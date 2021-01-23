@@ -3,10 +3,9 @@ local gamera = require 'gamera'
 local min, max = math.min, math.max
 
 -- game variables (entities)
-local world, player, target, cam1, cam2
+local world, player, cam1, cam2
 
 -- auxiliary functions
-local isDown = love.keyboard.isDown
 local floor = math.floor
 
 local function makeZero(x,minX,maxX)
@@ -14,10 +13,7 @@ local function makeZero(x,minX,maxX)
   return 0
 end
 
-local function drawTarget()
-    love.graphics.setColor(255,255,0)
-    love.graphics.rectangle("fill", target.x, target.y, 32, 32)
-  end
+
 
 local function drawWorld(cl,ct,cw,ch)
     local w = world.w / world.columns
@@ -36,23 +32,17 @@ local function drawWorld(cl,ct,cw,ch)
 		end
 	end
   end
-
-
-
-  local function updateTarget(dt)
-    target.x, target.y = cam1:toWorld(player.grid_x, player.grid_y)
-  end
-
+  
 
 
   local function updateCameras(dt)
     cam1:setPosition(player.act_x, player.act_y)
     cam2:setPosition(player.act_x, player.act_y)
   
-    local scaleFactor = isDown('[') and -0.8 or (isDown(']') and 0.8 or 0)
+    local scaleFactor = 0
     cam1:setScale(cam1:getScale() + scaleFactor * dt)
   
-    local angleFactor = isDown(',') and -0.8 or (isDown('.') and 0.8 or 0)
+    local angleFactor = 0
     cam1:setAngle(cam1:getAngle() + angleFactor * dt)
   end
 
@@ -66,6 +56,8 @@ local function drawWorld(cl,ct,cw,ch)
     love.graphics.polygon('line', cam1:getVisibleCorners())
   end
 
+ 
+  
   local function drawPlayer()
     love.graphics.setColor(255,255,255,100)
     love.graphics.rectangle("fill", player.act_x, player.act_y, 32, 32)
@@ -78,15 +70,19 @@ local function drawWorld(cl,ct,cw,ch)
     end
   end
 
+
+
   local function updatePlayer(dt)
     player.act_y = player.act_y - ((player.act_y - player.grid_y) * player.speed * dt)
     player.act_x = player.act_x - ((player.act_x - player.grid_x) * player.speed * dt)
   end
 
+
+
 function love.load()
 
+    love.window.setFullscreen(true, "desktop")
     world  = { w = 5000, h = 3000, rows = 10, columns = 20 }
-    --target = { x = 500,  y = 500 }
 
     player = 
     {
@@ -143,7 +139,6 @@ end
 function love.update(dt)
     updatePlayer(dt)
     updateCameras(dt)
-    --updateTarget(dt)
 end
  
 
@@ -153,13 +148,11 @@ function love.draw()
     cam1:draw(function(l,t,w,h)
         drawWorld(l,t,w,h)
         drawPlayer()
-        --drawTarget()
       end)
     
       cam2:draw(function(l,t,w,h)
         drawWorld(l,t,w,h)
         drawPlayer()
-        --drawTarget()
         drawCam1ViewPort()
       end)
 
@@ -191,11 +184,12 @@ function love.keypressed(key)
     elseif key == 'escape' then love.event.quit()
     end
 end
- 
+
+
+
 function testMap(x, y)
 	if map[(player.grid_y / 32) + y][(player.grid_x / 32) + x] == 1 then
 		return false
 	end
 	return true
-end
-  
+end 
