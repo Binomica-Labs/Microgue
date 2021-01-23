@@ -1,13 +1,19 @@
 local gamera = require 'gamera'
+local cam = gamera.new(0,0,8000,8000)
+cam:setWindow(0,0,800,600)
 
 function love.load()
-	player = {
+    
+    
+    
+    player = {
 		grid_x = 256,
 		grid_y = 256,
 		act_x = 200,
 		act_y = 200,
 		speed = 10
-	}
+    }
+
 	map = {
 		{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
 		{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
@@ -41,36 +47,50 @@ end
  
 function love.update(dt)
 	player.act_y = player.act_y - ((player.act_y - player.grid_y) * player.speed * dt)
-	player.act_x = player.act_x - ((player.act_x - player.grid_x) * player.speed * dt)
+    player.act_x = player.act_x - ((player.act_x - player.grid_x) * player.speed * dt)
+    
 end
  
 function love.draw()
-	love.graphics.rectangle("fill", player.act_x, player.act_y, 32, 32)
+    
+    --cam:setPosition(player.grid_x, player.grid_y)
+    
+    love.graphics.rectangle("fill", player.act_x, player.act_y, 32, 32)
 	for y=1, #map do
 		for x=1, #map[y] do
 			if map[y][x] == 1 then
 				love.graphics.rectangle("line", x * 32, y * 32, 32, 32)
 			end
 		end
-	end
+    end
+    
+    cam:draw(function(l,t,w,h)
+        cam:setPosition(player.act_x, player.grid_y)
+        cam:setScale(2.0)
+      end)
+
 end
  
 function love.keypressed(key)
 	if key == "up" then
 		if testMap(0, -1) then
-			player.grid_y = player.grid_y - 32
+            player.grid_y = player.grid_y - 32
+            --cam:setPosition(player.grid_x, player.grid_y)
 		end
 	elseif key == "down" then
 		if testMap(0, 1) then
-			player.grid_y = player.grid_y + 32
+            player.grid_y = player.grid_y + 32
+            --cam:setPosition(player.grid_x, player.grid_y)
 		end
 	elseif key == "left" then
 		if testMap(-1, 0) then
-			player.grid_x = player.grid_x - 32
+            player.grid_x = player.grid_x - 32
+            --cam:setPosition(player.grid_x, player.grid_y)
 		end
 	elseif key == "right" then
 		if testMap(1, 0) then
-			player.grid_x = player.grid_x + 32
+            player.grid_x = player.grid_x + 32
+            --cam:setPosition(player.grid_x, player.grid_y)
 		end
 	end
 end
