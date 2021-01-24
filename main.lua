@@ -5,13 +5,6 @@ local Pathfinder = require 'jumper.pathfinder'
 
 local walkable = 0
 
---------------------------------
--- Library setup
--- Calls the grid class
-local Grid = require ("jumper.grid")
--- Calls the pathfinder class
-local Pathfinder = require ("jumper.pathfinder")
-
 -- Creates a grid object
 local grid = Grid(map)
 
@@ -19,11 +12,6 @@ local grid = Grid(map)
 local myFinder = Pathfinder(grid, 'JPS', walkable)
 
 -- Define start and goal locations coordinates
-local startx, starty = 1,1
-local endx, endy = 12, 12
-
--- Calculates the path, and its length
-local path = myFinder:getPath(startx, starty, endx, endy)
 
 
 
@@ -32,7 +20,7 @@ local path = myFinder:getPath(startx, starty, endx, endy)
 local min, max = math.min, math.max
 
 -- game variables (entities)
-local world, player, cam1, cam2
+local world, player, cam1, cam2, cursor
 
 -- auxiliary functions
 local floor = math.floor
@@ -96,6 +84,10 @@ local function drawWorld(cl,ct,cw,ch)
     end
   end
 
+  local function drawCursor()
+    love.graphics.setColor(1,0,0)
+    love.graphics.rectangle("line", cursor.x, cursor.y, 32, 32)
+  end
 
 
   local function updatePlayer(dt)
@@ -104,12 +96,15 @@ local function drawWorld(cl,ct,cw,ch)
   end
 
 
+  local function updateCursor(dt)
+    cursor.x, cursor.y = cam1:toWorld(love.mouse.getPosition())
+  end
 
 function love.load()
 
     love.window.setFullscreen(true, "desktop")
     world  = { w = 3200, h = 3200, rows = 10, columns = 20 }
-
+    cursor = { x = 256,  y = 256 }
     player = 
     {
 		grid_x = 256,
@@ -135,6 +130,13 @@ end
 function love.update(dt)
     updatePlayer(dt)
     updateCameras(dt)
+    updateCursor(dt)
+    local startx, starty = math.floor(player.act_x/32), math.floor(player.act_y/32)
+local endx, endy = math.floor(cursor.x/32), math.floor(cursor.y/32)
+
+-- Calculates the path, and its length
+local path, length = myFinder:getPath(startx, starty, endx, endy)
+
 end
  
 
@@ -142,22 +144,18 @@ end
 function love.draw()
  
     love.graphics.setColor(255,255,255,100)
-    local path, length = myFinder:getPath(startx, starty, endx, endy)
-if path then
-  print(('Path found! Length: %.2f'):format(length))
-    for node, count in path:iter() do
-      print(('Step: %d - x: %d - y: %d'):format(count, node.x, node.y))
-    end
-end
+    local path, length = myFinder:getPath(6, 6, 12, 12)
 
     cam1:draw(function(l,t,w,h)
         drawWorld(l,t,w,h)
         drawPlayer()
+        drawCursor()
       end)
     
       cam2:draw(function(l,t,w,h)
         drawWorld(l,t,w,h)
         drawPlayer()
+        drawCursor()
         drawCam1ViewPort()
       end)
 
@@ -165,6 +163,17 @@ end
       love.graphics.rectangle('line', cam1:getWindow())
       love.graphics.rectangle('line', cam2:getWindow())
 
+      --local path, length = myFinder:getPath(startx, starty, endx, endy)
+    if path then
+        msgPath = "Path found!"
+        msgPathLength = tostring(length)
+    else
+        msgPath = "NO PATH"
+        msgPathLength = "NO LENGTH"
+    end
+    
+    love.graphics.print(msgPath, 32, 832)
+    love.graphics.print(msgPathLength, 32, 864)
 end
  
 
