@@ -84,10 +84,13 @@ local function drawWorld(cl,ct,cw,ch)
     end
   end
 
+
+  
   local function drawCursor()
     love.graphics.setColor(1,0,0)
     love.graphics.rectangle("line", cursor.x, cursor.y, 32, 32)
   end
+
 
 
   local function updatePlayer(dt)
@@ -96,9 +99,12 @@ local function drawWorld(cl,ct,cw,ch)
   end
 
 
+
   local function updateCursor(dt)
     cursor.x, cursor.y = cam1:toWorld(love.mouse.getPosition())
   end
+
+
 
 function love.load()
 
