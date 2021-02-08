@@ -5,6 +5,13 @@ local Pathfinder = require 'jumper.pathfinder'
 
 local walkable = 0
 
+local cameraBounds = {}
+cameraBounds.T = 0
+cameraBounds.L = 0
+cameraBounds.W = 0
+cameraBounds.H = 0
+
+
 -- Creates a grid object
 local grid = Grid(map)
 
@@ -57,10 +64,10 @@ local function drawWorld(cl,ct,cw,ch)
     cam2:setPosition(player.act_x, player.act_y)
   
     local scaleFactor = 0
-    cam1:setScale(cam1:getScale() + scaleFactor * dt)
+    --cam1:setScale(cam1:getScale() + scaleFactor * dt)
   
     local angleFactor = 0
-    cam1:setAngle(cam1:getAngle() + angleFactor * dt)
+    --cam1:setAngle(cam1:getAngle() + angleFactor * dt)
   end
 
 
@@ -137,11 +144,24 @@ function love.update(dt)
     updatePlayer(dt)
     updateCameras(dt)
     updateCursor(dt)
+    cameraBounds.T,cameraBounds.L,cameraBounds.W, cameraBounds.H = cam1:getWindow() 
+    if cursor.x < player.act_x - cameraBounds.W/2 then
+      cursor.x = player.act_x - cameraBounds.W/2--cameraBounds.L + 32
+    end
+    if cursor.x > player.act_x + cameraBounds.W/2 then
+      cursor.x = player.act_x + cameraBounds.W/2--cameraBounds.W -32
+    end
+    if cursor.y < player.act_y - cameraBounds.H/2 + 32 then
+      cursor.y = player.act_y - cameraBounds.H/2 + 32
+    end
+    if cursor.y > player.act_y + cameraBounds.H/2 - 32 then
+      cursor.y = player.act_y + cameraBounds.H/2 + 32
+    end
     local startx, starty = math.floor(player.act_x/32), math.floor(player.act_y/32)
 local endx, endy = math.floor(cursor.x/32), math.floor(cursor.y/32)
 
 -- Calculates the path, and its length
-local path, length = myFinder:getPath(startx, starty, endx, endy)
+--local path, length = myFinder:getPath(startx, starty, endx, endy)
 
 end
  
@@ -150,7 +170,7 @@ end
 function love.draw()
  
     love.graphics.setColor(255,255,255,100)
-    local path, length = myFinder:getPath(6, 6, 12, 12)
+    --local path, length = myFinder:getPath(6, 6, 12, 12)
 
     cam1:draw(function(l,t,w,h)
         drawWorld(l,t,w,h)
