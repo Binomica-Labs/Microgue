@@ -130,10 +130,10 @@ function love.load()
     
 
   cam1 = gamera.new(0, 0, world.w, world.h)
-  cam1:setWindow(32,32,800,800)
+  cam1:setWindow(64,64,800,800)
 
   cam2 = gamera.new(0,0, world.w, world.h)
-  cam2:setWindow(832,32,256,256)
+  cam2:setWindow(898,64,256,256)
   cam2:setScale(0)
 
 end
@@ -146,19 +146,20 @@ function love.update(dt)
     updateCursor(dt)
     cameraBounds.T,cameraBounds.L,cameraBounds.W, cameraBounds.H = cam1:getWindow() 
     if cursor.x < player.act_x - cameraBounds.W/2 then
-      cursor.x = player.act_x - cameraBounds.W/2--cameraBounds.L + 32
+      cursor.x = player.act_x - cameraBounds.W/2
     end
-    if cursor.x > player.act_x + cameraBounds.W/2 then
-      cursor.x = player.act_x + cameraBounds.W/2--cameraBounds.W -32
+    if cursor.x > player.act_x + cameraBounds.W/2 - 32 then
+      cursor.x = player.act_x + cameraBounds.W/2 - 32
     end
-    if cursor.y < player.act_y - cameraBounds.H/2 + 32 then
-      cursor.y = player.act_y - cameraBounds.H/2 + 32
+    if cursor.y < player.act_y - cameraBounds.H/2  then
+      cursor.y = player.act_y - cameraBounds.H/2 
     end
     if cursor.y > player.act_y + cameraBounds.H/2 - 32 then
-      cursor.y = player.act_y + cameraBounds.H/2 + 32
+      cursor.y = player.act_y + cameraBounds.H/2 - 32
     end
+    
     local startx, starty = math.floor(player.act_x/32), math.floor(player.act_y/32)
-local endx, endy = math.floor(cursor.x/32), math.floor(cursor.y/32)
+    local endx, endy = math.floor(cursor.x/32), math.floor(cursor.y/32)
 
 -- Calculates the path, and its length
 --local path, length = myFinder:getPath(startx, starty, endx, endy)
