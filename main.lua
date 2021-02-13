@@ -108,7 +108,11 @@ local function drawWorld(cl,ct,cw,ch)
 
 
   local function updateCursor(dt)
-    cursor.x, cursor.y = cam1:toWorld(love.mouse.getPosition())
+    mouseX, mouseY = love.mouse.getPosition()
+    mouseGridX = math.floor(mouseX/32)
+	  mouseGridY = math.floor(mouseY/32)
+    mousePosition = mouseX, mouseY
+    cursor.x, cursor.y = cam1:toWorld(mouseGridX, mouseGridY)
   end
 
 
@@ -144,6 +148,7 @@ function love.update(dt)
     updatePlayer(dt)
     updateCameras(dt)
     updateCursor(dt)
+    
     cameraBounds.T,cameraBounds.L,cameraBounds.W, cameraBounds.H = cam1:getWindow() 
     if cursor.x < player.act_x - cameraBounds.W/2 then
       cursor.x = player.act_x - cameraBounds.W/2
