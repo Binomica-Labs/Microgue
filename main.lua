@@ -51,6 +51,7 @@ local function drawWorld(cl,ct,cw,ch)
     for y=1, #map do
 		for x=1, #map[y] do
 			if map[y][x] == 1 then
+        love.graphics.setColor(1,1,1)
 				love.graphics.rectangle("line", x * 32, y * 32, 32, 32)
 			end
 		end
@@ -72,31 +73,24 @@ local function drawWorld(cl,ct,cw,ch)
 
 
 
+  local function drawCursor()
+    love.graphics.setColor(1,0,0)
+    love.graphics.rectangle("line", cursor.x, cursor.y, 32, 32)
+  end
+
+
+
   local function drawCam1ViewPort()
-    love.graphics.setColor(255,255,255,100)
+    love.graphics.setColor(1,1,1)
     love.graphics.rectangle('line', cam1:getVisible())
   end
 
  
   
   local function drawPlayer()
-    love.graphics.setColor(255,255,255,100)
+    love.graphics.setColor(1,1,1)
     love.graphics.rectangle("fill", player.act_x, player.act_y, 32, 32)
-	for y=1, #map do
-		for x=1, #map[y] do
-			if map[y][x] == 1 then
-				love.graphics.rectangle("line", x * 32, y * 32, 32, 32)
-			end
-		end
-    end
-  end
-
-
-  
-  local function drawCursor()
-    love.graphics.setColor(1,0,0)
-    love.graphics.rectangle("line", cursor.x, cursor.y, 32, 32)
-  end
+	end
 
 
 
@@ -124,20 +118,20 @@ function love.load()
     cursor = { x = 256,  y = 256 }
     player = 
     {
-		grid_x = 320,
-		grid_y = 320,
-		act_x = 320,
-		act_y = 320,
+		grid_x = 256,
+		grid_y = 256,
+		act_x = 256,
+		act_y = 256,
 		speed = 10
     }
 
     
 
   cam1 = gamera.new(32, 32, world.w, world.h)
-  cam1:setWindow(64,64,800,800)
+  cam1:setWindow(0,0,800,800)
 
   cam2 = gamera.new(32,32, world.w, world.h)
-  cam2:setWindow(898,64,256,256)
+  cam2:setWindow(864,0,256,256)
   cam2:setScale(0)
 
 end
@@ -191,7 +185,7 @@ function love.draw()
         drawCam1ViewPort()
       end)
 
-      love.graphics.setColor(255,255,255)
+      love.graphics.setColor(1,1,1)
       love.graphics.rectangle('line', cam1:getWindow())
       love.graphics.rectangle('line', cam2:getWindow())
 
