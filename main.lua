@@ -125,8 +125,6 @@ function love.load()
 		speed = 10
     }
 
-    
-
   cam1 = gamera.new(32, 32, world.w, world.h)
   cam1:setWindow(0,0,800,800)
 
@@ -157,11 +155,11 @@ function love.update(dt)
       cursor.y = player.act_y + cameraBounds.H/2 - 32
     end
     
-    local startx, starty = math.floor(player.act_x/32), math.floor(player.act_y/32)
-    local endx, endy = math.floor(cursor.x/32), math.floor(cursor.y/32)
+     --startx, starty = cam1:toWorld(player.act_x, player.act_y) --math.floor(player.act_x/32) * 32, math.floor(player.act_y/32) * 32
+     --endx, endy = 64 --cam1:toWorld(cursor.x, cursor.y) --math.floor(cursor.x/32) * 32, math.floor(cursor.y/32) * 32
 
--- Calculates the path, and its length
---local path, length = myFinder:getPath(startx, starty, endx, endy)
+    -- Calculates the path, and its length
+     --path, length = myFinder:getPath(startx, starty, endx, endy)
 
 end
  
@@ -169,7 +167,7 @@ end
 
 function love.draw()
  
-    love.graphics.setColor(255,255,255,100)
+    love.graphics.setColor(1,1,1)
     --local path, length = myFinder:getPath(6, 6, 12, 12)
 
     cam1:draw(function(l,t,w,h)
