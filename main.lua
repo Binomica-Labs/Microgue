@@ -61,8 +61,8 @@ local function drawWorld(cl,ct,cw,ch)
 
 
   local function updateCameras(dt)
-    cam1:setPosition(player.act_x, player.act_y)
-    cam2:setPosition(player.act_x, player.act_y)
+    cam1:setPosition(player.act_x+16, player.act_y+16)
+    cam2:setPosition(player.act_x+16, player.act_y+16)
   
     local scaleFactor = 0
     --cam1:setScale(cam1:getScale() + scaleFactor * dt)
@@ -118,10 +118,10 @@ function love.load()
     cursor = { x = 256,  y = 256 }
     player = 
     {
-		grid_x = 256,
-		grid_y = 256,
-		act_x = 256,
-		act_y = 256,
+		grid_x = 512,
+		grid_y = 512,
+		act_x = 512,
+		act_y = 512,
 		speed = 10
     }
 
@@ -145,14 +145,14 @@ function love.update(dt)
     if cursor.x < player.act_x - cameraBounds.W/2 then
       cursor.x = player.act_x - cameraBounds.W/2
     end
-    if cursor.x > player.act_x + cameraBounds.W/2 - 32 then
-      cursor.x = player.act_x + cameraBounds.W/2 - 32
+    if cursor.x > player.act_x + cameraBounds.W/2 - 16 then
+      cursor.x = player.act_x + cameraBounds.W/2 - 16
     end
     if cursor.y < player.act_y - cameraBounds.H/2  then
       cursor.y = player.act_y - cameraBounds.H/2 
     end
-    if cursor.y > player.act_y + cameraBounds.H/2 - 32 then
-      cursor.y = player.act_y + cameraBounds.H/2 - 32
+    if cursor.y > player.act_y + cameraBounds.H/2 - 16 then
+      cursor.y = player.act_y + cameraBounds.H/2 - 16
     end
     
      --startx, starty = cam1:toWorld(player.act_x, player.act_y) --math.floor(player.act_x/32) * 32, math.floor(player.act_y/32) * 32
