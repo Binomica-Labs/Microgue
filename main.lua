@@ -109,8 +109,8 @@ local function drawWorld(cl,ct,cw,ch)
 
   local function updateCursor(dt)
     mouseX, mouseY = love.mouse.getPosition()
-    mouseGridX = math.floor(mouseX/32)
-	  mouseGridY = math.floor(mouseY/32)
+    mouseGridX = math.floor(mouseX/32) * 32
+	  mouseGridY = math.floor(mouseY/32) * 32
     mousePosition = mouseX, mouseY
     cursor.x, cursor.y = cam1:toWorld(mouseGridX, mouseGridY)
   end
@@ -124,19 +124,19 @@ function love.load()
     cursor = { x = 256,  y = 256 }
     player = 
     {
-		grid_x = 256,
-		grid_y = 256,
-		act_x = 256,
-		act_y = 256,
+		grid_x = 320,
+		grid_y = 320,
+		act_x = 320,
+		act_y = 320,
 		speed = 10
     }
 
     
 
-  cam1 = gamera.new(0, 0, world.w, world.h)
+  cam1 = gamera.new(32, 32, world.w, world.h)
   cam1:setWindow(64,64,800,800)
 
-  cam2 = gamera.new(0,0, world.w, world.h)
+  cam2 = gamera.new(32,32, world.w, world.h)
   cam2:setWindow(898,64,256,256)
   cam2:setScale(0)
 
