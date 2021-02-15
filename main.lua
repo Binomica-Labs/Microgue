@@ -60,7 +60,7 @@ local function drawWorld(cl,ct,cw,ch)
   
 
 
-  local function updateCameras(dt)
+  local function updateCameras()
     cam1:setPosition(player.act_x+16, player.act_y+16)
     cam2:setPosition(player.act_x+16, player.act_y+16)
   
@@ -103,9 +103,8 @@ local function drawWorld(cl,ct,cw,ch)
 
   local function updateCursor(dt)
     mouseX, mouseY = love.mouse.getPosition()
-    mouseGridX = math.floor(mouseX/32) * 32
+    mouseGridX = math.floor(mouseX/32) * 32 
 	  mouseGridY = math.floor(mouseY/32) * 32
-    mousePosition = mouseX, mouseY
     cursor.x, cursor.y = cam1:toWorld(mouseGridX, mouseGridY)
   end
 
@@ -142,24 +141,24 @@ function love.update(dt)
     updateCursor(dt)
     
     cameraBounds.T,cameraBounds.L,cameraBounds.W, cameraBounds.H = cam1:getWindow() 
-    if cursor.x < player.act_x - cameraBounds.W/2 then
-      cursor.x = player.act_x - cameraBounds.W/2
+    if cursor.x < player.grid_x - cameraBounds.W/2 then
+      cursor.x = player.grid_x - cameraBounds.W/2
     end
-    if cursor.x > player.act_x + cameraBounds.W/2 - 16 then
-      cursor.x = player.act_x + cameraBounds.W/2 - 16
+    if cursor.x > player.grid_x + cameraBounds.W/2 - 16 then
+      cursor.x = player.grid_x + cameraBounds.W/2 - 16
     end
-    if cursor.y < player.act_y - cameraBounds.H/2  then
-      cursor.y = player.act_y - cameraBounds.H/2 
+    if cursor.y < player.grid_y - cameraBounds.H/2  then
+      cursor.y = player.grid_y - cameraBounds.H/2 
     end
-    if cursor.y > player.act_y + cameraBounds.H/2 - 16 then
-      cursor.y = player.act_y + cameraBounds.H/2 - 16
+    if cursor.y > player.grid_y + cameraBounds.H/2 - 16 then
+      cursor.y = player.grid_y + cameraBounds.H/2 - 16
     end
     
-     --startx, starty = cam1:toWorld(player.act_x, player.act_y) --math.floor(player.act_x/32) * 32, math.floor(player.act_y/32) * 32
-     --endx, endy = 64 --cam1:toWorld(cursor.x, cursor.y) --math.floor(cursor.x/32) * 32, math.floor(cursor.y/32) * 32
+     startx, starty = math.floor((player.grid_x/32)+0.5), math.floor((player.grid_y/32)+0.5)
+     endx, endy = math.floor((cursor.x/32)+0.5), math.floor((cursor.y/32)+0.5)
 
     -- Calculates the path, and its length
-     --path, length = myFinder:getPath(startx, starty, endx, endy)
+     path, length = myFinder:getPath(startx, starty, endx, endy)
 
 end
  
@@ -196,8 +195,22 @@ function love.draw()
         msgPathLength = "NO LENGTH"
     end
     
-    love.graphics.print(msgPath, 32, 832)
-    love.graphics.print(msgPathLength, 32, 864)
+    love.graphics.print("Path Detected?: " .. msgPath, 32, 832)
+    love.graphics.print("Path Length: " .. msgPathLength, 32, 842)
+    love.graphics.print("Player Actual X: " .. player.act_x, 32, 852)
+    love.graphics.print("Player Actual Y: " .. player.act_y, 32, 862)
+    love.graphics.print("Player Grid X: " .. player.grid_x, 32, 872)
+    love.graphics.print("Player Grid Y: " .. player.grid_y, 32, 882)
+    love.graphics.print("Mouse X: " .. mouseX, 32, 892)
+    love.graphics.print("Mouse Y: " .. mouseY, 32, 902)
+    love.graphics.print("Cursor X: " .. cursor.x/32, 32, 912)
+    love.graphics.print("Cursor Y: " .. cursor.y/32, 32, 922)
+    love.graphics.print("Path Start x: " .. startx, 32, 932)
+    love.graphics.print("Path Start y: " .. starty, 32, 942)
+    love.graphics.print("Path End x: " .. endx, 32, 952)
+    love.graphics.print("Path End y: " .. endy, 32, 962)
+    
+    
 end
  
 
