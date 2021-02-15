@@ -2,7 +2,7 @@ local gamera = require 'gamera'
 local map = require 'map'
 local Grid = require 'jumper.grid'
 local Pathfinder = require 'jumper.pathfinder'
-
+local mapGen = require 'mapGen'
 local walkable = 0
 
 local cameraBounds = {}
