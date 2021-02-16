@@ -43,10 +43,6 @@ local function drawWorld(cl,ct,cw,ch)
     local w = world.w / world.columns
     local h = world.h / world.rows
   
-    local minX = max(floor(cl/w), 0)
-    local maxX = min(floor((cl+cw)/w), world.columns-1)
-    local minY = max(floor(ct/h), 0)
-    local maxY = min(floor((ct+ch)/h), world.rows-1)
   
     for y=1, #map do
 		for x=1, #map[y] do
