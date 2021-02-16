@@ -1,10 +1,10 @@
 local gamera = require 'gamera'
-local map = require 'map'
+local map = require 'testLevel'
 local Grid = require 'jumper.grid'
 local Pathfinder = require 'jumper.pathfinder'
 local mapGen = require 'mapGen'
 local walkable = 0
-
+local generatedMap = {}
 local cameraBounds = {}
 cameraBounds.T = 0
 cameraBounds.L = 0
@@ -111,16 +111,21 @@ local function drawWorld(cl,ct,cw,ch)
 
 
 function love.load()
-
+    --image = love.graphics.newImage('mapImage.png')
+    
+    genmap = mapGen:generate()
+    mapGen:loadMapFromImage('mapImage2.png')
+    mapGen:writeMap()
+    --grid = Grid(generatedMap)
     love.window.setFullscreen(true, "desktop")
-    world  = { w = 3200, h = 3200, rows = 10, columns = 20 }
-    cursor = { x = 256,  y = 256 }
+    world  = { w = 256*32, h = 256*32, rows = 32, columns = 32 }
+    cursor = { x = 128*32,  y = 130*32 }
     player = 
     {
-		grid_x = 512,
-		grid_y = 512,
-		act_x = 512,
-		act_y = 512,
+		grid_x = 200*32,
+		grid_y = 200*32,
+		act_x = 200*32,
+		act_y = 200*32,
 		speed = 10
     }
 
@@ -209,6 +214,8 @@ function love.draw()
     love.graphics.print("Path Start y: " .. starty, 32, 942)
     love.graphics.print("Path End x: " .. endx, 32, 952)
     love.graphics.print("Path End y: " .. endy, 32, 962)
+    love.graphics.print("GenMap Size: " .. #generatedMap, 32, 972)
+    love.graphics.print("Filesystem: " .. love.filesystem.getSaveDirectory(), 32, 982)
     
     
 end
