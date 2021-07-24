@@ -1,5 +1,5 @@
 local gamera = require 'gamera'
-local map = require 'testMapLevel'
+local map = require 'testLevel'
 local Grid = require 'jumper.grid'
 local Pathfinder = require 'jumper.pathfinder'
 local mapGen = require 'mapGen'
@@ -110,7 +110,7 @@ function love.load()
     --image = love.graphics.newImage('mapImage.png')
     
     genmap = mapGen:generate()
-    mapGen:loadMapFromImage("mapImage2.png")
+    mapGen:loadMapFromImage('mapImage2.png')
     mapGen:writeMap()
     --grid = Grid(generatedMap)
     love.window.setFullscreen(true, "desktop")

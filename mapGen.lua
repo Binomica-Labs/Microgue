@@ -35,7 +35,7 @@ end
 
 
 function mapGen:writeMap()
-    local f = love.filesystem.newFile("testMapLevel.lua")
+    local f = love.filesystem.newFile("testLevel.lua")
     
     f:open("w")
     f:write("local map = \r\n")
@@ -57,7 +57,6 @@ function mapGen:writeMap()
     end
     f:write("}\r\n")
     f:write("return map\r\n")
-    f:write("{\r\n")
     f:close()
 end
 
