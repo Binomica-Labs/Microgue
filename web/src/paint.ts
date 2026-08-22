@@ -3,6 +3,7 @@
 // drawImage rather than dozens of path operations.
 
 import { MORPHOLOGY, type Role, type Shape } from "./shapes.js";
+import { PIXELS, PX_SIZE } from "./pixels.js";
 import type { Stratum } from "./biology.js";
 
 export interface Palette { body: string; dark: string; accent: string; hi: string; }
@@ -80,41 +81,80 @@ export function paintShapes(
 
 const cache = new Map<string, HTMLCanvasElement>();
 
+const ROLE_OF: Readonly<Record<string, Role>> =
+  { "1": "dark", "2": "body", "3": "accent", "4": "hi" };
+
+/** Paint a 16x16 role grid at 1 canvas pixel per art pixel. Scaling happens
+ *  on blit with smoothing off, so edges stay hard. */
+function paintPixels(
+  ctx: CanvasRenderingContext2D, art: readonly string[], p: Palette,
+): void {
+  for (let y = 0; y < art.length; y++) {
+    const row = art[y];
+    if (row === undefined) continue;
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x];
+      if (ch === undefined || ch === ".") continue;
+      const role = ROLE_OF[ch];
+      if (role === undefined) continue;
+      ctx.fillStyle = colour(role, p);
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
 /** Rasterised sprite, cached. Supersampled 2x then drawn down for clean edges. */
 export function sprite(id: string, size: number, p: Palette): HTMLCanvasElement | null {
+  const art = PIXELS[id];
   const shapes = MORPHOLOGY[id];
-  if (!shapes) return null;
+  if (!art && !shapes) return null;
   const px = Math.max(Math.round(size), 4);
   const key = `${id}:${px}:${p.body}${p.dark}${p.accent}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
   const c = document.createElement("canvas");
-  const ss = 2;
-  c.width = px * ss;
-  c.height = px * ss;
+  const ss = art ? 1 : 2;                   // pixel art is authored at 1:1
+  c.width = art ? PX_SIZE : px * ss;
+  c.height = art ? PX_SIZE : px * ss;
   const cx = c.getContext("2d");
   if (!cx) return null;
 
   // Soft halo. Without separation a pale organism on a pale wall -- or a
   // purple one in the purple sulfur band -- disappears. A hard disc read as a
   // sticker, so this fades out instead.
-  const r = px * ss * 0.5;
-  const g = cx.createRadialGradient(r, r, r * 0.34, r, r, r);
-  g.addColorStop(0, "rgba(0,0,0,0.55)");
-  g.addColorStop(0.72, "rgba(0,0,0,0.34)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  cx.fillStyle = g;
-  cx.fillRect(0, 0, px * ss, px * ss);
-
-  paintShapes(cx, shapes, 0, 0, px * ss, p);
+  if (art) {
+    paintPixels(cx, art, p);
+  } else if (shapes) {
+    const r = px * ss * 0.5;
+    const g = cx.createRadialGradient(r, r, r * 0.34, r, r, r);
+    g.addColorStop(0, "rgba(0,0,0,0.55)");
+    g.addColorStop(0.72, "rgba(0,0,0,0.34)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, px * ss, px * ss);
+    paintShapes(cx, shapes, 0, 0, px * ss, p);
+  }
 
   const out = document.createElement("canvas");
   out.width = px;
   out.height = px;
   const ox = out.getContext("2d");
   if (!ox) return null;
-  ox.imageSmoothingEnabled = true;
+  // Hard edges for pixel art, smoothed downscale for vector.
+  ox.imageSmoothingEnabled = !art;
+  if (art) {
+    // Separation halo behind the art, since a pale organism on a pale wall
+    // otherwise vanishes. Drawn on the OUTPUT canvas so it stays soft.
+    const r = px * 0.5;
+    const g = ox.createRadialGradient(r, r, r * 0.3, r, r, r);
+    g.addColorStop(0, "rgba(0,0,0,0.5)");
+    g.addColorStop(0.7, "rgba(0,0,0,0.3)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ox.fillStyle = g;
+    ox.fillRect(0, 0, px, px);
+    ox.imageSmoothingEnabled = false;
+  }
   ox.drawImage(c, 0, 0, px, px);
 
   if (cache.size > 120) cache.clear();
