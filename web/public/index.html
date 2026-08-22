@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#060d0b">
+<meta name="description" content="A roguelike descending the Winogradsky column's redox tower.">
+<title>Microgue</title>
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+
+<!-- iOS ignores the manifest for these; it needs its own tags or you get a
+     screenshot instead of an icon and browser chrome instead of fullscreen. -->
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Microgue">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+
+<style>
+  html,body{margin:0;height:100%;background:#060d0b;overflow:hidden;
+    overscroll-behavior:none;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none}
+  canvas{display:block;touch-action:none}
+  #boot{position:fixed;inset:0;display:grid;place-content:center;color:#8fd9a8;
+    font:14px ui-monospace,monospace;text-align:center;gap:1em}
+</style>
+</head>
+<body>
+<div id="boot">loading…</div>
+<canvas id="game" aria-label="Microgue game board"></canvas>
+<script type="module" src="./microgue.js"></script>
+</body>
+</html>

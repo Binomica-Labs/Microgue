@@ -1,0 +1,23 @@
+{
+  "name": "microgue",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "npm run verify && esbuild src/main.ts --bundle --minify --format=esm --target=es2022 --outfile=public/microgue.js && esbuild src/sw.ts --bundle --minify --format=iife --target=es2022 --outfile=public/sw.js",
+    "dev": "esbuild src/main.ts --bundle --format=esm --sourcemap --outfile=public/microgue.js --watch",
+    "test": "vitest run",
+    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.sw.json",
+    "lint": "eslint src test",
+    "guard": "node --input-type=module -e \"import{readdirSync}from'fs';const bad=['src','test'].flatMap(d=>readdirSync(d,{recursive:true}).filter(f=>/\\\\.(js|jsx|mjs|cjs)$/.test(String(f))));if(bad.length){console.error('hand-written JS found in source:',bad);process.exit(1)}console.log('guard: source is 100% TypeScript')\"",
+    "verify": "npm run guard && npm run check && npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^10.9.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^3.0.0"
+  }
+}
