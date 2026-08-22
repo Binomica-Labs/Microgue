@@ -93,10 +93,11 @@ web/
     shapes.ts     the vector morphologies pixels.ts was seeded from
     plasmid.ts    the ring + parts bin: operons, polarity, synergy, complexes
     plasmid_ui.ts ring rendering + polar hit-testing for drag and spin
-    kegg.ts       KEGG modules: metabolite chains, EC numbers, completeness
-    kegg_ui.ts    the module map -- greyed arrows for enzymes you lack
+    kegg.ts       KEGG modules + the metabolite graph they derive into
+    kegg_ui.ts    pannable node graph, caption relaxation, screen/world transforms
     buttons.ts    on-screen controls
     gesture.ts    pointer gesture classification, pure and tested
+    fx.ts         effects: easing, lunge, shake decay, hitstop -- all pure
     hud.ts        Winogradsky column gauge, bars, plasmid ring
     save.ts       localStorage with a real runtime validator
     main.ts       canvas, input, game loop  <- the only DOM-aware file
@@ -205,6 +206,24 @@ deciding where it goes are separate acts. `install`/`uninstall` conserve
 parts: a displaced part returns to the bin rather than vanishing, and there is
 a test asserting the total never changes.
 
+## The pathway graph closes into real cycles
+
+`EDGES` is derived from `MODULES`, so the graph cannot drift from the module
+data. Because metabolites are shared, the modules are not eight parallel
+chains — N2 leaves denitrification and re-enters at fixation, H2S leaves
+sulfate reduction and re-enters at sulfur oxidation. `spec` walks the edge set
+and asserts both cycles close; if a step is retargeted so a cycle breaks, that
+fails.
+
+Layout invariants are tested rather than eyeballed: no two nodes overlap, no
+caption overlaps another caption or a metabolite box, no edge spans more than
+420 units. `moduleBoxes()` relaxes captions apart because raw centroids collide
+whenever two modules share a region.
+
+Two electron pools, not one: nitrogenase draws from reduced ferredoxin and the
+photosynthetic reaction centre feeds the quinone pool. Merging them was both
+wrong and produced an edge across the whole map.
+
 ## Auto-assembly is deliberately not a free win
 
 `Plasmid.assemble()` lays a module out as one operon in reaction order, but it
@@ -242,6 +261,26 @@ of it is worth caching, and caching it would add invalidation bugs.
 The one real cost was `insets()`: `createElement` plus `getComputedStyle`
 forces a style recalculation, and it ran four times a frame. It is cached now
 and cleared on resize.
+
+## Juice, and why the timing lives in a pure module
+
+`fx.ts` holds easing, lunge offsets, shake decay and hitstop as pure functions,
+because the failure mode for game feel is an effect that never expires or a
+freeze that never lifts — things a test catches and an eyeball does not. The
+suite asserts a lunge returns to exactly zero offset, shake decays to exactly
+zero, the effect queue is bounded at 160, hitstop is capped at 120ms no matter
+how many kills land in one frame, and particle jitter is deterministic so a
+burst does not shimmer between frames.
+
+Hitstop freezes `dt`, not the turn loop. Turn state has already resolved by the
+time an effect is queued, so nothing can desync — the world just holds still.
+
+One attack is: lunge out and back over 190ms peaking at 0.44 tiles, a white
+flash on the target at +60ms, a damage number rising and fading over 620ms,
+camera shake scaled to damage and capped, and 28ms of hitstop. A kill adds a
+14-particle burst in the organism's own pigment, a bigger shake and 70ms of
+stop. A ranged strike draws a jagged nanowire bolt instead of a lunge, and HGT
+sends a green bolt from the corpse to you with the locus name floating up.
 
 ## Failure modes seen repeatedly
 

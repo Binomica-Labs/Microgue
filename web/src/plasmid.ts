@@ -17,6 +17,7 @@ import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
          type Complex, type GeneId, type Hazard, type Teap } from "./biology.js";
 
 export const SLOTS = 16;
+export const BIN_CAP = 18;
 
 export type Strength = "weak" | "medium" | "strong";
 
@@ -63,9 +64,16 @@ export class Plasmid {
     // parts to build a second transcript once you have something to put in it.
     this.slots[0] = { kind: "promoter", strength: "medium" };
     this.slots[1] = { kind: "gene", id: "ori", optimised: false };
+    // A working parts library, not a token. Two weak and two medium promoters
+    // plus three terminators is enough to lay down three transcripts before
+    // you have looted anything, which is what makes the ring feel like a
+    // bench rather than a puzzle piece.
     this.bin.push(
       { kind: "promoter", strength: "weak" },
+      { kind: "promoter", strength: "weak" },
       { kind: "promoter", strength: "medium" },
+      { kind: "promoter", strength: "medium" },
+      { kind: "terminator" },
       { kind: "terminator" },
       { kind: "terminator" },
     );
@@ -76,7 +84,7 @@ export class Plasmid {
     if (part.kind === "gene" && (this.has(part.id) || this.inBin(part.id))) {
       return { ok: false, err: `${GENES[part.id].name} already carried` };
     }
-    if (this.bin.length >= 12) return { ok: false, err: "parts bin is full" };
+    if (this.bin.length >= BIN_CAP) return { ok: false, err: "parts bin is full" };
     this.bin.push(part);
     return { ok: true };
   }
@@ -107,7 +115,7 @@ export class Plasmid {
     if (part.kind === "gene" && part.id === "ori") {
       return { ok: false, err: "cannot excise the origin" };
     }
-    if (this.bin.length >= 12) return { ok: false, err: "parts bin is full" };
+    if (this.bin.length >= BIN_CAP) return { ok: false, err: "parts bin is full" };
     this.put(slot, null);
     this.bin.push(part);
     return { ok: true };

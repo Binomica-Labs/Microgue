@@ -38,11 +38,19 @@ export const MODULES: readonly Module[] = [
     note: "Nitrate to dinitrogen. Stop short and the intermediate accumulates.",
   },
   {
+    id: "M00528", name: "Nitrification", pathway: "nitrogen",
+    steps: [
+      { from: "NH3",  to: "NO2-", gene: "amoA", ec: "1.14.99.39" },
+      { from: "NO2-", to: "NO3-", gene: "nxrA", ec: "1.7.99.-" },
+    ],
+    note: "Ammonia to nitrate. Feeds the denitrifiers below you.",
+  },
+  {
     id: "M00596", name: "Dissimilatory sulfate reduction", pathway: "sulfur",
     steps: [
       { from: "SO4^2-", to: "APS",    gene: "sat",  ec: "2.7.7.4" },
       { from: "APS",    to: "SO3^2-", gene: "aprA", ec: "1.8.99.2" },
-      { from: "SO3^2-", to: "HS-",    gene: "dsrA", ec: "1.8.99.5" },
+      { from: "SO3^2-", to: "H2S",    gene: "dsrA", ec: "1.8.99.5" },
     ],
     note: "Sulfate to sulfide. The H2S blackens the sediment and burns neighbours.",
   },
@@ -66,7 +74,7 @@ export const MODULES: readonly Module[] = [
     id: "M00175", name: "Nitrogen fixation", pathway: "nitrogen",
     steps: [
       { from: "N2", to: "NH3", gene: "nifH", ec: "1.18.6.1" },
-      { from: "H2", to: "e-",  gene: "hydA", ec: "1.12.7.2" },
+      { from: "H2", to: "e- (Fd)", gene: "hydA", ec: "1.12.7.2" },
     ],
     note: "Nitrogenase evolves H2 obligately; an uptake hydrogenase recovers it.",
   },
@@ -81,7 +89,7 @@ export const MODULES: readonly Module[] = [
   {
     id: "M00173", name: "Reductive citrate cycle", pathway: "carbon",
     steps: [
-      { from: "light", to: "e-",        gene: "pufM", ec: "1.10.9.9" },
+      { from: "light", to: "e- (Q)",    gene: "pufM", ec: "1.10.9.9" },
       { from: "CO2",   to: "acetyl-CoA", gene: "aclB", ec: "2.3.3.8" },
     ],
     note: "rTCA under anoxygenic light. Fewer ATP per carbon than Calvin.",
@@ -126,4 +134,97 @@ export function missingGenes(m: Module, carried: ReadonlySet<GeneId>): GeneId[] 
 /** Total kb a module would occupy on the plasmid. */
 export function moduleKb(m: Module): number {
   return m.steps.reduce((a, s) => a + GENES[s.gene].kb, 0);
+}
+
+
+// ------------------------------------------------------------------- graph
+//
+// Metabolites are shared between modules, so the modules are not eight
+// parallel chains -- they close into the actual biogeochemical cycles. N2
+// leaves denitrification and re-enters at nitrogen fixation; H2S leaves
+// sulfate reduction and re-enters at sulfur oxidation. Laying it out as a
+// graph makes that visible, which a list cannot.
+//
+// Positions are hand-placed in an abstract space; the view pans and zooms over
+// them. Cycles are drawn as rings so they read as cycles.
+
+export interface Node {
+  readonly id: string;          // the metabolite label
+  readonly x: number;
+  readonly y: number;
+  readonly group: Pathway;
+}
+
+const ring = (
+  cx: number, cy: number, r: number, group: Pathway, labels: readonly string[],
+): Node[] => labels.map((id, i) => {
+  const a = (i / labels.length) * Math.PI * 2 - Math.PI / 2;
+  return { id, x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, group };
+});
+
+export const NODES: readonly Node[] = [
+  // nitrogen cycle -- a genuine ring
+  ...ring(0, 0, 150, "nitrogen", ["N2", "NH3", "NO2-", "NO3-", "NO", "N2O"]),
+  // sulfur cycle -- also a ring, sharing nothing with nitrogen
+  // H2S and HS- are the same pool at circumneutral pH (pKa1 ~ 7.0), so they
+  // are one node -- which is what lets the sulfur cycle close.
+  ...ring(400, 0, 140, "sulfur", ["H2S", "S0", "SO4^2-", "APS", "SO3^2-"]),
+  // carbon and methane
+  { id: "CO2",       x: 760, y: -110, group: "carbon" },
+  { id: "CH3-S-CoM", x: 900, y: -40,  group: "methane" },
+  { id: "CH4",       x: 900, y: 50,   group: "methane" },
+  { id: "3-PGA",     x: 640, y: -10,  group: "carbon" },
+  { id: "acetyl-CoA",x: 640, y: 90,   group: "carbon" },
+  { id: "H2O",       x: 790, y: 220,  group: "photo" },
+  { id: "O2 + e-",   x: 640, y: 190,  group: "photo" },
+  { id: "light",     x: 790, y: 130,  group: "photo" },
+  { id: "e- (Q)",    x: 660, y: 300,  group: "energy" },
+  { id: "e- (Fd)",   x: -180, y: 250, group: "energy" },
+  { id: "H2",        x: -180, y: 140, group: "energy" },
+  // iron
+  { id: "quinol",           x: 150,  y: 300, group: "iron" },
+  { id: "Fe(III) surface",  x: 330,  y: 300, group: "iron" },
+  { id: "MtrC",             x: 150,  y: 380, group: "iron" },
+  { id: "distal Fe(III)",   x: 330,  y: 380, group: "iron" },
+];
+
+export interface Edge {
+  readonly from: Node;
+  readonly to: Node;
+  readonly gene: GeneId;
+  readonly ec: string;
+  readonly module: Module;
+}
+
+const nodeById = new Map(NODES.map((n) => [n.id, n]));
+
+/** Edges derive from MODULES, so the graph cannot drift from the module data. */
+export const EDGES: readonly Edge[] = MODULES.flatMap((m) =>
+  m.steps.flatMap((s) => {
+    const from = nodeById.get(s.from);
+    const to = nodeById.get(s.to);
+    if (!from || !to) return [];
+    return [{ from, to, gene: s.gene, ec: s.ec, module: m }];
+  }));
+
+/** Metabolites named by a module but absent from NODES. Should always be empty;
+ *  the suite asserts it, so adding a step without a node fails the build. */
+export function orphanMetabolites(): string[] {
+  const out = new Set<string>();
+  for (const m of MODULES) {
+    for (const s of m.steps) {
+      if (!nodeById.has(s.from)) out.add(s.from);
+      if (!nodeById.has(s.to)) out.add(s.to);
+    }
+  }
+  return [...out];
+}
+
+export function graphBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of NODES) {
+    minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+    minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+  }
+  return { minX, minY, maxX, maxY };
 }

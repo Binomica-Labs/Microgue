@@ -22,7 +22,7 @@ export type GeneId =
   | "psbA" | "cbbL" | "katG" | "amoA" | "narG" | "nosZ" | "nifH"
   | "soxB" | "sqr"  | "mtrC" | "omcS" | "pufM" | "fmoA" | "csmA"
   | "aclB" | "dsrA" | "aprA" | "hydA" | "mcrA" | "hdrB" | "ori"
-  | "nirS" | "norB" | "sat";
+  | "nirS" | "norB" | "sat" | "nxrA";
 
 export type Teap = "O2" | "NO3-" | "Mn(IV)" | "Fe(III)" | "S0" | "H2S" | "SO4" | "CO2";
 
@@ -62,6 +62,7 @@ export const GENES: Readonly<Record<GeneId, Gene>> = {
   nirS: { id:"nirS", name:"nirS", kb:1.7, product:"cytochrome cd1 nitrite reductase", tier:2, desc:"NO2- to NO. The committed step of denitrification.", pathway:"nitrogen" },
   norB: { id:"norB", name:"norB", kb:1.4, product:"nitric oxide reductase B",        tier:2, desc:"NO to N2O. Clears a radical that would otherwise kill you.", pathway:"nitrogen" },
   sat:  { id:"sat",  name:"sat",  kb:1.2, product:"ATP sulfurylase",                 tier:3, desc:"Activates sulfate to APS. Nothing downstream runs without it.", pathway:"sulfur" },
+  nxrA: { id:"nxrA", name:"nxrA", kb:3.4, product:"nitrite oxidoreductase alpha",   tier:2, desc:"NO2- to NO3-. A nitrate reductase running the other way.", pathway:"nitrogen" },
   ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates.", pathway:"core" },
 };
 
@@ -79,7 +80,7 @@ export const MICROBES: readonly Microbe[] = [
   { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" },
   { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" },
   { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" },
-  { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["narG"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" },
+  { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["nxrA"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" },
   { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" },
   { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" },
   { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." , pigment:"#e6e6da" },

@@ -5,13 +5,18 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { DEFAULT_SETTINGS, parseSave } from "../src/save.js";
-import { Plasmid, SLOTS, type Part } from "../src/plasmid.js";
+import { BIN_CAP, Plasmid, SLOTS, type Part } from "../src/plasmid.js";
 import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.js";
 import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
 import { classify, traceWalls } from "../src/walls.js";
 import { PIXELS, PX_SIZE, validate as validatePixels } from "../src/pixels.js";
 import { classifyDown, classifyKey, inBox, type Gesture } from "../src/gesture.js";
-import { MODULES, missingGenes, moduleState } from "../src/kegg.js";
+import { Effects, easeInQuad, easeOutCubic, easeOutQuad, jitter, linear,
+         lungeOffset, pulse } from "../src/fx.js";
+import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
+         orphanMetabolites } from "../src/kegg.js";
+import { NODE_W, NODE_H, clampView, fitView, moduleBoxes, toScreen, toWorld,
+         type View } from "../src/kegg_ui.js";
 
 describe("redox tower", () => {
   const depthOf = (t: bio.Teap) => bio.STRATA.find((s) => s.teap === t)!.depth;
@@ -1288,7 +1293,7 @@ describe("edge cases across modules", () => {
   it("a full bin refuses further loot rather than dropping it silently", () => {
     const p = new Plasmid();
     while (p.stash({ kind: "terminator" }).ok) { /* fill */ }
-    expect(p.bin.length).toBeLessThanOrEqual(12);
+    expect(p.bin.length).toBeLessThanOrEqual(18);
     expect(p.stash({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
   });
 
@@ -1326,5 +1331,342 @@ describe("edge cases across modules", () => {
       expect(y).toBeGreaterThan(0);
       expect(y).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("pathway graph", () => {
+  it("every metabolite a module names has a node -- no orphans", () => {
+    expect(orphanMetabolites()).toEqual([]);
+  });
+
+  it("edges derive from modules, so the graph cannot drift", () => {
+    const stepCount = MODULES.reduce((a, m) => a + m.steps.length, 0);
+    expect(EDGES).toHaveLength(stepCount);
+    for (const e of EDGES) {
+      expect(e.module.steps.some((s) => s.gene === e.gene), e.gene).toBe(true);
+    }
+  });
+
+  it("the nitrogen cycle closes", () => {
+    const adj = new Map<string, string[]>();
+    for (const e of EDGES) {
+      const l = adj.get(e.from.id) ?? [];
+      l.push(e.to.id);
+      adj.set(e.from.id, l);
+    }
+    const seen = new Set<string>();
+    const reaches = (a: string, b: string): boolean => {
+      if (a === b && seen.size > 0) return true;
+      if (seen.has(a)) return false;
+      seen.add(a);
+      return (adj.get(a) ?? []).some((n) => n === b || reaches(n, b));
+    };
+    expect(reaches("N2", "N2")).toBe(true);
+  });
+
+  it("the sulfur cycle closes", () => {
+    const adj = new Map<string, string[]>();
+    for (const e of EDGES) {
+      const l = adj.get(e.from.id) ?? [];
+      l.push(e.to.id);
+      adj.set(e.from.id, l);
+    }
+    const walk = (n: string, target: string, seen: Set<string>): boolean => {
+      if (seen.has(n)) return false;
+      seen.add(n);
+      for (const nx of adj.get(n) ?? []) {
+        if (nx === target || walk(nx, target, seen)) return true;
+      }
+      return false;
+    };
+    expect(walk("H2S", "H2S", new Set())).toBe(true);
+  });
+
+  it("no two nodes sit on top of each other", () => {
+    for (let i = 0; i < NODES.length; i++) {
+      for (let j = i + 1; j < NODES.length; j++) {
+        const a = NODES[i]!, b = NODES[j]!;
+        const overlap = Math.abs(a.x - b.x) < NODE_W && Math.abs(a.y - b.y) < NODE_H;
+        expect(overlap, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("node ids are unique", () => {
+    const ids = NODES.map((n) => n.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("fitView puts the whole graph on screen at any viewport", () => {
+    for (const [w, h] of [[1080, 2000], [720, 1200], [2400, 1000]] as const) {
+      const v = fitView(w, h);
+      const b = graphBounds();
+      expect(v.scale).toBeGreaterThan(0);
+      expect((b.maxX - b.minX) * v.scale).toBeLessThanOrEqual(w + 1);
+    }
+  });
+
+  it("clampView keeps the graph reachable and the scale sane", () => {
+    for (const bad of [{ x: -1e6, y: -1e6, scale: 0.001 },
+                       { x: 1e6, y: 1e6, scale: 900 }]) {
+      const v = clampView(bad, 1080, 2000);
+      expect(v.scale).toBeGreaterThanOrEqual(0.35);
+      expect(v.scale).toBeLessThanOrEqual(2.5);
+      expect(Number.isFinite(v.x)).toBe(true);
+      expect(Number.isFinite(v.y)).toBe(true);
+    }
+  });
+
+  it("screen and world transforms round-trip", () => {
+    const v: View = { x: 40, y: -20, scale: 0.8 };
+    for (const [x, y] of [[0, 0], [500, 300], [-120, 900]] as const) {
+      const s = toScreen(v, x, y);
+      const w = toWorld(v, s.x, s.y);
+      expect(w.x).toBeCloseTo(x, 6);
+      expect(w.y).toBeCloseTo(y, 6);
+    }
+  });
+
+  it("every module gets a caption box inside the graph bounds", () => {
+    const boxes = moduleBoxes();
+    expect(boxes).toHaveLength(MODULES.length);
+    const b = graphBounds();
+    for (const box of boxes) {
+      expect(box.x, box.module.id).toBeGreaterThan(b.minX - 400);
+      expect(box.x, box.module.id).toBeLessThan(b.maxX + 400);
+    }
+  });
+});
+
+describe("starter parts library", () => {
+  it("stocks enough to lay down several transcripts before looting", () => {
+    const p = new Plasmid();
+    const proms = p.bin.filter((x) => x.kind === "promoter").length;
+    const terms = p.bin.filter((x) => x.kind === "terminator").length;
+    expect(proms).toBeGreaterThanOrEqual(3);
+    expect(terms).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a fresh plasmid can assemble a looted module without extra promoters", () => {
+    const p = new Plasmid();
+    for (const g of ["sat", "aprA", "dsrA"] as const) {
+      p.stash({ kind: "gene", id: g, optimised: false });
+    }
+    expect(p.assemble(["sat", "aprA", "dsrA"]).ok).toBe(true);
+    // and still has parts left for a second transcript
+    expect(p.bin.some((x) => x.kind === "promoter")).toBe(true);
+  });
+
+  it("starter parts leave room in the bin for loot", () => {
+    const p = new Plasmid();
+    expect(p.bin.length).toBeLessThan(BIN_CAP - 4);
+  });
+});
+
+describe("graph caption layout", () => {
+  const BOX_W = 150, BOX_H = 22;
+  const hit = (ax: number, ay: number, aw: number, ah: number,
+               bx: number, by: number, bw: number, bh: number): boolean =>
+    ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+
+  it("no caption overlaps another caption", () => {
+    const boxes = moduleBoxes();
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!, b = boxes[j]!;
+        expect(hit(a.x, a.y, BOX_W, BOX_H, b.x, b.y, BOX_W, BOX_H),
+          `${a.module.id} overlaps ${b.module.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("no caption sits on top of a metabolite box", () => {
+    for (const box of moduleBoxes()) {
+      for (const n of NODES) {
+        expect(hit(box.x, box.y, BOX_W, BOX_H, n.x, n.y, NODE_W, NODE_H),
+          `${box.module.id} overlaps ${n.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("electron pools are distinct -- ferredoxin is not the quinone pool", () => {
+    const ids = NODES.map((n) => n.id);
+    expect(ids).toContain("e- (Fd)");
+    expect(ids).toContain("e- (Q)");
+  });
+
+  it("no edge spans an absurd distance across the map", () => {
+    for (const e of EDGES) {
+      const d = Math.hypot(e.to.x - e.from.x, e.to.y - e.from.y);
+      expect(d, `${e.gene}: ${e.from.id} -> ${e.to.id}`).toBeLessThan(420);
+    }
+  });
+});
+
+describe("effects", () => {
+  const now = 1000;
+
+  it("easing functions stay in [0,1] and hit their endpoints", () => {
+    for (const e of [linear, easeOutCubic, easeOutQuad, easeInQuad]) {
+      expect(e(0)).toBeCloseTo(0, 6);
+      expect(e(1)).toBeCloseTo(1, 6);
+      for (let t = 0; t <= 1; t += 0.05) {
+        expect(e(t)).toBeGreaterThanOrEqual(-1e-9);
+        expect(e(t)).toBeLessThanOrEqual(1 + 1e-9);
+      }
+    }
+  });
+
+  it("pulse goes out and comes back", () => {
+    expect(pulse(0)).toBeCloseTo(0, 6);
+    expect(pulse(0.5)).toBeCloseTo(1, 6);
+    expect(pulse(1)).toBeCloseTo(0, 6);
+    expect(pulse(-5)).toBeCloseTo(0, 6);       // clamped
+    expect(pulse(5)).toBeCloseTo(0, 6);
+  });
+
+  it("a lunge starts and ends at zero offset -- nothing is left displaced", () => {
+    const f = { kind: "lunge" as const, t0: now, dur: 200, who: "player",
+                from: { x: 3, y: 3 }, to: { x: 4, y: 3 } };
+    expect(lungeOffset(f, now).x).toBeCloseTo(0, 6);
+    expect(lungeOffset(f, now + 200).x).toBeCloseTo(0, 6);
+    expect(lungeOffset(f, now + 100).x).toBeGreaterThan(0.3);
+  });
+
+  it("a lunge never overshoots the target tile", () => {
+    const f = { kind: "lunge" as const, t0: now, dur: 200, who: "player",
+                from: { x: 0, y: 0 }, to: { x: 1, y: 0 } };
+    for (let t = 0; t <= 200; t += 5) {
+      expect(lungeOffset(f, now + t).x).toBeLessThan(1);
+    }
+  });
+
+  it("effects expire and the queue drains", () => {
+    const fx = new Effects();
+    fx.add({ kind: "flash", t0: now, dur: 100, x: 0, y: 0, colour: "#fff" });
+    fx.add({ kind: "flash", t0: now, dur: 400, x: 0, y: 0, colour: "#fff" });
+    expect(fx.count()).toBe(2);
+    fx.prune(now + 150);
+    expect(fx.count()).toBe(1);
+    fx.prune(now + 500);
+    expect(fx.count()).toBe(0);
+  });
+
+  it("the queue is bounded, so a runaway producer cannot leak", () => {
+    const fx = new Effects();
+    for (let i = 0; i < 5000; i++) {
+      fx.add({ kind: "flash", t0: now, dur: 1e9, x: 0, y: 0, colour: "#fff" });
+    }
+    expect(fx.count()).toBeLessThanOrEqual(160);
+  });
+
+  it("shake decays to exactly zero and is magnitude-capped", () => {
+    const fx = new Effects();
+    fx.shake(999, 300, now);                  // absurd request
+    const a = fx.shakeOffset(now + 10);
+    expect(Math.hypot(a.x, a.y)).toBeLessThanOrEqual(14 * Math.SQRT2);
+    expect(fx.shakeOffset(now + 300)).toEqual({ x: 0, y: 0 });
+    expect(fx.shakeOffset(now + 5000)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("a bigger hit overrides a smaller ongoing shake, and they never sum", () => {
+    const fx = new Effects();
+    fx.shake(2, 300, now);
+    fx.shake(8, 300, now + 50);
+    const mag = Math.hypot(fx.shakeOffset(now + 60).x, fx.shakeOffset(now + 60).y);
+    expect(mag).toBeLessThanOrEqual(8 * Math.SQRT2);
+  });
+
+  it("hitstop is capped so a flurry of kills cannot lock the game", () => {
+    const fx = new Effects();
+    for (let i = 0; i < 50; i++) fx.hitstop(60, now);
+    expect(fx.frozen(now + 119)).toBe(true);
+    expect(fx.frozen(now + 121)).toBe(false);
+  });
+
+  it("hitstop from an earlier frame does not persist forever", () => {
+    const fx = new Effects();
+    fx.hitstop(60, now);
+    expect(fx.frozen(now + 30)).toBe(true);
+    expect(fx.frozen(now + 200)).toBe(false);
+  });
+
+  it("jitter is deterministic and bounded", () => {
+    for (let i = 0; i < 200; i++) {
+      const a = jitter(42, i), b = jitter(42, i);
+      expect(a).toEqual(b);
+      expect(Math.abs(a.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(a.y)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("progress is clamped for effects queried outside their window", () => {
+    const f = { kind: "flash" as const, t0: now, dur: 100, x: 0, y: 0, colour: "#fff" };
+    expect(Effects.t(f, now - 500)).toBe(0);
+    expect(Effects.t(f, now + 500)).toBe(1);
+  });
+
+  it("a zero-duration effect does not divide by zero", () => {
+    const f = { kind: "flash" as const, t0: now, dur: 0, x: 0, y: 0, colour: "#fff" };
+    expect(Number.isFinite(Effects.t(f, now))).toBe(true);
+  });
+
+  it("clear() drops effects, shake and hitstop together", () => {
+    const fx = new Effects();
+    fx.add({ kind: "flash", t0: now, dur: 9999, x: 0, y: 0, colour: "#fff" });
+    fx.shake(10, 500, now);
+    fx.hitstop(100, now);
+    fx.clear();
+    expect(fx.count()).toBe(0);
+    expect(fx.shakeOffset(now + 10)).toEqual({ x: 0, y: 0 });
+    expect(fx.frozen(now + 10)).toBe(false);
+  });
+});
+
+describe("juice cannot break the game", () => {
+  it("a rapid kill streak never freezes for more than the cap", () => {
+    const fx = new Effects();
+    let t = 0;
+    for (let i = 0; i < 30; i++) {
+      fx.hitstop(70, t);
+      fx.shake(7, 260, t);
+      t += 8;                                  // faster than frames arrive
+    }
+    // still bounded from the last call
+    expect(fx.frozen(t + 121)).toBe(false);
+  });
+
+  it("effects added far in the future still expire", () => {
+    const fx = new Effects();
+    fx.add({ kind: "flash", t0: 5000, dur: 100, x: 0, y: 0, colour: "#fff" });
+    fx.prune(4000);
+    expect(fx.count()).toBe(1);                // not yet started
+    fx.prune(5200);
+    expect(fx.count()).toBe(0);
+  });
+
+  it("a burst is deterministic, so particles do not jitter between frames", () => {
+    const a = Array.from({ length: 14 }, (_v, i) => jitter(999, i));
+    const b = Array.from({ length: 14 }, (_v, i) => jitter(999, i));
+    expect(a).toEqual(b);
+  });
+
+  it("shake offset is finite for any clock value", () => {
+    const fx = new Effects();
+    fx.shake(6, 200, 1000);
+    for (const t of [0, 999, 1000, 1100, 1e9, Number.MAX_SAFE_INTEGER]) {
+      const o = fx.shakeOffset(t);
+      expect(Number.isFinite(o.x), String(t)).toBe(true);
+      expect(Number.isFinite(o.y), String(t)).toBe(true);
+    }
+  });
+
+  it("descending clears effects so a wipe never inherits the last level's debris", () => {
+    const fx = new Effects();
+    for (let i = 0; i < 20; i++) {
+      fx.add({ kind: "burst", t0: 0, dur: 9999, x: 0, y: 0, colour: "#fff", n: 8, seed: i });
+    }
+    fx.clear();
+    expect(fx.count()).toBe(0);
   });
 });

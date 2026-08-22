@@ -6,7 +6,7 @@
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
 import { GENES, MAX_DEPTH, type GeneId } from "./biology.js";
-import { SLOTS, type Part, type Strength } from "./plasmid.js";
+import { BIN_CAP, SLOTS, type Part, type Strength } from "./plasmid.js";
 
 export interface Settings {
   readonly uiScale: number;
@@ -71,7 +71,7 @@ function parseBin(v: unknown): Part[] {
   if (!Array.isArray(v)) return [];
   const out: Part[] = [];
   const seen = new Set<GeneId>();
-  for (const entry of (v as unknown[]).slice(0, 12)) {
+  for (const entry of (v as unknown[]).slice(0, BIN_CAP)) {
     const p = parsePart(entry);
     if (p === null) continue;
     if (p.kind === "gene") {

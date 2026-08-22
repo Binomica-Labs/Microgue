@@ -8,13 +8,16 @@ import { binAt, drawBin, drawRing, describe as describeSlot, slotAt,
          type BinGeom, type RingGeom } from "./plasmid_ui.js";
 import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
 import { classifyDown, classifyKey, type Gesture } from "./gesture.js";
-import { drawMap, layoutMap, rowAt, type MapGeom, type MapRow } from "./kegg_ui.js";
+import { clampView, drawGraph, fitView, moduleBoxes, moduleLabelAt, toWorld,
+         type ModuleBox, type View } from "./kegg_ui.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { paintWallMotif, paletteForPigment, playerSprite, sprite } from "./paint.js";
 import { traceWalls } from "./walls.js";
+import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad,
+         jitter, lungeOffset } from "./fx.js";
 import { DEFAULT_SETTINGS, SCHEMA, readSave, writeSave, type Settings } from "./save.js";
 
 const TILE = 32;
@@ -45,9 +48,10 @@ class Game {
   dragBin: number | null = null;
   bin: BinGeom = { x: 0, y: 0, cell: 0, gap: 0, cols: 6 };
   showMap = false;
-  map: MapGeom = { x: 0, y: 0, w: 0, rowH: 0, scroll: 0 };
-  mapRows: MapRow[] = [];
-  mapContentH = 0;
+  view: View | null = null;
+  boxes: ModuleBox[] = moduleBoxes();
+  panFrom: { x: number; y: number } | null = null;
+  panMoved = 0;
   dragXY: { x: number; y: number } | null = null;
   selected: number | null = null;
   spinFrom: number | null = null;
@@ -56,6 +60,8 @@ class Game {
   logH = 0;
   settings: Settings = DEFAULT_SETTINGS;
   private last = 0;
+  fx = new Effects();
+  now = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -89,6 +95,9 @@ class Game {
     this.zoom = this.tileZoom();
     const s = level.stratum;
     if (!level.visited) { level.visited = true; this.note(s.blurb); }
+    // Descending should feel like passing through something.
+    this.fx.clear();
+    this.fx.add({ kind: "wipe", t0: this.now, dur: 460, colour: s.wall, down: true });
     this.save();
   }
 
@@ -119,9 +128,17 @@ class Game {
     const regen = this.genome.regen(d);
     if (regen > 0 && this.player.hp < this.player.maxhp) {
       this.player.hp = Math.min(this.player.hp + regen, this.player.maxhp);
+      this.fx.add({ kind: "text", t0: this.now, dur: 700, x: this.player.x,
+                    y: this.player.y, text: `+${regen}`, colour: "#7fe0a4" });
+    }
+    if (tox > 0) {
+      this.fx.add({ kind: "text", t0: this.now, dur: 700, x: this.player.x,
+                    y: this.player.y, text: `-${tox}`, colour: "#ff9a5a" });
     }
     const aura = this.genome.aura(d);
     if (aura > 0) {
+      this.fx.add({ kind: "ring", t0: this.now, dur: 420, x: this.player.x,
+                    y: this.player.y, colour: "#c8b0ff", r: 1.6 });
       for (const m of this.level.mobs) {
         if (!m.alive) continue;
         if (Math.abs(m.x - this.player.x) <= 1 && Math.abs(m.y - this.player.y) <= 1) {
@@ -133,9 +150,32 @@ class Game {
   }
 
   attack(m: Mob): void {
-    m.hp = Math.max(m.hp - Math.max(Math.round(this.atk()), 1), 0);
+    const dmg = Math.max(Math.round(this.atk()), 1);
+    const ranged = Math.abs(m.x - this.player.x) > 1 || Math.abs(m.y - this.player.y) > 1;
+    const now = this.now;
+
+    if (ranged) {
+      // Nanowire strike. The bolt IS the feedback; there is nothing else.
+      this.fx.add({ kind: "bolt", t0: now, dur: 220, colour: "#8fe6ff", seed: now,
+                    from: { x: this.player.x, y: this.player.y }, to: { x: m.x, y: m.y } });
+    } else {
+      this.fx.add({ kind: "lunge", t0: now, dur: 190, who: "player",
+                    from: { x: this.player.x, y: this.player.y }, to: { x: m.x, y: m.y } });
+    }
+    this.fx.add({ kind: "flash", t0: now + 60, dur: 130, x: m.x, y: m.y, colour: "#ffffff" });
+    this.fx.add({ kind: "text", t0: now + 60, dur: 620, x: m.x, y: m.y,
+                  text: String(dmg), colour: "#ffe0a0" });
+    this.fx.shake(Math.min(2 + dmg * 0.35, 7), 190, now);
+    this.fx.hitstop(28, now);
+
+    m.hp = Math.max(m.hp - dmg, 0);
     if (m.hp <= 0) {
       m.alive = false;
+      // Lysis: the cell bursts. Bigger shake, longer stop, scattered debris.
+      this.fx.add({ kind: "burst", t0: this.now + 40, dur: 520, x: m.x, y: m.y,
+                    colour: m.pigment, n: 14, seed: this.now + m.x * 31 + m.y });
+      this.fx.shake(7, 260, this.now);
+      this.fx.hitstop(70, this.now);
       this.note(`${m.name} destroyed.`);
       const pool = m.genes.filter((g) => !this.genome.has(g));
       if (!pool.length) { this.note(`Nothing new to take.`); }
@@ -143,6 +183,15 @@ class Game {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         if (pick === undefined) return;
         const r = this.genome.stash({ kind: "gene", id: pick, optimised: false });
+        if (r.ok) {
+          // The loop's whole point deserves a moment: the locus travels.
+          this.fx.add({ kind: "bolt", t0: this.now + 120, dur: 380, colour: "#a0ffd0",
+                        seed: this.now, from: { x: m.x, y: m.y },
+                        to: { x: this.player.x, y: this.player.y } });
+          this.fx.add({ kind: "text", t0: this.now + 220, dur: 900, x: this.player.x,
+                        y: this.player.y - 0.5, text: bio.GENES[pick].name,
+                        colour: "#a0ffd0" });
+        }
         this.note(r.ok ? `HGT: ${bio.GENES[pick].name} from ${m.name} \u2192 parts bin.`
                        : `${bio.GENES[pick].name} — ${r.err}`);
       }
@@ -165,6 +214,13 @@ class Game {
         const inc = Math.max(
           Math.round(m.atk * 0.35 * this.genome.armour(this.dungeon.depth)), 1);
         this.player.hp = Math.max(this.player.hp - inc, 0);
+        this.fx.add({ kind: "lunge", t0: this.now, dur: 210, who: m.id,
+                      from: { x: m.x, y: m.y }, to: { x: this.player.x, y: this.player.y } });
+        this.fx.add({ kind: "flash", t0: this.now + 70, dur: 140,
+                      x: this.player.x, y: this.player.y, colour: "#ff6a5a" });
+        this.fx.add({ kind: "text", t0: this.now + 70, dur: 560, x: this.player.x,
+                      y: this.player.y, text: `-${inc}`, colour: "#ff8a7a" });
+        this.fx.shake(2.5, 180, this.now);
         continue;
       }
       const sx = Math.sign(dx), sy = Math.sign(dy);
@@ -400,8 +456,13 @@ class Game {
   }
 
   frame(t: number): void {
-    const dt = Math.min(Math.max((t - this.last) / 1000, 0), 1 / 15);
+    this.now = t;
+    let dt = Math.min(Math.max((t - this.last) / 1000, 0), 1 / 15);
     this.last = t;
+    // Hitstop freezes the animation clock only. Turn state already resolved,
+    // so nothing desyncs -- the world just holds still for a beat.
+    if (this.fx.frozen(t)) dt = 0;
+    this.fx.prune(t);
 
     // slide toward the logical tile; clamped so a hitch cannot overshoot
     const k = this.settings.reduceMotion ? 1 : Math.min(this.player.speed * dt, 1);
@@ -434,7 +495,9 @@ class Game {
 
     const px = TILE * this.zoom;
     ctx.save();
-    ctx.translate(W / 2 - (this.player.ax + 0.5) * px, H / 2 - (this.player.ay + 0.5) * px);
+    const sh = this.fx.shakeOffset(this.now);
+    ctx.translate(W / 2 - (this.player.ax + 0.5) * px + sh.x,
+                  H / 2 - (this.player.ay + 0.5) * px + sh.y);
 
     const x0 = Math.max(Math.floor((this.player.ax - W / px / 2) - 1), 0);
     const x1 = Math.min(Math.ceil((this.player.ax + W / px / 2) + 1), this.level.grid.w - 1);
@@ -500,9 +563,16 @@ class Game {
     for (const m of this.level.mobs) {
       if (!m.alive) continue;
       const f = Math.max(m.hp / m.maxhp, 0);
+      let mx = 0, my = 0;
+      for (const f of this.fx.all()) {
+        if (f.kind === "lunge" && f.who === m.id) {
+          const o = lungeOffset(f, this.now);
+          mx += o.x; my += o.y;
+        }
+      }
       const img = hc ? null : sprite(m.id, px * 0.92, paletteForPigment(m.pigment));
       if (img) {
-        ctx.drawImage(img, m.x * px + px * 0.04, m.y * px + px * 0.04);
+        ctx.drawImage(img, (m.x + mx) * px + px * 0.04, (m.y + my) * px + px * 0.04);
       } else {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.15, px * 0.7, px * 0.7);
@@ -524,20 +594,30 @@ class Game {
       }
     }
 
+    let lx = 0, ly = 0;
+    for (const f of this.fx.all()) {
+      if (f.kind === "lunge" && f.who === "player") {
+        const o = lungeOffset(f, this.now);
+        lx += o.x; ly += o.y;
+      }
+    }
     const me = hc ? null : playerSprite(px * 0.92);
     if (me) {
-      ctx.drawImage(me, this.player.ax * px + px * 0.04, this.player.ay * px + px * 0.04);
+      ctx.drawImage(me, (this.player.ax + lx) * px + px * 0.04,
+                        (this.player.ay + ly) * px + px * 0.04);
     } else {
       ctx.fillStyle = "#0ff";
-      ctx.fillRect(this.player.ax * px + px * 0.18, this.player.ay * px + px * 0.18,
-                   px * 0.64, px * 0.64);
+      ctx.fillRect((this.player.ax + lx) * px + px * 0.18,
+                   (this.player.ay + ly) * px + px * 0.18, px * 0.64, px * 0.64);
     }
 
     ctx.strokeStyle = hc ? "#ff0" : (this.path ? "#ffffff" : "#777777");
     ctx.lineWidth = 2;
     ctx.strokeRect(this.cursor.x * px, this.cursor.y * px, px, px);
+    this.drawFx(px);
     ctx.restore();
 
+    this.drawScreenFx(W, H);
     this.drawHud(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
     if (this.showMap) {
@@ -547,6 +627,96 @@ class Game {
     } else {
       layoutButtons(this.buttons, W, H, this.insets(), u, this.barH + this.logH);
       drawButtons(ctx, this.buttons, u);
+    }
+  }
+
+  /** World-space effects, drawn inside the camera transform. */
+  drawFx(px: number): void {
+    const { ctx } = this;
+    const now = this.now;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (const f of this.fx.all()) {
+      const t = Effects.t(f, now);
+      if (now < f.t0) continue;
+
+      switch (f.kind) {
+        case "flash": {
+          ctx.globalAlpha = (1 - t) * 0.85;
+          ctx.fillStyle = f.colour;
+          ctx.fillRect(f.x * px + px * 0.06, f.y * px + px * 0.06, px * 0.88, px * 0.88);
+          break;
+        }
+        case "text": {
+          // rise and fade
+          ctx.globalAlpha = 1 - easeInQuadLocal(t);
+          ctx.fillStyle = f.colour;
+          ctx.font = `bold ${px * 0.34}px ui-monospace,monospace`;
+          ctx.fillText(f.text, (f.x + 0.5) * px, (f.y + 0.4 - t * 0.8) * px);
+          break;
+        }
+        case "burst": {
+          const e = easeOutCubic(t);
+          ctx.globalAlpha = 1 - t;
+          ctx.fillStyle = f.colour;
+          for (let i = 0; i < f.n; i++) {
+            const j = jitter(f.seed, i);
+            const d = (0.25 + Math.abs(j.x) * 0.7) * e;
+            const r = px * 0.055 * (1 - t * 0.6);
+            ctx.beginPath();
+            ctx.arc((f.x + 0.5 + j.x * d) * px, (f.y + 0.5 + j.y * d) * px, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
+        case "bolt": {
+          // A jagged discharge that draws in, then fades.
+          const grow = easeOutQuad(Math.min(t * 2.2, 1));
+          ctx.globalAlpha = 1 - easeInQuadLocal(t);
+          ctx.strokeStyle = f.colour;
+          ctx.lineWidth = Math.max(px * 0.055, 2);
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          const segs = 7;
+          for (let i = 0; i <= segs; i++) {
+            const k = (i / segs) * grow;
+            const j = jitter(f.seed, i);
+            const bx = (f.from.x + (f.to.x - f.from.x) * k + 0.5 + j.x * 0.13) * px;
+            const by = (f.from.y + (f.to.y - f.from.y) * k + 0.5 + j.y * 0.13) * px;
+            if (i === 0) ctx.moveTo(bx, by); else ctx.lineTo(bx, by);
+          }
+          ctx.stroke();
+          break;
+        }
+        case "ring": {
+          const e = easeOutCubic(t);
+          ctx.globalAlpha = (1 - t) * 0.6;
+          ctx.strokeStyle = f.colour;
+          ctx.lineWidth = Math.max(px * 0.05, 2);
+          ctx.beginPath();
+          ctx.arc((f.x + 0.5) * px, (f.y + 0.5) * px, f.r * px * e, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+        }
+        case "lunge": case "wipe": break;    // handled elsewhere
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  /** Screen-space effects: the level-transition wipe. */
+  drawScreenFx(W: number, H: number): void {
+    const { ctx } = this;
+    for (const f of this.fx.all()) {
+      if (f.kind !== "wipe") continue;
+      const t = Effects.t(f, this.now);
+      ctx.globalAlpha = 1 - easeOutQuad(t);
+      ctx.fillStyle = f.colour;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -754,9 +924,9 @@ class Game {
   pointerDown(x: number, y: number): void {
     if (this.showMap) {
       if (this.inClose(x, y)) { this.gesture = "dismiss"; return; }
-      this.gesture = "spin";                 // reused as "scroll" here
-      this.spinFrom = y;
-      this.spinStart = y;
+      this.gesture = "spin";                 // reused as "pan" here
+      this.panFrom = { x, y };
+      this.panMoved = 0;
       return;
     }
     // Bin cells are checked first: they sit outside the ring, which would
@@ -806,13 +976,22 @@ class Game {
   }
 
   pointerMove(x: number, y: number): void {
+    if (this.showMap && this.panFrom && this.view) {
+      const dx = x - this.panFrom.x, dy = y - this.panFrom.y;
+      this.panMoved += Math.abs(dx) + Math.abs(dy);
+      this.view = clampView({
+        ...this.view,
+        x: this.view.x - dx / this.view.scale,
+        y: this.view.y - dy / this.view.scale,
+      }, innerWidth, innerHeight);
+      this.panFrom = { x, y };
+      return;
+    }
     if (this.gesture === "slot" && (this.dragFrom !== null || this.dragBin !== null)) {
       this.dragXY = { x, y };
     } else if (this.gesture === "spin" && this.spinFrom !== null) {
       if (this.showMap) {
-        const maxScroll = Math.max(this.mapContentH - this.map.rowH * 3, 0);
-        this.map.scroll = Math.min(Math.max(this.map.scroll - (y - this.spinFrom), 0), maxScroll);
-        this.spinFrom = y;
+        // handled in the pan branch below
       } else {
         const a = Math.atan2(y - this.ring.cy, x - this.ring.cx);
         this.ring.rot += a - this.spinFrom;
@@ -854,15 +1033,15 @@ class Game {
         }
         break;
       case "spin":
-        // A tap on a complete module builds it, but only if the drag was
-        // short enough to be a tap rather than a scroll.
-        if (this.showMap && this.spinStart !== null && Math.abs(y - this.spinStart) < 8) {
-          const row = rowAt(this.mapRows, y);
-          if (row?.canAssemble) {
-            const r = this.genome.assemble(row.state.module.steps.map((s) => s.gene));
-            this.note(r.ok
-              ? `Assembled ${row.state.module.id} ${row.state.module.name}.`
-              : `${row.state.module.id}: ${r.err}`);
+        // A tap on a module caption builds it -- but only if the pointer barely
+        // moved, so a pan across a caption is never mistaken for a tap.
+        if (this.showMap && this.view && this.panMoved < 10) {
+          const p = this.mapPoint(x, y);
+          const m = moduleLabelAt({ ...this.view, x: 0, y: 0, scale: this.view.scale },
+                                  p.x * this.view.scale, p.y * this.view.scale, this.boxes);
+          if (m) {
+            const r = this.genome.assemble(m.steps.map((st) => st.gene));
+            this.note(r.ok ? `Assembled ${m.id} ${m.name}.` : `${m.id}: ${r.err}`);
             if (r.ok) { this.showMap = false; this.save(); }
           }
         }
@@ -876,40 +1055,39 @@ class Game {
     this.dragXY = null;
     this.spinFrom = null;
     this.spinStart = null;
+    this.panFrom = null;
   }
 
   drawMapScreen(W: number, H: number): void {
     const { ctx } = this;
     const ins = this.insets();
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
-    ctx.fillStyle = "rgba(0,0,0,0.94)";
+    ctx.fillStyle = "rgba(4,7,6,0.97)";
     ctx.fillRect(0, 0, W, H);
 
-    const headerH = ins.top + 44 * u;
+    this.view ??= fitView(W, H - ins.top - ins.bottom - 60 * u);
+    this.view = clampView(this.view, W, H);
+
+    ctx.save();
+    ctx.translate(0, ins.top + 52 * u);
+    drawGraph(ctx, this.view, this.genome, u, this.boxes);
+    ctx.restore();
+
+    // header sits above the graph, opaque, so panning never runs under it
+    ctx.fillStyle = "rgba(4,7,6,0.95)";
+    ctx.fillRect(0, 0, W, ins.top + 50 * u);
     ctx.fillStyle = "#ffffff";
     ctx.font = `${14 * u}px ui-monospace,monospace`;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText("PATHWAY MODULES", ins.left + 14 * u, ins.top + 26 * u);
+    ctx.fillText("PATHWAY MAP", ins.left + 14 * u, ins.top + 24 * u);
     ctx.fillStyle = "#8fa89a";
     ctx.font = `${10 * u}px ui-monospace,monospace`;
-    ctx.fillText("greyed enzymes are ones you do not carry",
+    ctx.fillText("drag to pan · pinch to zoom · tap a complete module to build it",
                  ins.left + 14 * u, ins.top + 40 * u);
 
-    this.map = {
-      x: ins.left + 14 * u,
-      y: headerH + 10 * u,
-      w: W - ins.left - ins.right - 28 * u,
-      rowH: 62 * u,
-      scroll: this.map.scroll,
-    };
-    const laid = layoutMap(this.map, this.genome);
-    this.mapRows = laid.rows;
-    this.mapContentH = laid.contentH;
-    drawMap(ctx, this.map, this.mapRows, u, headerH, H - ins.bottom - 40 * u);
-
     const cs = Math.max(46 * u, 44);
-    this.closeBox = { x: W - ins.right - cs - 12 * u, y: ins.top + 8 * u, w: cs, h: cs };
+    this.closeBox = { x: W - ins.right - cs - 12 * u, y: ins.top + 4 * u, w: cs, h: cs };
     ctx.fillStyle = "rgba(0,0,0,0.6)";
     ctx.strokeStyle = "rgba(255,255,255,0.35)";
     ctx.lineWidth = Math.max(1.5 * u, 1.5);
@@ -922,6 +1100,15 @@ class Game {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("\u2715", this.closeBox.x + cs / 2, this.closeBox.y + cs / 2);
+  }
+
+  /** Graph-space point for a screen point, accounting for the header offset. */
+  private mapPoint(x: number, y: number): { x: number; y: number } {
+    const ins = this.insets();
+    const u = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * this.settings.uiScale;
+    const v = this.view;
+    if (!v) return { x: 0, y: 0 };
+    return toWorld(v, x, y - (ins.top + 52 * u));
   }
 
   /** Single entry point, so nothing can open the screen without also parking
