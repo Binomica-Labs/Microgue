@@ -256,6 +256,55 @@ class Game {
   }
 
   // ------------------------------------------------------------- render
+  /** Notch / gesture-bar insets. Read from CSS env() via a probe element,
+   *  since canvas has no access to them directly. */
+  private insets(): { top: number; right: number; bottom: number; left: number } {
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "position:fixed;visibility:hidden;" +
+      "top:env(safe-area-inset-top);right:env(safe-area-inset-right);" +
+      "bottom:env(safe-area-inset-bottom);left:env(safe-area-inset-left)";
+    document.body.appendChild(probe);
+    const cs = getComputedStyle(probe);
+    const px = (v: string): number => {
+      const n = Number.parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const out = { top: px(cs.top), right: px(cs.right), bottom: px(cs.bottom), left: px(cs.left) };
+    probe.remove();
+    return out;
+  }
+
+  /** Largest font size at which `text` fits `maxWidth`, down to a floor. */
+  private fitFont(text: string, maxWidth: number, ideal: number): number {
+    const { ctx } = this;
+    let size = ideal;
+    for (; size > 8; size -= 0.5) {
+      ctx.font = `${size}px ui-monospace,monospace`;
+      if (ctx.measureText(text).width <= maxWidth) break;
+    }
+    return size;
+  }
+
+  /** Word-wrap for the message log, which ran off the right edge. */
+  private wrap(text: string, maxWidth: number): string[] {
+    const { ctx } = this;
+    const words = text.split(" ");
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      const test = line === "" ? word : `${line} ${word}`;
+      if (ctx.measureText(test).width > maxWidth && line !== "") {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    }
+    if (line !== "") lines.push(line);
+    return lines;
+  }
+
   tileZoom(): number {
     const short = Math.min(innerWidth, innerHeight);
     const coarse = matchMedia("(pointer: coarse)").matches;
@@ -319,7 +368,11 @@ class Game {
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         if (!this.level.grid.isWall(x, y)) continue;
-        ctx.fillRect(x * px, y * px, px, px);
+        // Round and overlap by a pixel. At fractional zoom (32 * 2.6 = 83.2)
+        // adjacent rects antialias against each other and leave visible seams.
+        const rx = Math.round(x * px);
+        const ry = Math.round(y * px);
+        ctx.fillRect(rx, ry, Math.round((x + 1) * px) - rx + 1, Math.round((y + 1) * px) - ry + 1);
         if (s.hatch && !hc) {
           ctx.fillStyle = s.floor;
           const n = s.hatch;
@@ -330,9 +383,15 @@ class Game {
     }
 
     if (this.path) {
+      // Trim the stretch already walked, so the trail shows where you are
+      // going rather than where you have been.
+      const at = this.path.findIndex((p) => p.x === this.player.x && p.y === this.player.y);
+      const ahead = at >= 0 ? this.path.slice(at + 1) : this.path;
       ctx.fillStyle = hc ? "#ff0" : s.accent;
-      ctx.globalAlpha = 0.45;
-      for (const p of this.path) ctx.fillRect(p.x * px + px * 0.38, p.y * px + px * 0.38, px * 0.24, px * 0.24);
+      ctx.globalAlpha = 0.5;
+      for (const p of ahead) {
+        ctx.fillRect(p.x * px + px * 0.38, p.y * px + px * 0.38, px * 0.24, px * 0.24);
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -378,26 +437,48 @@ class Game {
 
   drawHud(W: number, H: number): void {
     const { ctx } = this;
+    const ins = this.insets();
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
+    const pad = 8 * u;
+    const left = ins.left + pad;
+    const maxW = W - ins.left - ins.right - pad * 2;
     const s = this.level.stratum;
-    ctx.font = `${13 * u}px ui-monospace,monospace`;
-    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
 
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(0, H - 30 * u, W, 30 * u);
-    ctx.fillStyle = "#fff";
-    ctx.fillText(
-      `D${this.dungeon.depth}/${bio.MAX_DEPTH}  ${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV` +
-      `   hp ${Math.max(this.player.hp, 0).toFixed(0)}/${this.player.maxhp}` +
-      `   ${this.genome.used().toFixed(1)}/${this.genome.capacity}kb` +
-      `   hostiles ${this.dungeon.aliveCount()}`,
-      8 * u, H - 10 * u);
+    // Two lines: identity, then vitals. One line did not fit a phone.
+    const lineA = `D${this.dungeon.depth}/${bio.MAX_DEPTH}  ${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV`;
+    const lineB = `hp ${Math.max(this.player.hp, 0).toFixed(0)}/${this.player.maxhp}` +
+      `   plasmid ${this.genome.used().toFixed(1)}/${this.genome.capacity}kb` +
+      `   hostiles ${this.dungeon.aliveCount()}`;
 
-    for (let i = this.log.length - 1; i >= 0; i--) {
-      ctx.globalAlpha = 1 - (this.log.length - 1 - i) * 0.17;
+    const size = Math.min(
+      this.fitFont(lineA, maxW, 13 * u),
+      this.fitFont(lineB, maxW, 13 * u),
+    );
+    ctx.font = `${size}px ui-monospace,monospace`;
+    const lh = size * 1.35;
+    const barH = lh * 2 + pad;
+    const barTop = H - ins.bottom - barH;
+
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, barTop, W, barH + ins.bottom);
+    ctx.fillStyle = s.accent;
+    ctx.fillText(lineA, left, barTop + lh * 0.85);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(lineB, left, barTop + lh * 1.85);
+
+    // Log above the bar, wrapped and clipped to the visible area.
+    ctx.font = `${size}px ui-monospace,monospace`;
+    const wrapped: string[] = [];
+    for (const entry of this.log) wrapped.push(...this.wrap(entry, maxW));
+    const shown = wrapped.slice(-5);
+    for (let i = shown.length - 1; i >= 0; i--) {
+      const line = shown[i];
+      if (line === undefined) continue;
+      ctx.globalAlpha = 1 - (shown.length - 1 - i) * 0.16;
       ctx.fillStyle = "#cfe8d4";
-      const line = this.log[i];
-      if (line !== undefined) ctx.fillText(line, 8 * u, H - (34 + (this.log.length - i) * 15) * u);
+      ctx.fillText(line, left, barTop - (shown.length - i) * lh - pad * 0.5);
     }
     ctx.globalAlpha = 1;
   }
