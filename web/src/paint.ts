@@ -143,6 +143,10 @@ export function paintWallMotif(
   depth: number, tx: number, ty: number,
   rx: number, ry: number, px: number, floor: string,
 ): void {
+  // Below about 40px a tile has no room for texture and the marks merge into
+  // stripes -- exactly what the hatch ticks did before. Skip it entirely.
+  if (px < 40) return;
+
   ctx.save();
   ctx.fillStyle = floor;
   const dot = (fx: number, fy: number, r: number): void => {

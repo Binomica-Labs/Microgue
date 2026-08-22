@@ -6,13 +6,16 @@
 // a glance -- how far down you are, and how much darker it gets.
 
 import { MAX_DEPTH, STRATA, type Stratum } from "./biology.js";
-import type { Genome } from "./genome.js";
+import type { Plasmid } from "./plasmid.js";
 
 export interface HudLayout {
   readonly u: number;          // ui scale
   readonly left: number; readonly right: number;
   readonly top: number; readonly bottom: number;
   readonly w: number; readonly h: number;
+  /** Height of the status bar the gauge must stop above. Omitting this ran
+   *  the column off the bottom of the screen and under the bar. */
+  readonly reserve: number;
 }
 
 /** The column gauge. Returns the width it consumed. */
@@ -23,7 +26,7 @@ export function drawColumn(
   const pad = 6 * L.u;
   const x = L.left + pad;
   const top = L.top + pad;
-  const h = L.h - L.top - L.bottom - pad * 2;
+  const h = L.h - L.top - L.bottom - L.reserve - pad * 2;
   const band = h / MAX_DEPTH;
 
   ctx.save();
@@ -92,7 +95,7 @@ export function drawBar(
 /** Miniature plasmid ring: occupancy as arc coverage, burden as ring colour. */
 export function drawPlasmidRing(
   ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number,
-  genome: Genome, depth: number,
+  genome: Plasmid, depth: number,
 ): void {
   ctx.save();
   ctx.lineWidth = Math.max(r * 0.36, 3);
@@ -101,13 +104,17 @@ export function drawPlasmidRing(
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  for (const f of genome.report(depth)) {
-    const a0 = (f.start - 90) * Math.PI / 180;
-    const a1 = (f.stop - 90) * Math.PI / 180;
-    const e = f.expression;
+  // One arc per operon, brightness by mean expression at this depth.
+  for (const op of genome.operons()) {
+    if (op.genes.length === 0) continue;
+    const step = (Math.PI * 2) / 16;
+    const a0 = op.promoter * step - Math.PI / 2;
+    const a1 = a0 + (op.genes.length + 1) * step;
+    const e = op.genes.reduce((a, g) => a + genome.expression(g.id, depth), 0)
+            / op.genes.length;
     ctx.strokeStyle = `rgba(${120 + 135 * e},${140 + 110 * e},130,${0.45 + 0.55 * e})`;
     ctx.beginPath();
-    ctx.arc(cx, cy, r, a0 + 0.03, a1 - 0.03);
+    ctx.arc(cx, cy, r, a0 + 0.04, a1 - 0.04);
     ctx.stroke();
   }
 

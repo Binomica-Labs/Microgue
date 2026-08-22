@@ -3,7 +3,9 @@
 
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
-import { Genome } from "./genome.js";
+import { Plasmid } from "./plasmid.js";
+import { drawRing, describe as describeSlot, slotAt, type RingGeom } from "./plasmid_ui.js";
+import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
@@ -18,7 +20,7 @@ class Game {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   dungeon = new Dungeon(110, 80, 7);
-  genome = new Genome(12);
+  genome = new Plasmid();
   level!: Level;
   player = { x: 0, y: 0, ax: 0, ay: 0, hp: 30, maxhp: 30, speed: 18 };
   cursor: Point = { x: 0, y: 0 };
@@ -27,6 +29,13 @@ class Game {
   zoom = 1;
   log: { text: string; t: number }[] = [];
   showPlasmid = false;
+  buttons: Button[] = makeButtons();
+  ring: RingGeom = { cx: 0, cy: 0, rInner: 0, rOuter: 0, rot: 0 };
+  dragFrom: number | null = null;
+  dragXY: { x: number; y: number } | null = null;
+  selected: number | null = null;
+  spinFrom: number | null = null;
+  barH = 0;
   settings: Settings = DEFAULT_SETTINGS;
   private last = 0;
 
@@ -78,13 +87,7 @@ class Game {
   }
 
   // ------------------------------------------------------------- combat
-  atk(): number {
-    let a = 3;
-    for (const s of this.genome.slots) {
-      a += this.genome.expression(s.id, this.dungeon.depth) * s.tier * 0.9;
-    }
-    return a;
-  }
+  atk(): number { return 3 + this.genome.power(this.dungeon.depth) * 0.9; }
 
   attack(m: Mob): void {
     m.hp = Math.max(m.hp - Math.max(Math.round(this.atk()), 1), 0);
@@ -96,7 +99,7 @@ class Game {
       else {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         if (pick === undefined) return;
-        const r = this.genome.insert(pick);
+        const r = this.genome.add({ kind: "gene", id: pick, optimised: false });
         this.note(r.ok ? `HGT: acquired ${bio.GENES[pick].name} from ${m.name}.`
                        : `${bio.GENES[pick].name} — ${r.err}`);
       }
@@ -175,10 +178,21 @@ class Game {
 
     this.canvas.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      if (this.showPlasmid) { this.showPlasmid = false; return; }
+      if (this.plasmidPointer("down", e.clientX, e.clientY)) return;
+      const b = buttonAt(this.buttons, e.clientX, e.clientY);
+      if (b) { b.active = true; this.press(b.id); return; }
       const t = toTile(e.clientX, e.clientY);
       this.tap(t.x, t.y);
     });
+    this.canvas.addEventListener("pointermove", (e) => {
+      this.plasmidPointer("move", e.clientX, e.clientY);
+    });
+    const release = (e: PointerEvent): void => {
+      this.plasmidPointer("up", e.clientX, e.clientY);
+      for (const b of this.buttons) if (b.id !== "plasmid") b.active = false;
+    };
+    this.canvas.addEventListener("pointerup", release);
+    this.canvas.addEventListener("pointercancel", release);
 
     addEventListener("keydown", (e) => {
       const k = e.key;
@@ -243,7 +257,7 @@ class Game {
       px: this.player.x,
       py: this.player.y,
       hp: this.player.hp,
-      genes: this.genome.slots.map((slot) => [slot.id, slot.optimised] as const),
+      ring: this.genome.slots.map((p) => (p === null ? null : { ...p })),
       settings: this.settings,
     });
   }
@@ -253,11 +267,8 @@ class Game {
     if (s === null) return false;
     this.dungeon = new Dungeon(110, 80, s.seed);
     this.dungeon.depth = s.depth;
-    this.genome = new Genome(12);
-    for (const [id, optimised] of s.genes) {
-      if (id === "ori") continue;
-      if (this.genome.insert(id).ok && optimised) this.genome.optimise(id);
-    }
+    this.genome = new Plasmid();
+    s.ring.forEach((p, i) => { this.genome.put(i, p); });
     this.settings = s.settings;
     this.enter(this.dungeon.current(), { x: s.px, y: s.py });
     this.player.hp = s.hp;
@@ -463,7 +474,13 @@ class Game {
     ctx.restore();
 
     this.drawHud(W, H);
-    if (this.showPlasmid) this.drawPlasmid(W, H);
+    const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
+    if (this.showPlasmid) {
+      this.drawPlasmid(W, H);
+    } else {
+      layoutButtons(this.buttons, W, H, this.insets(), u, this.barH);
+      drawButtons(ctx, this.buttons, u);
+    }
   }
 
   drawHud(W: number, H: number): void {
@@ -478,12 +495,19 @@ class Game {
     ctx.textBaseline = "alphabetic";
 
     const L: HudLayout = {
-      u, left: ins.left, right: ins.right, top: ins.top, bottom: ins.bottom, w: W, h: H,
+      u, left: ins.left, right: ins.right, top: ins.top, bottom: ins.bottom,
+      w: W, h: H, reserve: this.barH,
     };
 
     // The column gauge: eight bands in their stratum colours, your depth
     // marked. The game's structure, drawn literally.
     const gaugeW = drawColumn(ctx, L, this.dungeon.depth);
+    const upBtn = this.buttons.find((b) => b.id === "up");
+    const downBtn = this.buttons.find((b) => b.id === "down");
+    if (upBtn) upBtn.enabled = this.dungeon.depth > 1;
+    if (downBtn) downBtn.enabled = this.level.down !== null;
+    const pl = this.buttons.find((b) => b.id === "plasmid");
+    if (pl) pl.active = this.showPlasmid;
 
     const barX = left + gaugeW;
     const barW = Math.min(W - barX - ins.right - pad, 260 * u);
@@ -492,6 +516,7 @@ class Game {
     const lh = size * 1.35;
     const barH = lh * 2.6 + pad;
     const barTop = H - ins.bottom - barH;
+    this.barH = barH;
 
     ctx.fillStyle = "rgba(0,0,0,0.62)";
     ctx.fillRect(0, barTop, W, barH + ins.bottom);
@@ -515,7 +540,7 @@ class Game {
     ctx.font = `${size * 0.86}px ui-monospace,monospace`;
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${this.genome.used().toFixed(1)}/${this.genome.capacity}kb   ` +
+    ctx.fillText(`${this.genome.used().toFixed(1)}/${this.genome.capacityKb()}kb   ` +
                  `${this.dungeon.aliveCount()} hostile`,
                  ringX + ringR + 8 * u, barTop + lh * 1.15 + gaugeH / 2);
     ctx.textBaseline = "alphabetic";
@@ -553,43 +578,128 @@ class Game {
 
   drawPlasmid(W: number, H: number): void {
     const { ctx } = this;
+    const ins = this.insets();
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
-    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.27;
-    ctx.fillStyle = "rgba(0,0,0,0.9)";
+    ctx.fillStyle = "rgba(0,0,0,0.93)";
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "#40474a"; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
 
+    const avail = Math.min(W - ins.left - ins.right, H * 0.58);
+    this.ring = {
+      cx: W / 2,
+      cy: ins.top + avail * 0.55 + 20 * u,
+      rOuter: avail * 0.42,
+      rInner: avail * 0.42 - Math.max(avail * 0.11, 30 * u),
+      rot: this.ring.rot,
+    };
+
+    drawRing(ctx, this.ring, this.genome, {
+      depth: this.dungeon.depth, dragFrom: this.dragFrom,
+      dragXY: this.dragXY, selected: this.selected, u,
+    });
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${15 * u}px ui-monospace,monospace`;
+    ctx.fillText(`${this.genome.used().toFixed(1)}/${this.genome.capacityKb()} kb`,
+                 this.ring.cx, this.ring.cy - 9 * u);
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.fillStyle = this.genome.burden() > 0 ? "#ffb45a" : "#8fa89a";
+    ctx.fillText(`burden ${(this.genome.burden() * 100) | 0}%`,
+                 this.ring.cx, this.ring.cy + 9 * u);
+    ctx.fillStyle = "#8fa89a";
+    ctx.fillText(`power ${this.genome.power(this.dungeon.depth).toFixed(1)}`,
+                 this.ring.cx, this.ring.cy + 26 * u);
+
+    // Detail panel for the tapped slot.
+    const py = this.ring.cy + this.ring.rOuter + 26 * u;
+    const lines = this.selected === null
+      ? ["tap a slot to inspect it",
+         "drag a part to move it — genes must sit downstream of a promoter",
+         "drag outside the ring to spin"]
+      : describeSlot(this.genome, this.selected, this.dungeon.depth);
+    ctx.textAlign = "left";
     ctx.font = `${12 * u}px ui-monospace,monospace`;
-    for (const f of this.genome.report(this.dungeon.depth)) {
-      const a0 = (f.start - 90) * Math.PI / 180, a1 = (f.stop - 90) * Math.PI / 180;
-      const e = f.expression;
-      ctx.strokeStyle = `rgba(${90 + 165 * e},${110 + 130 * e},120,${0.35 + 0.65 * e})`;
-      ctx.lineWidth = 10 * u;
-      ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
-      const mid = (a0 + a1) / 2;
-      ctx.fillStyle = `rgba(255,255,255,${0.5 + 0.5 * e})`;
-      ctx.textAlign = Math.cos(mid) < 0 ? "right" : "left";
-      ctx.textBaseline = "middle";
-      // expression as a number too, not just brightness
-      ctx.fillText(`${f.name}${f.optimised ? "*" : ""} ${(e * 100) | 0}%`,
-        cx + Math.cos(mid) * (R + 16 * u), cy + Math.sin(mid) * (R + 16 * u));
-    }
-    ctx.fillStyle = "#fff"; ctx.textAlign = "center";
-    ctx.font = `${14 * u}px ui-monospace,monospace`;
-    ctx.fillText(`PLASMID  ${this.genome.used().toFixed(1)}/${this.genome.capacity} kb` +
-      `  burden ${(this.genome.burden() * 100) | 0}%`, cx, 30 * u);
-    ctx.fillText(`expression at D${this.dungeon.depth} — tap to close`, cx, H - 40 * u);
-  }
-}
+    lines.forEach((line, i) => {
+      ctx.fillStyle = i === 0 ? "#ffffff" : "#9fb8a8";
+      for (const w of this.wrap(line, W - (ins.left + ins.right + 32 * u))) {
+        ctx.fillText(w, ins.left + 16 * u, py + i * 20 * u);
+      }
+    });
 
-/** Register the service worker so the home-screen icon launches offline. */
-function registerServiceWorker(): void {
-  if (!("serviceWorker" in navigator)) return;
-  addEventListener("load", () => {
-    void navigator.serviceWorker.register("./sw.js", { scope: "./" })
-      .catch(() => undefined);   // file:// or an unsupported browser -- fine
-  });
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${12 * u}px ui-monospace,monospace`;
+    ctx.fillText("tap outside to close", W / 2, H - ins.bottom - 18 * u);
+  }
+
+  /** Pointer handling while the plasmid screen is open. Returns true if the
+   *  event was consumed. */
+  plasmidPointer(phase: "down" | "move" | "up", x: number, y: number): boolean {
+    if (!this.showPlasmid) return false;
+    const i = slotAt(this.ring, x, y);
+
+    if (phase === "down") {
+      if (i === null) {
+        const d = Math.hypot(x - this.ring.cx, y - this.ring.cy);
+        if (d > this.ring.rOuter) {
+          // outside the ring: either spin it or dismiss
+          this.spinFrom = Math.atan2(y - this.ring.cy, x - this.ring.cx);
+          return true;
+        }
+        return true;
+      }
+      this.selected = i;
+      if (this.genome.at(i) !== null) {
+        this.dragFrom = i;
+        this.dragXY = { x, y };
+      }
+      return true;
+    }
+
+    if (phase === "move") {
+      if (this.dragFrom !== null) { this.dragXY = { x, y }; return true; }
+      if (this.spinFrom !== null) {
+        const a = Math.atan2(y - this.ring.cy, x - this.ring.cx);
+        this.ring.rot += a - this.spinFrom;
+        this.spinFrom = a;
+        return true;
+      }
+      return true;
+    }
+
+    // up
+    if (this.dragFrom !== null) {
+      if (i !== null && i !== this.dragFrom) {
+        this.genome.swap(this.dragFrom, i);
+        this.selected = i;
+        this.save();
+      }
+      this.dragFrom = null;
+      this.dragXY = null;
+      return true;
+    }
+    if (this.spinFrom !== null) { this.spinFrom = null; return true; }
+    if (i === null && Math.hypot(x - this.ring.cx, y - this.ring.cy) > this.ring.rOuter * 1.35) {
+      this.showPlasmid = false;
+    }
+    return true;
+  }
+
+  press(id: string): void {
+    switch (id) {
+      case "plasmid": this.showPlasmid = !this.showPlasmid; this.selected = null; break;
+      case "down": this.descend(); break;
+      case "up": this.ascend(); break;
+      case "zoomIn": this.zoom = Math.min(this.zoom * 1.25, 8); break;
+      case "zoomOut": this.zoom = Math.max(this.zoom / 1.25, 0.3); break;
+      case "contrast":
+        this.settings = { ...this.settings, highContrast: !this.settings.highContrast };
+        this.save();
+        break;
+      default: break;
+    }
+  }
 }
 
 function boot(): void {
@@ -597,7 +707,12 @@ function boot(): void {
   if (!(el instanceof HTMLCanvasElement)) return;
   new Game(el);
   document.getElementById("boot")?.remove();
-  registerServiceWorker();
+  if ("serviceWorker" in navigator) {
+    addEventListener("load", () => {
+      void navigator.serviceWorker.register("./sw.js", { scope: "./" })
+        .catch(() => undefined);
+    });
+  }
 }
 boot();
 

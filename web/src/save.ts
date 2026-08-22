@@ -6,6 +6,7 @@
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
 import { GENES, MAX_DEPTH, type GeneId } from "./biology.js";
+import { SLOTS, type Part, type Strength } from "./plasmid.js";
 
 export interface Settings {
   readonly uiScale: number;
@@ -21,7 +22,7 @@ export interface SaveData {
   readonly px: number;
   readonly py: number;
   readonly hp: number;
-  readonly genes: readonly (readonly [GeneId, boolean])[];
+  readonly ring: readonly (Part | null)[];
   readonly settings: Settings;
 }
 
@@ -41,14 +42,38 @@ const bool = (v: unknown, fallback: boolean): boolean =>
 const isGeneId = (v: unknown): v is GeneId =>
   typeof v === "string" && Object.prototype.hasOwnProperty.call(GENES, v);
 
-function parseGenes(v: unknown): (readonly [GeneId, boolean])[] {
-  if (!Array.isArray(v)) return [];
-  const out: (readonly [GeneId, boolean])[] = [];
-  for (const entry of v as unknown[]) {
-    if (!Array.isArray(entry)) continue;
-    const [id, optimised] = entry as unknown[];
-    if (isGeneId(id)) out.push([id, bool(optimised, false)]);
+const STRENGTHS: readonly string[] = ["weak", "medium", "strong"];
+
+function parsePart(v: unknown): Part | null {
+  if (!isRecord(v)) return null;
+  const kind = v["kind"];
+  if (kind === "terminator") return { kind: "terminator" };
+  if (kind === "promoter") {
+    const st = v["strength"];
+    const strength: Strength =
+      typeof st === "string" && STRENGTHS.includes(st) ? (st as Strength) : "medium";
+    return { kind: "promoter", strength };
   }
+  if (kind === "gene" && isGeneId(v["id"])) {
+    return { kind: "gene", id: v["id"], optimised: bool(v["optimised"], false) };
+  }
+  return null;
+}
+
+/** Fixed-length ring; anything unrecognised becomes an empty slot. */
+function parseRing(v: unknown): (Part | null)[] {
+  const out = Array<Part | null>(SLOTS).fill(null);
+  if (!Array.isArray(v)) return out;
+  const seen = new Set<GeneId>();
+  (v as unknown[]).slice(0, SLOTS).forEach((entry, i) => {
+    const p = parsePart(entry);
+    if (p === null) return;
+    if (p.kind === "gene") {
+      if (seen.has(p.id)) return;      // a duplicated gene would break add()
+      seen.add(p.id);
+    }
+    out[i] = p;
+  });
   return out;
 }
 
@@ -76,7 +101,7 @@ export function parseSave(raw: unknown): SaveData | null {
     px: Math.round(px),
     py: Math.round(py),
     hp: Math.max(num(raw["hp"], 30), 1),
-    genes: parseGenes(raw["genes"]),
+    ring: parseRing(raw["ring"]),
     settings: parseSettings(raw["settings"]),
   };
 }

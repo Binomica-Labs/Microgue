@@ -28,30 +28,37 @@ export type Teap = "O2" | "NO3-" | "Mn(IV)" | "Fe(III)" | "S0" | "H2S" | "SO4" |
 export interface Gene {
   readonly id: GeneId; readonly name: string; readonly kb: number;
   readonly product: string; readonly tier: number; readonly desc: string;
+  /** Real operons cluster genes of one pathway. Same-pathway neighbours in an
+   *  operon co-regulate, and the plasmid rewards reproducing that. */
+  readonly pathway: Pathway;
 }
 
+export type Pathway =
+  | "photo" | "carbon" | "nitrogen" | "sulfur" | "iron"
+  | "methane" | "energy" | "defense" | "core";
+
 export const GENES: Readonly<Record<GeneId, Gene>> = {
-  psbA: { id:"psbA", name:"psbA", kb:1.1, product:"PSII D1 protein",               tier:1, desc:"Harvest light. Photodamaged constantly; needs repair." },
-  cbbL: { id:"cbbL", name:"cbbL", kb:1.4, product:"RuBisCO large subunit",         tier:1, desc:"Fix CO2 into biomass. Slow, universal." },
-  katG: { id:"katG", name:"katG", kb:2.2, product:"catalase-peroxidase",           tier:1, desc:"Detoxify H2O2. The oxic zone is corrosive without it." },
-  amoA: { id:"amoA", name:"amoA", kb:0.8, product:"ammonia monooxygenase A",       tier:2, desc:"Oxidise NH3. A steady trickle." },
-  narG: { id:"narG", name:"narG", kb:3.7, product:"nitrate reductase alpha",       tier:2, desc:"Respire nitrate once oxygen runs out." },
-  nosZ: { id:"nosZ", name:"nosZ", kb:1.9, product:"N2O reductase",                 tier:2, desc:"Complete denitrification. Vents N2." },
-  nifH: { id:"nifH", name:"nifH", kb:0.9, product:"nitrogenase Fe protein",        tier:4, desc:"Fix N2. Ruinously expensive; oxygen destroys it." },
-  soxB: { id:"soxB", name:"soxB", kb:1.7, product:"thiosulfate oxidation SoxB",    tier:3, desc:"Oxidise reduced sulfur at the O2/H2S front." },
-  sqr:  { id:"sqr",  name:"sqr",  kb:1.3, product:"sulfide:quinone oxidoreductase",tier:3, desc:"Feed sulfide to the quinone pool. Sulfide tolerance." },
-  mtrC: { id:"mtrC", name:"mtrC", kb:2.1, product:"decaheme cytochrome MtrC",      tier:4, desc:"Dump electrons onto solid Fe(III). Respire minerals." },
-  omcS: { id:"omcS", name:"omcS", kb:1.2, product:"OmcS nanowire cytochrome",      tier:4, desc:"Conductive filament. Strike along a wire." },
-  pufM: { id:"pufM", name:"pufM", kb:1.0, product:"type-2 RC subunit M",           tier:5, desc:"Anoxygenic photosynthesis. Light without oxygen." },
-  fmoA: { id:"fmoA", name:"fmoA", kb:1.1, product:"Fenna-Matthews-Olson protein",  tier:6, desc:"Near-lossless excitonic funnel. Works in near-darkness." },
-  csmA: { id:"csmA", name:"csmA", kb:0.2, product:"chlorosome envelope CsmA",      tier:6, desc:"Chlorosome antenna. Enormous absorption cross-section." },
-  aclB: { id:"aclB", name:"aclB", kb:1.2, product:"ATP citrate lyase beta",        tier:6, desc:"Reverse TCA carbon fixation. Cheaper than Calvin." },
-  dsrA: { id:"dsrA", name:"dsrA", kb:1.3, product:"dissimilatory sulfite reductase A", tier:7, desc:"Respire sulfate. Exhales H2S." },
-  aprA: { id:"aprA", name:"aprA", kb:1.9, product:"APS reductase alpha",           tier:7, desc:"Activate sulfate for reduction." },
-  hydA: { id:"hydA", name:"hydA", kb:1.7, product:"[FeFe] hydrogenase",            tier:7, desc:"Run on hydrogen. Oxygen-labile within minutes." },
-  mcrA: { id:"mcrA", name:"mcrA", kb:1.5, product:"methyl-CoM reductase alpha",    tier:8, desc:"Reduce CO2 to methane. The last acceptor." },
-  hdrB: { id:"hdrB", name:"hdrB", kb:0.8, product:"heterodisulfide reductase B",   tier:8, desc:"Flavin-based electron bifurcation." },
-  ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates." },
+  psbA: { id:"psbA", name:"psbA", kb:1.1, product:"PSII D1 protein",               tier:1, desc:"Harvest light. Photodamaged constantly; needs repair.", pathway:"photo" },
+  cbbL: { id:"cbbL", name:"cbbL", kb:1.4, product:"RuBisCO large subunit",         tier:1, desc:"Fix CO2 into biomass. Slow, universal.", pathway:"carbon" },
+  katG: { id:"katG", name:"katG", kb:2.2, product:"catalase-peroxidase",           tier:1, desc:"Detoxify H2O2. The oxic zone is corrosive without it.", pathway:"defense" },
+  amoA: { id:"amoA", name:"amoA", kb:0.8, product:"ammonia monooxygenase A",       tier:2, desc:"Oxidise NH3. A steady trickle.", pathway:"nitrogen" },
+  narG: { id:"narG", name:"narG", kb:3.7, product:"nitrate reductase alpha",       tier:2, desc:"Respire nitrate once oxygen runs out.", pathway:"nitrogen" },
+  nosZ: { id:"nosZ", name:"nosZ", kb:1.9, product:"N2O reductase",                 tier:2, desc:"Complete denitrification. Vents N2.", pathway:"nitrogen" },
+  nifH: { id:"nifH", name:"nifH", kb:0.9, product:"nitrogenase Fe protein",        tier:4, desc:"Fix N2. Ruinously expensive; oxygen destroys it.", pathway:"nitrogen" },
+  soxB: { id:"soxB", name:"soxB", kb:1.7, product:"thiosulfate oxidation SoxB",    tier:3, desc:"Oxidise reduced sulfur at the O2/H2S front.", pathway:"sulfur" },
+  sqr:  { id:"sqr",  name:"sqr",  kb:1.3, product:"sulfide:quinone oxidoreductase",tier:3, desc:"Feed sulfide to the quinone pool. Sulfide tolerance.", pathway:"sulfur" },
+  mtrC: { id:"mtrC", name:"mtrC", kb:2.1, product:"decaheme cytochrome MtrC",      tier:4, desc:"Dump electrons onto solid Fe(III). Respire minerals.", pathway:"iron" },
+  omcS: { id:"omcS", name:"omcS", kb:1.2, product:"OmcS nanowire cytochrome",      tier:4, desc:"Conductive filament. Strike along a wire.", pathway:"iron" },
+  pufM: { id:"pufM", name:"pufM", kb:1.0, product:"type-2 RC subunit M",           tier:5, desc:"Anoxygenic photosynthesis. Light without oxygen.", pathway:"photo" },
+  fmoA: { id:"fmoA", name:"fmoA", kb:1.1, product:"Fenna-Matthews-Olson protein",  tier:6, desc:"Near-lossless excitonic funnel. Works in near-darkness.", pathway:"photo" },
+  csmA: { id:"csmA", name:"csmA", kb:0.2, product:"chlorosome envelope CsmA",      tier:6, desc:"Chlorosome antenna. Enormous absorption cross-section.", pathway:"photo" },
+  aclB: { id:"aclB", name:"aclB", kb:1.2, product:"ATP citrate lyase beta",        tier:6, desc:"Reverse TCA carbon fixation. Cheaper than Calvin.", pathway:"carbon" },
+  dsrA: { id:"dsrA", name:"dsrA", kb:1.3, product:"dissimilatory sulfite reductase A", tier:7, desc:"Respire sulfate. Exhales H2S.", pathway:"sulfur" },
+  aprA: { id:"aprA", name:"aprA", kb:1.9, product:"APS reductase alpha",           tier:7, desc:"Activate sulfate for reduction.", pathway:"sulfur" },
+  hydA: { id:"hydA", name:"hydA", kb:1.7, product:"[FeFe] hydrogenase",            tier:7, desc:"Run on hydrogen. Oxygen-labile within minutes.", pathway:"energy" },
+  mcrA: { id:"mcrA", name:"mcrA", kb:1.5, product:"methyl-CoM reductase alpha",    tier:8, desc:"Reduce CO2 to methane. The last acceptor.", pathway:"methane" },
+  hdrB: { id:"hdrB", name:"hdrB", kb:0.8, product:"heterodisulfide reductase B",   tier:8, desc:"Flavin-based electron bifurcation.", pathway:"methane" },
+  ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates.", pathway:"core" },
 };
 
 export interface Microbe {
