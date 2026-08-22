@@ -85,6 +85,7 @@ web/
     plasmid.ts    the ring: slots, operons, polarity, pathway synergy
     plasmid_ui.ts ring rendering + polar hit-testing for drag and spin
     buttons.ts    on-screen controls
+    gesture.ts    pointer gesture classification, pure and tested
     hud.ts        Winogradsky column gauge, bars, plasmid ring
     save.ts       localStorage with a real runtime validator
     main.ts       canvas, input, game loop  <- the only DOM-aware file

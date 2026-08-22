@@ -6,10 +6,11 @@ import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { Plasmid } from "./plasmid.js";
 import { drawRing, describe as describeSlot, slotAt, type RingGeom } from "./plasmid_ui.js";
 import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
+import { classifyDown, type Gesture } from "./gesture.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
-import { drawBar, drawColumn, drawPlasmidRing, type HudLayout } from "./hud.js";
+import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { paintWallMotif, paletteForPigment, playerSprite, sprite } from "./paint.js";
 import { traceWalls } from "./walls.js";
 import { DEFAULT_SETTINGS, readSave, writeSave, type Settings } from "./save.js";
@@ -32,6 +33,12 @@ class Game {
   showPlasmid = false;
   buttons: Button[] = makeButtons();
   ring: RingGeom = { cx: 0, cy: 0, rInner: 0, rOuter: 0, rot: 0 };
+  // A pointer gesture is classified once on down and acted on once on up.
+  // Deciding per-event is what let a button press open the plasmid on down and
+  // a stray dismiss check close it again on up, in the same tap.
+  gesture: Gesture = "none";
+  gestureBtn: Button | null = null;
+  closeBox = { x: 0, y: 0, w: 0, h: 0 };
   dragFrom: number | null = null;
   dragXY: { x: number; y: number } | null = null;
   selected: number | null = null;
@@ -168,30 +175,25 @@ class Game {
     if (this.path && this.path.length > 1) this.walk = { nodes: this.path, i: 0 };
   }
 
-  private bindInput(): void {
-    const toTile = (cx: number, cy: number): Point => {
-      const r = this.canvas.getBoundingClientRect();
-      const s = TILE * this.zoom;
-      const px = (cx - r.left - r.width / 2) / s + this.player.ax + 0.5;
-      const py = (cy - r.top - r.height / 2) / s + this.player.ay + 0.5;
-      return { x: Math.floor(px), y: Math.floor(py) };
+  /** Screen point -> tile. Lives on the class because pointerDown needs it. */
+  toTile(cx: number, cy: number): Point {
+    const r = this.canvas.getBoundingClientRect();
+    const s = TILE * this.zoom;
+    return {
+      x: Math.floor((cx - r.left - r.width / 2) / s + this.player.ax + 0.5),
+      y: Math.floor((cy - r.top - r.height / 2) / s + this.player.ay + 0.5),
     };
+  }
 
+  private bindInput(): void {
     this.canvas.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      if (this.plasmidPointer("down", e.clientX, e.clientY)) return;
-      const b = buttonAt(this.buttons, e.clientX, e.clientY);
-      if (b) { b.active = true; this.press(b.id); return; }
-      const t = toTile(e.clientX, e.clientY);
-      this.tap(t.x, t.y);
+      this.pointerDown(e.clientX, e.clientY);
     });
     this.canvas.addEventListener("pointermove", (e) => {
-      this.plasmidPointer("move", e.clientX, e.clientY);
+      this.pointerMove(e.clientX, e.clientY);
     });
-    const release = (e: PointerEvent): void => {
-      this.plasmidPointer("up", e.clientX, e.clientY);
-      for (const b of this.buttons) if (b.id !== "plasmid") b.active = false;
-    };
+    const release = (e: PointerEvent): void => { this.pointerUp(e.clientX, e.clientY); };
     this.canvas.addEventListener("pointerup", release);
     this.canvas.addEventListener("pointercancel", release);
 
@@ -540,22 +542,24 @@ class Game {
     ctx.fillText(`${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV`,
                  barX, barTop + lh * 0.9);
 
+    // One row: hp gauge, then plain readouts. A miniature plasmid ring used to
+    // sit here and read as an unexplained circle, so it is gone -- the real
+    // ring is one tap away and legible.
     const gaugeH = Math.max(lh * 0.8, 12);
-    drawBar(ctx, barX, barTop + lh * 1.15, barW * 0.52, gaugeH,
+    const hpW = Math.min(barW * 0.44, 150 * u);
+    drawBar(ctx, barX, barTop + lh * 1.15, hpW, gaugeH,
             this.player.hp / this.player.maxhp, "#4fbf6a",
             `hp ${Math.max(this.player.hp, 0)}/${this.player.maxhp}`,
             `${size * 0.86}px ui-monospace,monospace`);
 
-    const ringR = gaugeH * 0.95;
-    const ringX = barX + barW * 0.6 + ringR;
-    drawPlasmidRing(ctx, ringX, barTop + lh * 1.15 + gaugeH / 2, ringR,
-                    this.genome, this.dungeon.depth);
+    const ops = this.genome.operons().filter((op) => op.genes.length > 0).length;
     ctx.font = `${size * 0.86}px ui-monospace,monospace`;
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${this.genome.used().toFixed(1)}/${this.genome.capacityKb()}kb   ` +
-                 `${this.dungeon.aliveCount()} hostile`,
-                 ringX + ringR + 8 * u, barTop + lh * 1.15 + gaugeH / 2);
+    ctx.fillText(
+      `${this.genome.used().toFixed(1)}kb  ${ops} operon${ops === 1 ? "" : "s"}` +
+      `   ${this.dungeon.aliveCount()} hostile`,
+      barX + hpW + 10 * u, barTop + lh * 1.15 + gaugeH / 2);
     ctx.textBaseline = "alphabetic";
 
     const LIFE = 9000;
@@ -628,8 +632,9 @@ class Game {
     const py = this.ring.cy + this.ring.rOuter + 26 * u;
     const lines = this.selected === null
       ? ["tap a slot to inspect it",
-         "drag a part to move it — genes must sit downstream of a promoter",
-         "drag outside the ring to spin"]
+         "drag a part between slots to rearrange — a gene transcribes only if",
+         "it sits downstream of a promoter with no gap or terminator between",
+         "drag outside the ring to spin it"]
       : describeSlot(this.genome, this.selected, this.dungeon.depth);
     ctx.textAlign = "left";
     ctx.font = `${12 * u}px ui-monospace,monospace`;
@@ -640,63 +645,102 @@ class Game {
       }
     });
 
+    // A real close target. "Tap outside" was ambiguous, and it was what let a
+    // button press dismiss the screen in the same gesture that opened it.
+    const cs = Math.max(46 * u, 44);
+    this.closeBox = { x: W - ins.right - cs - 12 * u, y: ins.top + 12 * u, w: cs, h: cs };
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = Math.max(1.5 * u, 1.5);
+    ctx.beginPath();
+    ctx.roundRect(this.closeBox.x, this.closeBox.y, cs, cs, cs * 0.28);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${cs * 0.42}px ui-monospace,monospace`;
     ctx.textAlign = "center";
-    ctx.fillStyle = "#8fa89a";
-    ctx.font = `${12 * u}px ui-monospace,monospace`;
-    ctx.fillText("tap outside to close", W / 2, H - ins.bottom - 18 * u);
+    ctx.textBaseline = "middle";
+    ctx.fillText("\u2715", this.closeBox.x + cs / 2, this.closeBox.y + cs / 2);
   }
 
-  /** Pointer handling while the plasmid screen is open. Returns true if the
-   *  event was consumed. */
-  plasmidPointer(phase: "down" | "move" | "up", x: number, y: number): boolean {
-    if (!this.showPlasmid) return false;
-    const i = slotAt(this.ring, x, y);
+  private inClose(x: number, y: number): boolean {
+    const c = this.closeBox;
+    return x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h;
+  }
 
-    if (phase === "down") {
-      if (i === null) {
-        const d = Math.hypot(x - this.ring.cx, y - this.ring.cy);
-        if (d > this.ring.rOuter) {
-          // outside the ring: either spin it or dismiss
-          this.spinFrom = Math.atan2(y - this.ring.cy, x - this.ring.cx);
-          return true;
+  pointerDown(x: number, y: number): void {
+    const slot = this.showPlasmid ? slotAt(this.ring, x, y) : null;
+    const btn = this.showPlasmid ? null : buttonAt(this.buttons, x, y);
+    this.gesture = classifyDown({
+      plasmidOpen: this.showPlasmid,
+      closeBox: this.closeBox,
+      slot,
+      distFromRing: Math.hypot(x - this.ring.cx, y - this.ring.cy),
+      rOuter: this.ring.rOuter,
+      onButton: btn !== null,
+    }, x, y);
+
+    switch (this.gesture) {
+      case "button":
+        this.gestureBtn = btn;
+        if (btn) btn.active = true;
+        break;
+      case "slot":
+        if (slot !== null) {
+          this.selected = slot;
+          if (this.genome.at(slot) !== null) { this.dragFrom = slot; this.dragXY = { x, y }; }
         }
-        return true;
+        break;
+      case "spin":
+        this.spinFrom = Math.atan2(y - this.ring.cy, x - this.ring.cx);
+        break;
+      case "world": {
+        const t = this.toTile(x, y);
+        this.tap(t.x, t.y);
+        break;
       }
-      this.selected = i;
-      if (this.genome.at(i) !== null) {
-        this.dragFrom = i;
-        this.dragXY = { x, y };
-      }
-      return true;
+      case "dismiss": case "none": break;
     }
+  }
 
-    if (phase === "move") {
-      if (this.dragFrom !== null) { this.dragXY = { x, y }; return true; }
-      if (this.spinFrom !== null) {
-        const a = Math.atan2(y - this.ring.cy, x - this.ring.cx);
-        this.ring.rot += a - this.spinFrom;
-        this.spinFrom = a;
-        return true;
-      }
-      return true;
+  pointerMove(x: number, y: number): void {
+    if (this.gesture === "slot" && this.dragFrom !== null) {
+      this.dragXY = { x, y };
+    } else if (this.gesture === "spin" && this.spinFrom !== null) {
+      const a = Math.atan2(y - this.ring.cy, x - this.ring.cx);
+      this.ring.rot += a - this.spinFrom;
+      this.spinFrom = a;
     }
+  }
 
-    // up
-    if (this.dragFrom !== null) {
-      if (i !== null && i !== this.dragFrom) {
-        this.genome.swap(this.dragFrom, i);
-        this.selected = i;
-        this.save();
+  pointerUp(x: number, y: number): void {
+    switch (this.gesture) {
+      case "button": {
+        const b = this.gestureBtn;
+        if (b) { b.active = false; if (buttonAt(this.buttons, x, y) === b) this.press(b.id); }
+        break;
       }
-      this.dragFrom = null;
-      this.dragXY = null;
-      return true;
+      case "slot": {
+        if (this.dragFrom !== null) {
+          const i = slotAt(this.ring, x, y);
+          if (i !== null && i !== this.dragFrom) {
+            this.genome.swap(this.dragFrom, i);
+            this.selected = i;
+            this.save();
+          }
+        }
+        break;
+      }
+      case "dismiss":
+        if (this.inClose(x, y)) { this.showPlasmid = false; this.selected = null; }
+        break;
+      case "none": case "spin": case "world": break;
     }
-    if (this.spinFrom !== null) { this.spinFrom = null; return true; }
-    if (i === null && Math.hypot(x - this.ring.cx, y - this.ring.cy) > this.ring.rOuter * 1.35) {
-      this.showPlasmid = false;
-    }
-    return true;
+    this.gesture = "none";
+    this.gestureBtn = null;
+    this.dragFrom = null;
+    this.dragXY = null;
+    this.spinFrom = null;
   }
 
   press(id: string): void {

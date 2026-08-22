@@ -11,6 +11,7 @@ import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.
 import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
 import { classify, traceWalls } from "../src/walls.js";
 import { PIXELS, PX_SIZE, validate as validatePixels } from "../src/pixels.js";
+import { classifyDown, inBox, type Gesture } from "../src/gesture.js";
 
 describe("redox tower", () => {
   const depthOf = (t: bio.Teap) => bio.STRATA.find((s) => s.teap === t)!.depth;
@@ -727,5 +728,59 @@ describe("pixel art", () => {
       .not.toBeNull();
     expect(validatePixels(Array.from({ length: PX_SIZE }, () => ".".repeat(3))))
       .not.toBeNull();
+  });
+});
+
+describe("pointer gestures", () => {
+  const closeBox = { x: 900, y: 40, w: 46, h: 46 };
+  const base = { closeBox, slot: null, distFromRing: 500, rOuter: 200, onButton: false };
+
+  it("a button press is a button press, not a dismiss", () => {
+    // The exact sequence that broke: button is outside the ring, but the
+    // plasmid is CLOSED when the gesture is decided, so it can only be a press.
+    expect(classifyDown({ ...base, plasmidOpen: false, onButton: true }, 990, 2200))
+      .toBe("button");
+  });
+
+  it("closing requires the close box, not merely being outside the ring", () => {
+    const open = { ...base, plasmidOpen: true };
+    expect(classifyDown(open, 990, 2200)).toBe("spin");     // outside != dismiss
+    expect(classifyDown(open, 920, 60)).toBe("dismiss");
+  });
+
+  it("a slot tap beats the spin zone", () => {
+    expect(classifyDown({ ...base, plasmidOpen: true, slot: 7, distFromRing: 150 }, 0, 0))
+      .toBe("slot");
+  });
+
+  it("the hole in the middle of the ring does nothing", () => {
+    expect(classifyDown({ ...base, plasmidOpen: true, distFromRing: 40 }, 0, 0))
+      .toBe("none");
+  });
+
+  it("world taps only happen while the plasmid is closed", () => {
+    expect(classifyDown({ ...base, plasmidOpen: false }, 300, 900)).toBe("world");
+    for (const d of [10, 150, 900]) {
+      expect(classifyDown({ ...base, plasmidOpen: true, distFromRing: d }, 300, 900))
+        .not.toBe("world");
+    }
+  });
+
+  it("no gesture from an open plasmid can move the player", () => {
+    const open = { ...base, plasmidOpen: true };
+    const cases: Gesture[] = [
+      classifyDown(open, 920, 60),
+      classifyDown({ ...open, slot: 3 }, 0, 0),
+      classifyDown({ ...open, distFromRing: 999 }, 0, 0),
+      classifyDown({ ...open, distFromRing: 10 }, 0, 0),
+      classifyDown({ ...open, onButton: true }, 500, 500),
+    ];
+    expect(cases).not.toContain("world");
+  });
+
+  it("inBox is inclusive of its edges", () => {
+    expect(inBox(closeBox, 900, 40)).toBe(true);
+    expect(inBox(closeBox, 946, 86)).toBe(true);
+    expect(inBox(closeBox, 899, 40)).toBe(false);
   });
 });
