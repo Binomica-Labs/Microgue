@@ -23,6 +23,7 @@ export interface SaveData {
   readonly py: number;
   readonly hp: number;
   readonly ring: readonly (Part | null)[];
+  readonly bin: readonly Part[];
   readonly settings: Settings;
 }
 
@@ -58,6 +59,23 @@ function parsePart(v: unknown): Part | null {
     return { kind: "gene", id: v["id"], optimised: bool(v["optimised"], false) };
   }
   return null;
+}
+
+/** The parts bin: a plain list, deduplicated against itself. */
+function parseBin(v: unknown): Part[] {
+  if (!Array.isArray(v)) return [];
+  const out: Part[] = [];
+  const seen = new Set<GeneId>();
+  for (const entry of (v as unknown[]).slice(0, 12)) {
+    const p = parsePart(entry);
+    if (p === null) continue;
+    if (p.kind === "gene") {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+    }
+    out.push(p);
+  }
+  return out;
 }
 
 /** Fixed-length ring; anything unrecognised becomes an empty slot. */
@@ -102,6 +120,7 @@ export function parseSave(raw: unknown): SaveData | null {
     py: Math.round(py),
     hp: Math.max(num(raw["hp"], 30), 1),
     ring: parseRing(raw["ring"]),
+    bin: parseBin(raw["bin"]),
     settings: parseSettings(raw["settings"]),
   };
 }

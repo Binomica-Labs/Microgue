@@ -89,8 +89,10 @@ web/
     walls.ts      organic wall contouring (corner classification + tracing)
     pixels.ts     16x16 pixel art as role grids -- EDIT THIS for sprite work
     shapes.ts     the vector morphologies pixels.ts was seeded from
-    plasmid.ts    the ring: slots, operons, polarity, pathway synergy
+    plasmid.ts    the ring + parts bin: operons, polarity, synergy, complexes
     plasmid_ui.ts ring rendering + polar hit-testing for drag and spin
+    kegg.ts       KEGG modules: metabolite chains, EC numbers, completeness
+    kegg_ui.ts    the module map -- greyed arrows for enzymes you lack
     buttons.ts    on-screen controls
     gesture.ts    pointer gesture classification, pure and tested
     hud.ts        Winogradsky column gauge, bars, plasmid ring
@@ -173,6 +175,42 @@ depending on mineral phase. The +770 mV textbook figure is the pH 2 aqueous
 couple and does not apply here.
 
 ---
+
+## The plasmid, biologically
+
+Four layers, each a real thing:
+
+1. **Transcription.** A promoter reads downstream until a terminator, a gap, or
+   the next promoter. A gene outside any operon is carried but silent.
+2. **Polarity.** Expression decays 0.82x per position from the promoter, so a
+   long operon starves its tail.
+3. **Clustering.** Same-pathway neighbours co-regulate (+18% each), which is
+   what operons are *for*.
+4. **Complexes.** A pathway only works when every step is present, in ONE
+   operon, all expressing at the current depth. `mtrC`+`omcS` is contact plus
+   nanowire electron transfer and grants reach 2. `dsrA`+`aprA` completes
+   sulfate reduction and the exhaled H2S burns adjacent cells. `nifH`+`hydA` is
+   nitrogenase with an uptake hydrogenase recycling the H2 it obligately
+   evolves. `katG`+`sqr` covers peroxide and sulfide.
+
+And the inverse: **HAZARDS** are half-built pathways. `narG` without `nosZ`
+leaves nitrous oxide; `aprA` without `dsrA` leaves sulfite; `psbA` without
+`katG` leaves photo-oxidative damage. Each costs hp per action. A partial
+pathway is genuinely worse than none, which is true of real metabolism.
+
+Loot goes to the **parts bin**, not onto the ring — acquiring a gene and
+deciding where it goes are separate acts. `install`/`uninstall` conserve
+parts: a displaced part returns to the bin rather than vanishing, and there is
+a test asserting the total never changes.
+
+## Auto-assembly is deliberately not a free win
+
+`Plasmid.assemble()` lays a module out as one operon in reaction order, but it
+requires a spare promoter from the bin and a run of contiguous free slots, and
+it fails with a reason rather than shuffling the ring. The arrangement puzzle --
+promoter strength, polarity ordering, what you displace -- stays the player's.
+Making it always succeed would turn the ring into decoration; there are tests
+for each refusal.
 
 ## Failure modes seen repeatedly
 

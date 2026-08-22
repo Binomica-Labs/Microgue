@@ -6,12 +6,13 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { DEFAULT_SETTINGS, parseSave } from "../src/save.js";
-import { Plasmid, SLOTS } from "../src/plasmid.js";
+import { Plasmid, SLOTS, type Part } from "../src/plasmid.js";
 import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.js";
 import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
 import { classify, traceWalls } from "../src/walls.js";
 import { PIXELS, PX_SIZE, validate as validatePixels } from "../src/pixels.js";
 import { classifyDown, classifyKey, inBox, type Gesture } from "../src/gesture.js";
+import { MODULES, missingGenes, moduleState } from "../src/kegg.js";
 
 describe("redox tower", () => {
   const depthOf = (t: bio.Teap) => bio.STRATA.find((s) => s.teap === t)!.depth;
@@ -889,5 +890,310 @@ describe("keyboard while the plasmid is open", () => {
   it("Escape closes the inventory rather than quitting", () => {
     expect(classifyKey("Escape", true).kind).toBe("closePlasmid");
     expect(classifyKey("Escape", false).kind).toBe("quit");
+  });
+});
+
+describe("parts bin", () => {
+  it("starts stocked with regulatory parts, not genes", () => {
+    const p = new Plasmid();
+    expect(p.bin.length).toBeGreaterThan(0);
+    expect(p.bin.every((x) => x.kind !== "gene")).toBe(true);
+    expect(p.bin.some((x) => x.kind === "promoter")).toBe(true);
+    expect(p.bin.some((x) => x.kind === "terminator")).toBe(true);
+  });
+
+  it("loot goes to the bin, not onto the ring", () => {
+    const p = new Plasmid();
+    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(true);
+    expect(p.inBin("mtrC")).toBe(true);
+    expect(p.has("mtrC")).toBe(false);
+    expect(p.expression("mtrC", 4)).toBe(0);          // stashed is not expressed
+  });
+
+  it("refuses a duplicate whether it is on the ring or in the bin", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(false);
+    p.install(p.bin.findIndex((x) => x.kind === "gene"), 8);
+    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(false);
+  });
+
+  it("install and uninstall conserve parts -- nothing is destroyed", () => {
+    const p = new Plasmid();
+    const count = () => p.bin.length + p.slots.filter((x) => x !== null).length;
+    const before = count();
+    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    const i = p.bin.findIndex((x) => x.kind === "gene");
+    p.install(i, 8);
+    expect(count()).toBe(before + 1);
+    p.uninstall(8);
+    expect(count()).toBe(before + 1);
+    expect(p.inBin("mtrC")).toBe(true);
+  });
+
+  it("installing over an occupied slot returns the old part to the bin", () => {
+    const p = new Plasmid();
+    p.put(8, { kind: "terminator" });
+    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    const binBefore = p.bin.length;
+    p.install(p.bin.findIndex((x) => x.kind === "gene"), 8);
+    expect(p.bin.length).toBe(binBefore);            // one out, one back in
+    expect(p.bin.some((x) => x.kind === "terminator")).toBe(true);
+  });
+
+  it("the origin can be neither displaced nor uninstalled", () => {
+    const p = new Plasmid();
+    const oi = p.slots.findIndex((x) => x?.kind === "gene" && x.id === "ori");
+    expect(p.uninstall(oi).ok).toBe(false);
+    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    expect(p.install(p.bin.findIndex((x) => x.kind === "gene"), oi).ok).toBe(false);
+  });
+});
+
+describe("operon complexes", () => {
+  const build = (parts: [number, Part][]) => {
+    const p = new Plasmid();
+    for (const [i, part] of parts) p.put(i, part);
+    return p;
+  };
+  const gene = (id: Parameters<Plasmid["has"]>[0]): Part =>
+    ({ kind: "gene", id, optimised: true });
+
+  it("a complete pathway in one operon activates; scattered genes do not", () => {
+    const together = build([
+      [4, { kind: "promoter", strength: "strong" }],
+      [5, gene("mtrC")], [6, gene("omcS")],
+    ]);
+    expect(together.complexes(4).map((c) => c.id)).toContain("eet");
+
+    const apart = build([
+      [4, { kind: "promoter", strength: "strong" }], [5, gene("mtrC")],
+      [9, { kind: "promoter", strength: "strong" }], [10, gene("omcS")],
+    ]);
+    expect(apart.complexes(4).map((c) => c.id)).not.toContain("eet");
+  });
+
+  it("a complex is inert where its genes have no substrate", () => {
+    const p = build([
+      [4, { kind: "promoter", strength: "strong" }],
+      [5, gene("mtrC")], [6, gene("omcS")],
+    ]);
+    expect(p.complexes(4).map((c) => c.id)).toContain("eet");   // ferruginous
+    expect(p.complexes(7).map((c) => c.id)).not.toContain("eet"); // no Fe(III)
+  });
+
+  it("electron transfer grants reach, sulfate reduction grants an aura", () => {
+    const eet = build([[4, { kind: "promoter", strength: "strong" }],
+                       [5, gene("mtrC")], [6, gene("omcS")]]);
+    expect(eet.reach(4)).toBe(2);
+    const sr = build([[4, { kind: "promoter", strength: "strong" }],
+                      [5, gene("dsrA")], [6, gene("aprA")]]);
+    expect(sr.aura(7)).toBeGreaterThan(0);
+  });
+
+  it("a complex multiplies output beyond the sum of its genes", () => {
+    const pair = build([[4, { kind: "promoter", strength: "strong" }],
+                        [5, gene("mcrA")], [6, gene("hdrB")]]);
+    const solo = build([[4, { kind: "promoter", strength: "strong" }],
+                        [5, gene("mcrA")], [7, gene("hdrB")]]);  // gap between
+    expect(pair.power(8)).toBeGreaterThan(solo.power(8) * 1.4);
+  });
+
+  it("armour reduces incoming damage only while the complex holds", () => {
+    const p = build([[4, { kind: "promoter", strength: "strong" }],
+                     [5, gene("katG")], [6, gene("sqr")]]);
+    expect(p.armour(3)).toBeLessThan(1);
+    p.put(6, null);
+    expect(p.armour(3)).toBe(1);
+  });
+});
+
+describe("toxic intermediates", () => {
+  it("nitrate reductase without N2O reductase accumulates nitrous oxide", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "narG", optimised: true });
+    expect(p.hazards(2).map((h) => h.id)).toContain("n2o");
+    expect(p.toxicity(2)).toBeGreaterThan(0);
+  });
+
+  it("completing the chain clears the hazard and grants the complex", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "narG", optimised: true });
+    p.put(6, { kind: "gene", id: "nosZ", optimised: true });
+    expect(p.hazards(2).map((h) => h.id)).not.toContain("n2o");
+    expect(p.complexes(2).map((c) => c.id)).toContain("denitrification");
+  });
+
+  it("a hazard needs the offending gene to actually be expressed", () => {
+    const p = new Plasmid();
+    p.put(9, { kind: "gene", id: "narG", optimised: true });   // no promoter
+    expect(p.toxicity(2)).toBe(0);
+  });
+
+  it("every hazard names a gene pair that exists", () => {
+    for (const h of bio.HAZARDS) {
+      expect(bio.GENES[h.present], h.id).toBeDefined();
+      expect(bio.GENES[h.missing], h.id).toBeDefined();
+    }
+  });
+
+  it("every complex names genes that exist and share a plausible pathway", () => {
+    for (const c of bio.COMPLEXES) {
+      expect(c.genes.length, c.id).toBeGreaterThanOrEqual(2);
+      for (const g of c.genes) expect(bio.GENES[g], `${c.id} -> ${g}`).toBeDefined();
+    }
+  });
+});
+
+describe("save round-trips the bin", () => {
+  it("keeps stashed parts across a reload", () => {
+    const s = parseSave({
+      depth: 4, seed: 7, px: 5, py: 5, hp: 20,
+      ring: [{ kind: "promoter", strength: "medium" }],
+      bin: [{ kind: "gene", id: "mtrC", optimised: false }, { kind: "terminator" }],
+      settings: {},
+    });
+    expect(s?.bin).toHaveLength(2);
+    expect(s?.bin[0]).toEqual({ kind: "gene", id: "mtrC", optimised: false });
+  });
+  it("drops junk and duplicates from the bin", () => {
+    const s = parseSave({
+      depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
+      bin: [{ kind: "gene", id: "mtrC" }, { kind: "gene", id: "mtrC" }, "junk", 7,
+            { kind: "gene", id: "notReal" }],
+    });
+    expect(s?.bin).toHaveLength(1);
+  });
+  it("a missing bin is an empty bin, not a crash", () => {
+    const s = parseSave({ depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
+    expect(s?.bin).toEqual([]);
+  });
+});
+
+describe("KEGG modules", () => {
+  it("every module step names a real gene and a real EC-shaped code", () => {
+    for (const m of MODULES) {
+      expect(m.steps.length, m.id).toBeGreaterThan(0);
+      for (const s of m.steps) {
+        expect(bio.GENES[s.gene], `${m.id} -> ${s.gene}`).toBeDefined();
+        expect(s.ec, `${m.id} ${s.gene}`).toMatch(/^[\d-]+\.[\d-]+\.[\d-]+\.[\d-]+$/);
+      }
+    }
+  });
+
+  it("module ids look like KEGG identifiers", () => {
+    for (const m of MODULES) expect(m.id).toMatch(/^M\d{5}$/);
+  });
+
+  it("a chain's products feed the next step's substrate where it should", () => {
+    const denit = MODULES.find((m) => m.id === "M00529")!;
+    for (let i = 1; i < denit.steps.length; i++) {
+      expect(denit.steps[i]!.from).toBe(denit.steps[i - 1]!.to);
+    }
+  });
+
+  it("an empty genome greys out every step", () => {
+    const st = moduleState(MODULES[0]!, new Set());
+    expect(st.steps.every((s) => s === "missing")).toBe(true);
+    expect(st.complete).toBe(false);
+    expect(st.held).toBe(0);
+  });
+
+  it("a partial genome reports exactly which enzymes are missing", () => {
+    const denit = MODULES.find((m) => m.id === "M00529")!;
+    const have = new Set<bio.GeneId>(["narG", "nosZ"]);
+    const st = moduleState(denit, have);
+    expect(st.complete).toBe(false);
+    expect(st.held).toBe(2);
+    expect(missingGenes(denit, have).sort()).toEqual(["nirS", "norB"]);
+  });
+
+  it("a full genome completes the module", () => {
+    const denit = MODULES.find((m) => m.id === "M00529")!;
+    const have = new Set<bio.GeneId>(["narG", "nirS", "norB", "nosZ"]);
+    expect(moduleState(denit, have).complete).toBe(true);
+    expect(missingGenes(denit, have)).toEqual([]);
+  });
+
+  it("stashed genes count toward completeness, like a genome scan", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "sat", optimised: false });
+    expect(p.carried().has("sat")).toBe(true);
+  });
+});
+
+describe("module auto-assembly", () => {
+  const sulfate: bio.GeneId[] = ["sat", "aprA", "dsrA"];
+  const stocked = () => {
+    const p = new Plasmid();
+    for (const g of sulfate) p.stash({ kind: "gene", id: g, optimised: true });
+    return p;
+  };
+
+  it("refuses when an enzyme is missing, and names it", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "dsrA", optimised: true });
+    const r = p.assemble(sulfate);
+    expect(r.ok).toBe(false);
+    if (!r.ok) { expect(r.err).toContain("sat"); expect(r.err).toContain("aprA"); }
+  });
+
+  it("refuses without a spare promoter -- it is not a free win", () => {
+    const p = stocked();
+    while (p.bin.some((x) => x.kind === "promoter")) {
+      p.bin.splice(p.bin.findIndex((x) => x.kind === "promoter"), 1);
+    }
+    const r = p.assemble(sulfate);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.err).toContain("promoter");
+  });
+
+  it("refuses without contiguous room, and says how much it needs", () => {
+    const p = stocked();
+    for (let i = 0; i < SLOTS; i++) {
+      if (p.at(i) === null) p.put(i, { kind: "terminator" });
+    }
+    const r = p.assemble(sulfate);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.err).toContain("contiguous");
+  });
+
+  it("lays the operon out in reaction order and it transcribes", () => {
+    const p = stocked();
+    expect(p.assemble(sulfate).ok).toBe(true);
+    for (const g of sulfate) expect(p.has(g), g).toBe(true);
+    const op = p.operonOf("sat");
+    expect(op).not.toBeNull();
+    // reaction order preserved: sat upstream of aprA upstream of dsrA
+    expect(p.operonOf("sat")!.rank).toBeLessThan(p.operonOf("aprA")!.rank);
+    expect(p.operonOf("aprA")!.rank).toBeLessThan(p.operonOf("dsrA")!.rank);
+    expect(p.expression("dsrA", 7)).toBeGreaterThan(0);
+  });
+
+  it("assembling grants the complex and clears the matching hazard", () => {
+    const p = stocked();
+    p.assemble(sulfate);
+    expect(p.complexes(7).map((c) => c.id)).toContain("sulfidogenesis");
+    expect(p.hazards(7).map((h) => h.id)).not.toContain("sulfite");
+  });
+
+  it("consumes the promoter from the bin rather than conjuring one", () => {
+    const p = stocked();
+    const before = p.bin.filter((x) => x.kind === "promoter").length;
+    p.assemble(sulfate);
+    expect(p.bin.filter((x) => x.kind === "promoter").length).toBe(before - 1);
+  });
+
+  it("re-assembling an already-installed module does not duplicate genes", () => {
+    const p = stocked();
+    p.assemble(sulfate);
+    p.bin.push({ kind: "promoter", strength: "weak" });
+    p.assemble(sulfate);
+    for (const g of sulfate) {
+      const n = p.slots.filter((x) => x?.kind === "gene" && x.id === g).length;
+      expect(n, g).toBe(1);
+    }
   });
 });

@@ -21,7 +21,8 @@
 export type GeneId =
   | "psbA" | "cbbL" | "katG" | "amoA" | "narG" | "nosZ" | "nifH"
   | "soxB" | "sqr"  | "mtrC" | "omcS" | "pufM" | "fmoA" | "csmA"
-  | "aclB" | "dsrA" | "aprA" | "hydA" | "mcrA" | "hdrB" | "ori";
+  | "aclB" | "dsrA" | "aprA" | "hydA" | "mcrA" | "hdrB" | "ori"
+  | "nirS" | "norB" | "sat";
 
 export type Teap = "O2" | "NO3-" | "Mn(IV)" | "Fe(III)" | "S0" | "H2S" | "SO4" | "CO2";
 
@@ -58,6 +59,9 @@ export const GENES: Readonly<Record<GeneId, Gene>> = {
   hydA: { id:"hydA", name:"hydA", kb:1.7, product:"[FeFe] hydrogenase",            tier:7, desc:"Run on hydrogen. Oxygen-labile within minutes.", pathway:"energy" },
   mcrA: { id:"mcrA", name:"mcrA", kb:1.5, product:"methyl-CoM reductase alpha",    tier:8, desc:"Reduce CO2 to methane. The last acceptor.", pathway:"methane" },
   hdrB: { id:"hdrB", name:"hdrB", kb:0.8, product:"heterodisulfide reductase B",   tier:8, desc:"Flavin-based electron bifurcation.", pathway:"methane" },
+  nirS: { id:"nirS", name:"nirS", kb:1.7, product:"cytochrome cd1 nitrite reductase", tier:2, desc:"NO2- to NO. The committed step of denitrification.", pathway:"nitrogen" },
+  norB: { id:"norB", name:"norB", kb:1.4, product:"nitric oxide reductase B",        tier:2, desc:"NO to N2O. Clears a radical that would otherwise kill you.", pathway:"nitrogen" },
+  sat:  { id:"sat",  name:"sat",  kb:1.2, product:"ATP sulfurylase",                 tier:3, desc:"Activates sulfate to APS. Nothing downstream runs without it.", pathway:"sulfur" },
   ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates.", pathway:"core" },
 };
 
@@ -76,7 +80,7 @@ export const MICROBES: readonly Microbe[] = [
   { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" },
   { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" },
   { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["narG"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" },
-  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nosZ"], note:"Facultative denitrifier. Motile, opportunistic." , pigment:"#cfe04a" },
+  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" },
   { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" },
   { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." , pigment:"#e6e6da" },
   { id:"thiobacillus",    name:"Thiobacillus",    depth:3, hp:11, atk:6,  glyph:"T", genes:["sqr","soxB"],  note:"Chemolithoautotroph. Generates sulfuric acid." , pigment:"#d8cfa0" },
@@ -88,7 +92,7 @@ export const MICROBES: readonly Microbe[] = [
   { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA"], note:"Green sulfur. Photosynthesis at near-zero photon flux." , pigment:"#5fd47a" },
   { id:"prosthecochloris",name:"Prosthecochloris",depth:6, hp:22, atk:10, glyph:"P", genes:["csmA","aclB"], note:"Prosthecate green sulfur. Fixes carbon via rTCA." , pigment:"#4fc98e" },
   { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." , pigment:"#a6acb6" },
-  { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA"], note:"Oxidises acetate completely to CO2." , pigment:"#949ba6" },
+  { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA","sat"], note:"Oxidises acetate completely to CO2." , pigment:"#949ba6" },
   { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB"], note:"The most metabolically flexible methanogen known." , pigment:"#dcc179" },
   { id:"methanobacterium",name:"Methanobacterium",depth:8, hp:32, atk:13, glyph:"m", genes:["mcrA"],        note:"Hydrogenotrophic. CO2 + H2. The last respiration." , pigment:"#cdba8b" },
 ];
@@ -134,3 +138,115 @@ export function energyYield(depth: number): number {
   const lo = -240, hi = 820;
   return Math.max((stratum(depth).e0 - lo) / (hi - lo), 0.04);
 }
+
+
+// ---------------------------------------------------------------- complexes
+//
+// An operon is more than the sum of its genes. A pathway only works when every
+// step is present, and a half-built pathway is worse than none at all because
+// the intermediate accumulates. Both of those are real, and both are here.
+//
+// A complex requires its genes in ONE operon AND all of them expressing at the
+// current depth, so a kit assembled for the sulfidic zone does nothing at the
+// surface.
+
+export type ComplexEffect =
+  | { kind: "power"; mult: number }      // multiplies plasmid output
+  | { kind: "regen"; hp: number }        // hp recovered per action
+  | { kind: "reach"; tiles: number }     // attack range in tiles
+  | { kind: "armour"; frac: number }     // incoming damage reduction
+  | { kind: "aura"; dmg: number };       // damage to adjacent microbes per action
+
+export interface Complex {
+  readonly id: string;
+  readonly name: string;
+  readonly genes: readonly GeneId[];
+  readonly effect: ComplexEffect;
+  readonly note: string;
+}
+
+export const COMPLEXES: readonly Complex[] = [
+  {
+    id: "denitrification", name: "Complete denitrification",
+    genes: ["narG", "nosZ"],
+    effect: { kind: "power", mult: 1.35 },
+    note: "NO3- reduced all the way to N2. Nothing accumulates, so the whole chain runs.",
+  },
+  {
+    id: "autotrophy", name: "Oxygenic autotrophy",
+    genes: ["psbA", "cbbL"],
+    effect: { kind: "regen", hp: 1 },
+    note: "Light plus RuBisCO is a closed loop: you fix your own carbon and repair.",
+  },
+  {
+    id: "eet", name: "Extracellular electron transfer",
+    genes: ["mtrC", "omcS"],
+    effect: { kind: "reach", tiles: 2 },
+    note: "MtrC dumps electrons by contact; OmcS nanowires carry them further. Strike at range.",
+  },
+  {
+    id: "sulfidogenesis", name: "Dissimilatory sulfate reduction",
+    genes: ["dsrA", "aprA"],
+    effect: { kind: "aura", dmg: 2 },
+    note: "Sulfate to sulfide. The H2S you exhale is toxic to everything adjacent.",
+  },
+  {
+    id: "chlorosome", name: "Chlorosome antenna",
+    genes: ["fmoA", "csmA"],
+    effect: { kind: "power", mult: 1.5 },
+    note: "FMO funnels excitons from a vast chlorosome. Photosynthesis at near-zero photon flux.",
+  },
+  {
+    id: "methanogenesis", name: "Hydrogenotrophic methanogenesis",
+    genes: ["mcrA", "hdrB"],
+    effect: { kind: "power", mult: 1.6 },
+    note: "Flavin-based electron bifurcation makes the last acceptor worth respiring.",
+  },
+  {
+    id: "diazotrophy", name: "Nitrogenase with H2 recycling",
+    genes: ["nifH", "hydA"],
+    effect: { kind: "power", mult: 1.4 },
+    note: "Nitrogenase obligately evolves H2; an uptake hydrogenase recovers it instead of venting.",
+  },
+  {
+    id: "oxidative", name: "Oxidative and sulfide tolerance",
+    genes: ["katG", "sqr"],
+    effect: { kind: "armour", frac: 0.35 },
+    note: "Catalase clears peroxide, SQR routes sulfide into the quinone pool. Both fronts covered.",
+  },
+  {
+    id: "rtca", name: "Reverse TCA carbon fixation",
+    genes: ["aclB", "pufM"],
+    effect: { kind: "regen", hp: 1 },
+    note: "Anoxygenic light plus rTCA. Cheaper per carbon than Calvin, and it runs without oxygen.",
+  },
+];
+
+// A pathway missing its final step accumulates the intermediate. This is the
+// classic case: nitrate reductase without N2O reductase leaves nitrous oxide.
+export interface Hazard {
+  readonly id: string;
+  readonly name: string;
+  readonly present: GeneId;
+  readonly missing: GeneId;
+  readonly dmg: number;
+  readonly note: string;
+}
+
+export const HAZARDS: readonly Hazard[] = [
+  {
+    id: "n2o", name: "N2O accumulation",
+    present: "narG", missing: "nosZ", dmg: 1,
+    note: "Nitrate reduced to nitrous oxide with no N2O reductase to finish the job. It builds up.",
+  },
+  {
+    id: "sulfite", name: "Sulfite accumulation",
+    present: "aprA", missing: "dsrA", dmg: 1,
+    note: "APS reductase makes sulfite faster than anything here consumes it. Sulfite is cytotoxic.",
+  },
+  {
+    id: "peroxide", name: "Photo-oxidative damage",
+    present: "psbA", missing: "katG", dmg: 1,
+    note: "Photosystem II leaks reactive oxygen. Without catalase, you are the substrate.",
+  },
+];

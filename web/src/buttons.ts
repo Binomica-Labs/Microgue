@@ -15,6 +15,7 @@ export function makeButtons(): Button[] {
     ({ id, glyph, hint, x: 0, y: 0, w: 0, h: 0, enabled: true, active: false });
   return [
     b("plasmid", "\u25CE", "plasmid"),
+    b("map", "\u229E", "pathway map"),
     b("down", "\u25BC", "descend"),
     b("up", "\u25B2", "ascend"),
     b("zoomIn", "+", "zoom in"),

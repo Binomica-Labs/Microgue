@@ -4,9 +4,11 @@
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { Plasmid } from "./plasmid.js";
-import { drawRing, describe as describeSlot, slotAt, type RingGeom } from "./plasmid_ui.js";
+import { binAt, drawBin, drawRing, describe as describeSlot, slotAt,
+         type BinGeom, type RingGeom } from "./plasmid_ui.js";
 import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
 import { classifyDown, classifyKey, type Gesture } from "./gesture.js";
+import { drawMap, layoutMap, rowAt, type MapGeom, type MapRow } from "./kegg_ui.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
@@ -40,9 +42,16 @@ class Game {
   gestureBtn: Button | null = null;
   closeBox = { x: 0, y: 0, w: 0, h: 0 };
   dragFrom: number | null = null;
+  dragBin: number | null = null;
+  bin: BinGeom = { x: 0, y: 0, cell: 0, gap: 0, cols: 6 };
+  showMap = false;
+  map: MapGeom = { x: 0, y: 0, w: 0, rowH: 0, scroll: 0 };
+  mapRows: MapRow[] = [];
+  mapContentH = 0;
   dragXY: { x: number; y: number } | null = null;
   selected: number | null = null;
   spinFrom: number | null = null;
+  spinStart: number | null = null;
   barH = 0;
   logH = 0;
   settings: Settings = DEFAULT_SETTINGS;
@@ -97,6 +106,32 @@ class Game {
   // ------------------------------------------------------------- combat
   atk(): number { return 3 + this.genome.power(this.dungeon.depth) * 0.9; }
 
+  /** Per-action upkeep: toxic intermediates bite, complexes repair, and a
+   *  sulfide aura burns anything adjacent. */
+  private upkeep(): void {
+    const d = this.dungeon.depth;
+    const tox = this.genome.toxicity(d);
+    if (tox > 0) {
+      this.player.hp = Math.max(this.player.hp - tox, 0);
+      const h = this.genome.hazards(d)[0];
+      if (h && Math.random() < 0.2) this.note(`${h.name} — ${tox} damage.`);
+    }
+    const regen = this.genome.regen(d);
+    if (regen > 0 && this.player.hp < this.player.maxhp) {
+      this.player.hp = Math.min(this.player.hp + regen, this.player.maxhp);
+    }
+    const aura = this.genome.aura(d);
+    if (aura > 0) {
+      for (const m of this.level.mobs) {
+        if (!m.alive) continue;
+        if (Math.abs(m.x - this.player.x) <= 1 && Math.abs(m.y - this.player.y) <= 1) {
+          m.hp = Math.max(m.hp - aura, 0);
+          if (m.hp <= 0) { m.alive = false; this.note(`${m.name} dissolved by H2S.`); }
+        }
+      }
+    }
+  }
+
   attack(m: Mob): void {
     m.hp = Math.max(m.hp - Math.max(Math.round(this.atk()), 1), 0);
     if (m.hp <= 0) {
@@ -107,12 +142,13 @@ class Game {
       else {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         if (pick === undefined) return;
-        const r = this.genome.add({ kind: "gene", id: pick, optimised: false });
-        this.note(r.ok ? `HGT: acquired ${bio.GENES[pick].name} from ${m.name}.`
+        const r = this.genome.stash({ kind: "gene", id: pick, optimised: false });
+        this.note(r.ok ? `HGT: ${bio.GENES[pick].name} from ${m.name} \u2192 parts bin.`
                        : `${bio.GENES[pick].name} — ${r.err}`);
       }
     } else {
-      this.player.hp = Math.max(this.player.hp - Math.round(m.atk * 0.5), 0);
+      const inc = Math.round(m.atk * 0.5 * this.genome.armour(this.dungeon.depth));
+      this.player.hp = Math.max(this.player.hp - inc, 0);
       this.note(`${m.name}: ${Math.max(m.hp, 0)} hp left.`);
     }
     this.mobTurn();
@@ -120,12 +156,15 @@ class Game {
   }
 
   mobTurn(): void {
+    this.upkeep();
     for (const m of this.level.mobs) {
       if (!m.alive) continue;
       const dx = this.player.x - m.x, dy = this.player.y - m.y;
       if (dx * dx + dy * dy > 64) continue;
       if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
-        this.player.hp = Math.max(this.player.hp - Math.max(Math.round(m.atk * 0.35), 1), 0);
+        const inc = Math.max(
+          Math.round(m.atk * 0.35 * this.genome.armour(this.dungeon.depth)), 1);
+        this.player.hp = Math.max(this.player.hp - inc, 0);
         continue;
       }
       const sx = Math.sign(dx), sy = Math.sign(dy);
@@ -167,7 +206,10 @@ class Game {
   tap(tx: number, ty: number): void {
     if (tx === this.player.x && ty === this.player.y) { if (this.stairs()) return; }
     const m = this.dungeon.mobAt(tx, ty);
-    if (m !== undefined && Math.abs(tx - this.player.x) <= 1 && Math.abs(ty - this.player.y) <= 1) {
+    // Extracellular electron transfer lets you strike along a nanowire.
+    const reach = this.genome.reach(this.dungeon.depth);
+    if (m !== undefined && Math.abs(tx - this.player.x) <= reach
+                        && Math.abs(ty - this.player.y) <= reach) {
       this.attack(m); return;
     }
     this.cursor = { x: tx, y: ty };
@@ -264,6 +306,7 @@ class Game {
       py: this.player.y,
       hp: this.player.hp,
       ring: this.genome.slots.map((p) => (p === null ? null : { ...p })),
+      bin: this.genome.bin.map((p) => ({ ...p })),
       settings: this.settings,
     });
   }
@@ -275,6 +318,8 @@ class Game {
     this.dungeon.depth = s.depth;
     this.genome = new Plasmid();
     s.ring.forEach((p, i) => { this.genome.put(i, p); });
+    this.genome.bin.length = 0;
+    for (const p of s.bin) this.genome.bin.push({ ...p });
     this.settings = s.settings;
     this.enter(this.dungeon.current(), { x: s.px, y: s.py });
     this.player.hp = s.hp;
@@ -495,7 +540,9 @@ class Game {
 
     this.drawHud(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
-    if (this.showPlasmid) {
+    if (this.showMap) {
+      this.drawMapScreen(W, H);
+    } else if (this.showPlasmid) {
       this.drawPlasmid(W, H);
     } else {
       layoutButtons(this.buttons, W, H, this.insets(), u, this.barH + this.logH);
@@ -606,7 +653,7 @@ class Game {
     ctx.fillStyle = "rgba(0,0,0,0.93)";
     ctx.fillRect(0, 0, W, H);
 
-    const avail = Math.min(W - ins.left - ins.right, H * 0.58);
+    const avail = Math.min(W - ins.left - ins.right, H * 0.46);
     this.ring = {
       cx: W / 2,
       cy: ins.top + avail * 0.55 + 20 * u,
@@ -634,20 +681,50 @@ class Game {
     ctx.fillText(`power ${this.genome.power(this.dungeon.depth).toFixed(1)}`,
                  this.ring.cx, this.ring.cy + 26 * u);
 
+    // Parts bin: everything you hold but have not installed.
+    const cell = Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
+    const gap = 8 * u;
+    this.bin = {
+      x: ins.left + gap, y: this.ring.cy + this.ring.rOuter + 16 * u,
+      cell, gap, cols: 6,
+    };
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(`PARTS BIN  ${this.genome.bin.length}/12`, this.bin.x, this.bin.y - 6 * u);
+    drawBin(ctx, this.bin, this.genome.bin, u, this.dragBin);
+    const binRows = Math.floor(this.genome.bin.length / 6) + 1;
+
+    // Active complexes and hazards, which is the payoff for arranging well.
+    let cy = this.bin.y + binRows * (cell + gap) + 14 * u;
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    for (const c of this.genome.complexes(this.dungeon.depth)) {
+      ctx.fillStyle = "#7fe0a4";
+      ctx.fillText(`\u2713 ${c.name}`, this.bin.x, cy);
+      cy += 15 * u;
+    }
+    for (const h of this.genome.hazards(this.dungeon.depth)) {
+      ctx.fillStyle = "#ff9a5a";
+      ctx.fillText(`\u26A0 ${h.name}  -${h.dmg}/turn`, this.bin.x, cy);
+      cy += 15 * u;
+    }
+
     // Detail panel for the tapped slot.
-    const py = this.ring.cy + this.ring.rOuter + 26 * u;
+    const py = cy + 8 * u;
     const lines = this.selected === null
-      ? ["tap a slot to inspect it",
+      ? ["drag a part from the bin onto a slot to install it",
+         "drag a slot back onto the bin to remove it",
          "drag a part between slots to rearrange — a gene transcribes only if",
          "it sits downstream of a promoter with no gap or terminator between",
          "drag outside the ring to spin it"]
       : describeSlot(this.genome, this.selected, this.dungeon.depth);
     ctx.textAlign = "left";
-    ctx.font = `${12 * u}px ui-monospace,monospace`;
+    ctx.font = `${11.5 * u}px ui-monospace,monospace`;
     lines.forEach((line, i) => {
       ctx.fillStyle = i === 0 ? "#ffffff" : "#9fb8a8";
       for (const w of this.wrap(line, W - (ins.left + ins.right + 32 * u))) {
-        ctx.fillText(w, ins.left + 16 * u, py + i * 20 * u);
+        ctx.fillText(w, ins.left + gap, py + i * 17 * u);
       }
     });
 
@@ -675,6 +752,25 @@ class Game {
   }
 
   pointerDown(x: number, y: number): void {
+    if (this.showMap) {
+      if (this.inClose(x, y)) { this.gesture = "dismiss"; return; }
+      this.gesture = "spin";                 // reused as "scroll" here
+      this.spinFrom = y;
+      this.spinStart = y;
+      return;
+    }
+    // Bin cells are checked first: they sit outside the ring, which would
+    // otherwise classify as a spin.
+    if (this.showPlasmid) {
+      const b = binAt(this.bin, this.genome.bin.length, x, y);
+      if (b !== null) {
+        this.gesture = "slot";
+        this.dragBin = b;
+        this.dragXY = { x, y };
+        this.selected = null;
+        return;
+      }
+    }
     const slot = this.showPlasmid ? slotAt(this.ring, x, y) : null;
     const btn = this.showPlasmid ? null : buttonAt(this.buttons, x, y);
     this.gesture = classifyDown({
@@ -710,12 +806,18 @@ class Game {
   }
 
   pointerMove(x: number, y: number): void {
-    if (this.gesture === "slot" && this.dragFrom !== null) {
+    if (this.gesture === "slot" && (this.dragFrom !== null || this.dragBin !== null)) {
       this.dragXY = { x, y };
     } else if (this.gesture === "spin" && this.spinFrom !== null) {
-      const a = Math.atan2(y - this.ring.cy, x - this.ring.cx);
-      this.ring.rot += a - this.spinFrom;
-      this.spinFrom = a;
+      if (this.showMap) {
+        const maxScroll = Math.max(this.mapContentH - this.map.rowH * 3, 0);
+        this.map.scroll = Math.min(Math.max(this.map.scroll - (y - this.spinFrom), 0), maxScroll);
+        this.spinFrom = y;
+      } else {
+        const a = Math.atan2(y - this.ring.cy, x - this.ring.cx);
+        this.ring.rot += a - this.spinFrom;
+        this.spinFrom = a;
+      }
     }
   }
 
@@ -727,26 +829,99 @@ class Game {
         break;
       }
       case "slot": {
-        if (this.dragFrom !== null) {
-          const i = slotAt(this.ring, x, y);
-          if (i !== null && i !== this.dragFrom) {
-            this.genome.swap(this.dragFrom, i);
-            this.selected = i;
+        const target = slotAt(this.ring, x, y);
+        if (this.dragBin !== null) {
+          if (target !== null) {                       // bin -> ring
+            const r = this.genome.install(this.dragBin, target);
+            if (r.ok) { this.selected = target; this.save(); } else this.note(r.err);
+          }
+        } else if (this.dragFrom !== null) {
+          if (binAt(this.bin, this.genome.bin.length + 1, x, y) !== null) {
+            const r = this.genome.uninstall(this.dragFrom);   // ring -> bin
+            if (r.ok) { this.selected = null; this.save(); } else this.note(r.err);
+          } else if (target !== null && target !== this.dragFrom) {
+            this.genome.swap(this.dragFrom, target);
+            this.selected = target;
             this.save();
           }
         }
         break;
       }
       case "dismiss":
-        if (this.inClose(x, y)) this.openPlasmid(false);
+        if (this.inClose(x, y)) {
+          if (this.showMap) this.showMap = false;
+          else this.openPlasmid(false);
+        }
         break;
-      case "none": case "spin": case "world": break;
+      case "spin":
+        // A tap on a complete module builds it, but only if the drag was
+        // short enough to be a tap rather than a scroll.
+        if (this.showMap && this.spinStart !== null && Math.abs(y - this.spinStart) < 8) {
+          const row = rowAt(this.mapRows, y);
+          if (row?.canAssemble) {
+            const r = this.genome.assemble(row.state.module.steps.map((s) => s.gene));
+            this.note(r.ok
+              ? `Assembled ${row.state.module.id} ${row.state.module.name}.`
+              : `${row.state.module.id}: ${r.err}`);
+            if (r.ok) { this.showMap = false; this.save(); }
+          }
+        }
+        break;
+      case "none": case "world": break;
     }
     this.gesture = "none";
     this.gestureBtn = null;
     this.dragFrom = null;
+    this.dragBin = null;
     this.dragXY = null;
     this.spinFrom = null;
+    this.spinStart = null;
+  }
+
+  drawMapScreen(W: number, H: number): void {
+    const { ctx } = this;
+    const ins = this.insets();
+    const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
+    ctx.fillStyle = "rgba(0,0,0,0.94)";
+    ctx.fillRect(0, 0, W, H);
+
+    const headerH = ins.top + 44 * u;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${14 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText("PATHWAY MODULES", ins.left + 14 * u, ins.top + 26 * u);
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.fillText("greyed enzymes are ones you do not carry",
+                 ins.left + 14 * u, ins.top + 40 * u);
+
+    this.map = {
+      x: ins.left + 14 * u,
+      y: headerH + 10 * u,
+      w: W - ins.left - ins.right - 28 * u,
+      rowH: 62 * u,
+      scroll: this.map.scroll,
+    };
+    const laid = layoutMap(this.map, this.genome);
+    this.mapRows = laid.rows;
+    this.mapContentH = laid.contentH;
+    drawMap(ctx, this.map, this.mapRows, u, headerH, H - ins.bottom - 40 * u);
+
+    const cs = Math.max(46 * u, 44);
+    this.closeBox = { x: W - ins.right - cs - 12 * u, y: ins.top + 8 * u, w: cs, h: cs };
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = Math.max(1.5 * u, 1.5);
+    ctx.beginPath();
+    ctx.roundRect(this.closeBox.x, this.closeBox.y, cs, cs, cs * 0.28);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${cs * 0.42}px ui-monospace,monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("\u2715", this.closeBox.x + cs / 2, this.closeBox.y + cs / 2);
   }
 
   /** Single entry point, so nothing can open the screen without also parking
@@ -765,7 +940,11 @@ class Game {
 
   press(id: string): void {
     switch (id) {
-      case "plasmid": this.openPlasmid(!this.showPlasmid); break;
+      case "plasmid": this.openPlasmid(!this.showPlasmid); this.showMap = false; break;
+      case "map":
+        this.showMap = !this.showMap;
+        if (this.showMap) this.openPlasmid(false);
+        break;
       case "down": this.descend(); break;
       case "up": this.ascend(); break;
       case "zoomIn": this.zoom = Math.min(this.zoom * 1.25, 8); break;

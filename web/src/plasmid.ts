@@ -13,7 +13,8 @@
 // Everything else -- substrate gating, oxygen lability, codon optimisation --
 // carries over from the previous flat model.
 
-import { GENES, energyYield, stratum, type GeneId, type Teap } from "./biology.js";
+import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
+         type Complex, type GeneId, type Hazard, type Teap } from "./biology.js";
 
 export const SLOTS = 16;
 
@@ -53,10 +54,63 @@ export type Result = { ok: true } | { ok: false; err: string };
 export class Plasmid {
   readonly slots: (Part | null)[] = Array<Part | null>(SLOTS).fill(null);
 
+  /** Parts you hold but have not installed. Loot lands here, so acquiring a
+   *  gene and deciding where it goes are separate acts. */
+  readonly bin: Part[] = [];
+
   constructor() {
-    // You start replicable and minimally transcribing.
+    // You start replicable and minimally transcribing, with spare regulatory
+    // parts to build a second transcript once you have something to put in it.
     this.slots[0] = { kind: "promoter", strength: "medium" };
     this.slots[1] = { kind: "gene", id: "ori", optimised: false };
+    this.bin.push(
+      { kind: "promoter", strength: "weak" },
+      { kind: "promoter", strength: "medium" },
+      { kind: "terminator" },
+      { kind: "terminator" },
+    );
+  }
+
+  /** Put a part in the bin rather than on the ring. */
+  stash(part: Part): Result {
+    if (part.kind === "gene" && (this.has(part.id) || this.inBin(part.id))) {
+      return { ok: false, err: `${GENES[part.id].name} already carried` };
+    }
+    if (this.bin.length >= 12) return { ok: false, err: "parts bin is full" };
+    this.bin.push(part);
+    return { ok: true };
+  }
+
+  inBin(id: GeneId): boolean {
+    return this.bin.some((p) => p.kind === "gene" && p.id === id);
+  }
+
+  /** Bin -> ring. Whatever was in the slot goes back to the bin, so a swap
+   *  never destroys a part. */
+  install(binIndex: number, slot: number): Result {
+    const part = this.bin[binIndex];
+    if (!part) return { ok: false, err: "no such part" };
+    const displaced = this.at(slot);
+    if (displaced?.kind === "gene" && displaced.id === "ori") {
+      return { ok: false, err: "cannot displace the origin" };
+    }
+    this.bin.splice(binIndex, 1);
+    this.put(slot, part);
+    if (displaced) this.bin.push(displaced);
+    return { ok: true };
+  }
+
+  /** Ring -> bin. */
+  uninstall(slot: number): Result {
+    const part = this.at(slot);
+    if (!part) return { ok: false, err: "empty slot" };
+    if (part.kind === "gene" && part.id === "ori") {
+      return { ok: false, err: "cannot excise the origin" };
+    }
+    if (this.bin.length >= 12) return { ok: false, err: "parts bin is full" };
+    this.put(slot, null);
+    this.bin.push(part);
+    return { ok: true };
   }
 
   private norm(i: number): number { return ((i % SLOTS) + SLOTS) % SLOTS; }
@@ -200,12 +254,135 @@ export class Plasmid {
     return { ok: true };
   }
 
+  /** Every gene you carry, installed or stashed -- KEGG completeness is scored
+   *  against the genome, not against what happens to be transcribing. */
+  carried(): Set<GeneId> {
+    const out = new Set<GeneId>();
+    for (const p of this.slots) if (p?.kind === "gene") out.add(p.id);
+    for (const p of this.bin) if (p.kind === "gene") out.add(p.id);
+    return out;
+  }
+
+  /** Lay a module out as one operon: promoter, genes in reaction order, then a
+   *  terminator if one is spare.
+   *
+   *  Deliberately NOT a free win. It needs a promoter from the bin and a run of
+   *  contiguous free slots, and it fails with a reason rather than shuffling
+   *  the ring for you. The arrangement puzzle -- promoter strength, polarity
+   *  order, what you displace -- stays yours; this only saves the dragging. */
+  assemble(genes: readonly GeneId[]): Result {
+    const missing = genes.filter((g) => !this.has(g) && !this.inBin(g));
+    if (missing.length > 0) {
+      return { ok: false, err: `missing ${missing.map((g) => GENES[g].name).join(", ")}` };
+    }
+
+    const pi = this.bin.findIndex((p) => p.kind === "promoter");
+    if (pi < 0) return { ok: false, err: "no spare promoter in the bin" };
+
+    // A run long enough for promoter + genes, ignoring slots those genes
+    // already occupy since they are about to move.
+    const movable = new Set<number>();
+    this.slots.forEach((p, i) => {
+      if (p?.kind === "gene" && genes.includes(p.id)) movable.add(i);
+    });
+    const usable = (i: number): boolean =>
+      this.slots[this.norm(i)] === null || movable.has(this.norm(i));
+
+    const need = genes.length + 1;
+    let start = -1;
+    for (let i = 0; i < SLOTS; i++) {
+      let ok = true;
+      for (let k = 0; k < need; k++) if (!usable(i + k)) { ok = false; break; }
+      if (ok) { start = i; break; }
+    }
+    if (start < 0) {
+      return { ok: false, err: `needs ${need} contiguous free slots` };
+    }
+
+    // Pull the genes off the ring, then lay everything down in order.
+    const parts: Part[] = [];
+    for (const g of genes) {
+      const at = this.slots.findIndex((p) => p?.kind === "gene" && p.id === g);
+      if (at >= 0) {
+        const p = this.slots[at];
+        if (p) parts.push(p);
+        this.slots[at] = null;
+      } else {
+        const bi = this.bin.findIndex((p) => p.kind === "gene" && p.id === g);
+        const p = this.bin[bi];
+        if (p) { parts.push(p); this.bin.splice(bi, 1); }
+      }
+    }
+    const promoter = this.bin[pi];
+    if (!promoter) return { ok: false, err: "no spare promoter in the bin" };
+    this.bin.splice(pi, 1);
+
+    this.put(start, promoter);
+    parts.forEach((p, k) => { this.put(start + 1 + k, p); });
+
+    // Cap it if a terminator is spare and the next slot is free.
+    const tail = this.norm(start + need);
+    const ti = this.bin.findIndex((p) => p.kind === "terminator");
+    if (ti >= 0 && this.slots[tail] === null) {
+      const t = this.bin[ti];
+      if (t) { this.bin.splice(ti, 1); this.put(tail, t); }
+    }
+    return { ok: true };
+  }
+
+  /** Complexes active right now: every gene in one operon and all expressing
+   *  at this depth. A kit built for the sulfidic zone is inert at the surface. */
+  complexes(depth: number): Complex[] {
+    const ops = this.operons();
+    return COMPLEXES.filter((c) =>
+      ops.some((op) => c.genes.every((g) =>
+        op.genes.some((x) => x.id === g) && this.expression(g, depth) > 0)));
+  }
+
+  /** Half-built pathways. The intermediate accumulates and it is cytotoxic. */
+  hazards(depth: number): Hazard[] {
+    return HAZARDS.filter((h) =>
+      this.expression(h.present, depth) > 0 && this.expression(h.missing, depth) <= 0);
+  }
+
+  /** Damage taken per action from accumulated intermediates. */
+  toxicity(depth: number): number {
+    return this.hazards(depth).reduce((a, h) => a + h.dmg, 0);
+  }
+
+  /** Incoming damage multiplier after any armour complex. */
+  armour(depth: number): number {
+    let frac = 0;
+    for (const c of this.complexes(depth)) {
+      if (c.effect.kind === "armour") frac = Math.max(frac, c.effect.frac);
+    }
+    return 1 - frac;
+  }
+
+  regen(depth: number): number {
+    return this.complexes(depth)
+      .reduce((a, c) => a + (c.effect.kind === "regen" ? c.effect.hp : 0), 0);
+  }
+
+  reach(depth: number): number {
+    return this.complexes(depth)
+      .reduce((a, c) => Math.max(a, c.effect.kind === "reach" ? c.effect.tiles : 1), 1);
+  }
+
+  aura(depth: number): number {
+    return this.complexes(depth)
+      .reduce((a, c) => a + (c.effect.kind === "aura" ? c.effect.dmg : 0), 0);
+  }
+
   /** Total output, which is what combat scales from. */
   power(depth: number): number {
     let a = 0;
     for (const p of this.slots) {
       if (p?.kind !== "gene") continue;
       a += this.expression(p.id, depth) * GENES[p.id].tier;
+    }
+    for (const c of this.complexes(depth)) {
+      if (c.effect.kind === "power") a *= c.effect.mult;
     }
     return a;
   }

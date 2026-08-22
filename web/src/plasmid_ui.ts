@@ -46,6 +46,57 @@ function partColour(p: Part): string {
   return "#8a8f96";
 }
 
+export interface BinGeom {
+  x: number; y: number; cell: number; gap: number; cols: number;
+}
+
+/** Screen point -> bin index, or null. */
+export function binAt(g: BinGeom, n: number, x: number, y: number): number | null {
+  for (let i = 0; i < n; i++) {
+    const c = i % g.cols, r = Math.floor(i / g.cols);
+    const bx = g.x + c * (g.cell + g.gap);
+    const by = g.y + r * (g.cell + g.gap);
+    if (x >= bx && x <= bx + g.cell && y >= by && y <= by + g.cell) return i;
+  }
+  return null;
+}
+
+export function binCell(g: BinGeom, i: number): { x: number; y: number } {
+  const c = i % g.cols, r = Math.floor(i / g.cols);
+  return { x: g.x + c * (g.cell + g.gap), y: g.y + r * (g.cell + g.gap) };
+}
+
+export function drawBin(
+  ctx: CanvasRenderingContext2D, g: BinGeom, parts: readonly Part[],
+  u: number, dragging: number | null,
+): void {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (!p) continue;
+    const c = binCell(g, i);
+    const held = dragging === i;
+    ctx.globalAlpha = held ? 0.25 : 1;
+    ctx.fillStyle = partColour(p);
+    ctx.beginPath();
+    ctx.roundRect(c.x, c.y, g.cell, g.cell, g.cell * 0.22);
+    ctx.fill();
+    ctx.fillStyle = "#141414";
+    ctx.font = `${Math.max(g.cell * 0.26, 8)}px ui-monospace,monospace`;
+    ctx.fillText(partLabel(p), c.x + g.cell / 2, c.y + g.cell / 2);
+    ctx.globalAlpha = 1;
+  }
+  // Empty outline for the next slot, so the bin reads as a container.
+  const c = binCell(g, parts.length);
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(c.x, c.y, g.cell, g.cell, g.cell * 0.22);
+  ctx.stroke();
+  void u;
+}
+
 export interface DrawOpts {
   readonly depth: number;
   readonly dragFrom: number | null;
@@ -141,11 +192,18 @@ export function describe(p: Plasmid, i: number, depth: number): string[] {
   if (!ctx) return [`${g.name} — ${g.product}`, "NOT TRANSCRIBED: no promoter upstream"];
   const sameCount = ctx.operon.genes.filter(
     (x) => x.id !== part.id && GENES[x.id].pathway === g.pathway).length;
-  return [
+  const lines = [
     `${g.name} — ${g.product}`,
     e > 0
       ? `${(e * 100) | 0}% · position ${ctx.rank + 1} · ${sameCount} ${g.pathway} neighbour${sameCount === 1 ? "" : "s"}`
       : `transcribed, but no substrate at this depth`,
     g.desc,
   ];
+  for (const c of p.complexes(depth)) {
+    if (c.genes.includes(part.id)) lines.push(`\u2713 ${c.name}: ${c.note}`);
+  }
+  for (const h of p.hazards(depth)) {
+    if (h.present === part.id) lines.push(`\u26A0 ${h.name}: ${h.note}`);
+  }
+  return lines;
 }
