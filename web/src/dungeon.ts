@@ -9,7 +9,7 @@ import { makeRng, type Rng } from "./rng.js";
 export interface Mob {
   id: string; name: string; glyph: string;
   x: number; y: number; hp: number; maxhp: number; atk: number;
-  genes: readonly GeneId[]; note: string; alive: boolean;
+  genes: readonly GeneId[]; note: string; pigment: string; alive: boolean;
 }
 
 export interface Level {
@@ -58,7 +58,7 @@ export class Dungeon {
       lvl.mobs.push({
         id: p.id, name: p.name, glyph: p.glyph, x, y,
         hp: p.hp, maxhp: p.hp, atk: p.atk, genes: p.genes, note: p.note,
-        alive: true,
+        pigment: p.pigment, alive: true,
       });
     }
   }

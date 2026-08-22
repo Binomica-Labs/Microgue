@@ -1,0 +1,233 @@
+// Shape painter + offscreen sprite cache. Sprites are rasterised once per
+// (organism, size, palette) and blitted thereafter, so per-frame cost is a
+// drawImage rather than dozens of path operations.
+
+import { MORPHOLOGY, type Role, type Shape } from "./shapes.js";
+import type { Stratum } from "./biology.js";
+
+export interface Palette { body: string; dark: string; accent: string; hi: string; }
+
+/** Shift a hex colour toward black or white by `t`. */
+function mix(hex: string, target: number, t: number): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+    .map((c) => Math.round(c + (target - c) * t));
+  return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Built from the organism's own pigment. Deriving it from the stratum made
+ *  every mob the same colour as the wall it was standing on. */
+export function paletteForPigment(pigment: string): Palette {
+  return {
+    body: pigment,
+    dark: mix(pigment, 0, 0.72),
+    accent: mix(pigment, 255, 0.45),
+    hi: mix(pigment, 255, 0.78),
+  };
+}
+
+export function paletteFor(s: Stratum): Palette {
+  return { body: s.wall, dark: s.floor, accent: s.accent, hi: "#fff6d0" };
+}
+
+const PLAYER_PALETTE: Palette =
+  { body: "#ffffff", dark: "#1d2b33", accent: "#cfe8f5", hi: "#6fe6ff" };
+
+function colour(role: Role, p: Palette): string {
+  switch (role) {
+    case "body": return p.body;
+    case "dark": return p.dark;
+    case "accent": return p.accent;
+    case "hi": return p.hi;
+    case "thread": return p.accent;
+  }
+}
+
+export function paintShapes(
+  ctx: CanvasRenderingContext2D,
+  shapes: readonly Shape[],
+  ox: number, oy: number, size: number, p: Palette,
+): void {
+  for (const s of shapes) {
+    ctx.fillStyle = colour(s.role, p);
+    ctx.strokeStyle = ctx.fillStyle;
+    if (s.k === "ellipse") {
+      ctx.beginPath();
+      ctx.ellipse(ox + s.cx * size, oy + s.cy * size,
+                  s.rx * size, s.ry * size, s.rot ?? 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (s.k === "poly") {
+      ctx.beginPath();
+      s.pts.forEach(([x, y], i) => {
+        if (i === 0) ctx.moveTo(ox + x * size, oy + y * size);
+        else ctx.lineTo(ox + x * size, oy + y * size);
+      });
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.lineWidth = Math.max(s.w * size, 1);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      s.pts.forEach(([x, y], i) => {
+        if (i === 0) ctx.moveTo(ox + x * size, oy + y * size);
+        else ctx.lineTo(ox + x * size, oy + y * size);
+      });
+      ctx.stroke();
+    }
+  }
+}
+
+const cache = new Map<string, HTMLCanvasElement>();
+
+/** Rasterised sprite, cached. Supersampled 2x then drawn down for clean edges. */
+export function sprite(id: string, size: number, p: Palette): HTMLCanvasElement | null {
+  const shapes = MORPHOLOGY[id];
+  if (!shapes) return null;
+  const px = Math.max(Math.round(size), 4);
+  const key = `${id}:${px}:${p.body}${p.dark}${p.accent}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const c = document.createElement("canvas");
+  const ss = 2;
+  c.width = px * ss;
+  c.height = px * ss;
+  const cx = c.getContext("2d");
+  if (!cx) return null;
+
+  // Soft halo. Without separation a pale organism on a pale wall -- or a
+  // purple one in the purple sulfur band -- disappears. A hard disc read as a
+  // sticker, so this fades out instead.
+  const r = px * ss * 0.5;
+  const g = cx.createRadialGradient(r, r, r * 0.34, r, r, r);
+  g.addColorStop(0, "rgba(0,0,0,0.55)");
+  g.addColorStop(0.72, "rgba(0,0,0,0.34)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, px * ss, px * ss);
+
+  paintShapes(cx, shapes, 0, 0, px * ss, p);
+
+  const out = document.createElement("canvas");
+  out.width = px;
+  out.height = px;
+  const ox = out.getContext("2d");
+  if (!ox) return null;
+  ox.imageSmoothingEnabled = true;
+  ox.drawImage(c, 0, 0, px, px);
+
+  if (cache.size > 120) cache.clear();
+  cache.set(key, out);
+  return out;
+}
+
+export function playerSprite(size: number): HTMLCanvasElement | null {
+  return sprite("player", size, PLAYER_PALETTE);
+}
+
+// --------------------------------------------------------------- wall motif
+// Each stratum gets a motif drawn from the actual material: bubbles in the
+// oxic water, mat streaks at the Beggiatoa front, angular rust in the
+// ferruginous zone, framboidal pyrite in the black sulfidic layer.
+
+/** Deterministic per-tile hash, so texture never shimmers between frames. */
+function hash(x: number, y: number, k: number): number {
+  let h = Math.imul(x * 374761393 + y * 668265263 + k * 2147483647, 1274126177);
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h / 4294967296;
+}
+
+export function paintWallMotif(
+  ctx: CanvasRenderingContext2D,
+  depth: number, tx: number, ty: number,
+  rx: number, ry: number, px: number, floor: string,
+): void {
+  ctx.save();
+  ctx.fillStyle = floor;
+  const dot = (fx: number, fy: number, r: number): void => {
+    ctx.beginPath();
+    ctx.arc(rx + fx * px, ry + fy * px, r * px, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  switch (depth) {
+    case 1: { // oxygen bubbles
+      ctx.globalAlpha = 0.16;
+      for (let i = 0; i < 3; i++) {
+        dot(0.2 + hash(tx, ty, i) * 0.6, 0.2 + hash(tx, ty, i + 9) * 0.6, 0.05);
+      }
+      break;
+    }
+    case 2: { // fine sediment grain
+      ctx.globalAlpha = 0.18;
+      for (let i = 0; i < 5; i++) {
+        dot(0.12 + hash(tx, ty, i) * 0.76, 0.12 + hash(tx, ty, i + 5) * 0.76, 0.035);
+      }
+      break;
+    }
+    case 3: { // Beggiatoa mat: horizontal filament streaks
+      ctx.globalAlpha = 0.22;
+      for (let i = 0; i < 3; i++) {
+        const y = 0.2 + i * 0.3 + hash(tx, ty, i) * 0.06;
+        ctx.fillRect(rx + 0.1 * px, ry + y * px, 0.8 * px, Math.max(0.035 * px, 1));
+      }
+      break;
+    }
+    case 4: { // angular rust mottling
+      ctx.globalAlpha = 0.2;
+      for (let i = 0; i < 3; i++) {
+        const cx = 0.18 + hash(tx, ty, i) * 0.64;
+        const cy = 0.2 + hash(tx, ty, i + 3) * 0.6;
+        const s = 0.05 + hash(tx, ty, i + 7) * 0.045;
+        ctx.beginPath();
+        ctx.moveTo(rx + cx * px, ry + (cy - s) * px);
+        ctx.lineTo(rx + (cx + s) * px, ry + cy * px);
+        ctx.lineTo(rx + cx * px, ry + (cy + s) * px);
+        ctx.lineTo(rx + (cx - s) * px, ry + cy * px);
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    }
+    case 5: { // sulfur globules
+      ctx.globalAlpha = 0.18;
+      for (let i = 0; i < 3; i++) {
+        dot(0.18 + hash(tx, ty, i) * 0.64, 0.18 + hash(tx, ty, i + 4) * 0.64, 0.042);
+      }
+      break;
+    }
+    case 6: { // dense stipple -- light-starved, packed cells
+      ctx.globalAlpha = 0.17;
+      for (let i = 0; i < 7; i++) {
+        dot(0.1 + hash(tx, ty, i) * 0.8, 0.1 + hash(tx, ty, i + 11) * 0.8, 0.03);
+      }
+      break;
+    }
+    case 7: { // framboidal pyrite: tight clusters of microcrystals
+      ctx.globalAlpha = 0.3;
+      for (let f = 0; f < 2; f++) {
+        const fx = 0.25 + hash(tx, ty, f) * 0.5;
+        const fy = 0.25 + hash(tx, ty, f + 6) * 0.5;
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2;
+          dot(fx + Math.cos(a) * 0.055, fy + Math.sin(a) * 0.055, 0.021);
+        }
+      }
+      break;
+    }
+    case 8: { // methane vesicles
+      ctx.globalAlpha = 0.17;
+      for (let i = 0; i < 3; i++) {
+        const cx = 0.18 + hash(tx, ty, i) * 0.64;
+        const cy = 0.18 + hash(tx, ty, i + 8) * 0.64;
+        ctx.beginPath();
+        ctx.ellipse(rx + cx * px, ry + cy * px, 0.075 * px, 0.045 * px, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    default: break;
+  }
+  ctx.restore();
+}

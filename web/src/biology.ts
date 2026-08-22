@@ -58,29 +58,32 @@ export interface Microbe {
   readonly id: string; readonly name: string; readonly depth: number;
   readonly hp: number; readonly atk: number; readonly glyph: string;
   readonly genes: readonly GeneId[]; readonly note: string;
+  /** Actual pigmentation, not a stratum tint. Also guarantees the organism
+   *  contrasts with the wall, which a stratum-derived colour did not. */
+  readonly pigment: string;
 }
 
 export const MICROBES: readonly Microbe[] = [
-  { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." },
-  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG"], note:"Green alga. Passive, tough cell wall." },
-  { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." },
-  { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." },
-  { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["narG"],        note:"Nitrite oxidiser. Completes nitrification." },
-  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nosZ"], note:"Facultative denitrifier. Motile, opportunistic." },
-  { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." },
-  { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." },
-  { id:"thiobacillus",    name:"Thiobacillus",    depth:3, hp:11, atk:6,  glyph:"T", genes:["sqr","soxB"],  note:"Chemolithoautotroph. Generates sulfuric acid." },
-  { id:"geobacter",       name:"Geobacter",       depth:4, hp:18, atk:7,  glyph:"G", genes:["omcS","mtrC"], note:"Grows conductive pili. Reduces solid Fe(III) oxides." },
-  { id:"shewanella",      name:"Shewanella",      depth:4, hp:16, atk:6,  glyph:"S", genes:["mtrC"],        note:"Mtr pathway respires minerals. Wildly versatile." },
-  { id:"rhodospirillum",  name:"Rhodospirillum",  depth:4, hp:15, atk:5,  glyph:"r", genes:["pufM","nifH"], note:"Purple non-sulfur. Photoheterotroph, fixes N2." },
-  { id:"allochromatium",  name:"Allochromatium",  depth:5, hp:22, atk:8,  glyph:"C", genes:["pufM","sqr"],  note:"Purple sulfur. Intracellular S0 globules." },
-  { id:"thiocapsa",       name:"Thiocapsa",       depth:5, hp:20, atk:8,  glyph:"h", genes:["pufM"],        note:"Purple sulfur, capsulate. Colonies in slime." },
-  { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA"], note:"Green sulfur. Photosynthesis at near-zero photon flux." },
-  { id:"prosthecochloris",name:"Prosthecochloris",depth:6, hp:22, atk:10, glyph:"P", genes:["csmA","aclB"], note:"Prosthecate green sulfur. Fixes carbon via rTCA." },
-  { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." },
-  { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA"], note:"Oxidises acetate completely to CO2." },
-  { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB"], note:"The most metabolically flexible methanogen known." },
-  { id:"methanobacterium",name:"Methanobacterium",depth:8, hp:32, atk:13, glyph:"m", genes:["mcrA"],        note:"Hydrogenotrophic. CO2 + H2. The last respiration." },
+  { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" },
+  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" },
+  { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" },
+  { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" },
+  { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["narG"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" },
+  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nosZ"], note:"Facultative denitrifier. Motile, opportunistic." , pigment:"#cfe04a" },
+  { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" },
+  { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." , pigment:"#e6e6da" },
+  { id:"thiobacillus",    name:"Thiobacillus",    depth:3, hp:11, atk:6,  glyph:"T", genes:["sqr","soxB"],  note:"Chemolithoautotroph. Generates sulfuric acid." , pigment:"#d8cfa0" },
+  { id:"geobacter",       name:"Geobacter",       depth:4, hp:18, atk:7,  glyph:"G", genes:["omcS","mtrC"], note:"Grows conductive pili. Reduces solid Fe(III) oxides." , pigment:"#d0603c" },
+  { id:"shewanella",      name:"Shewanella",      depth:4, hp:16, atk:6,  glyph:"S", genes:["mtrC"],        note:"Mtr pathway respires minerals. Wildly versatile." , pigment:"#dd9078" },
+  { id:"rhodospirillum",  name:"Rhodospirillum",  depth:4, hp:15, atk:5,  glyph:"r", genes:["pufM","nifH"], note:"Purple non-sulfur. Photoheterotroph, fixes N2." , pigment:"#b0527a" },
+  { id:"allochromatium",  name:"Allochromatium",  depth:5, hp:22, atk:8,  glyph:"C", genes:["pufM","sqr"],  note:"Purple sulfur. Intracellular S0 globules." , pigment:"#b34a86" },
+  { id:"thiocapsa",       name:"Thiocapsa",       depth:5, hp:20, atk:8,  glyph:"h", genes:["pufM"],        note:"Purple sulfur, capsulate. Colonies in slime." , pigment:"#a34fa8" },
+  { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA"], note:"Green sulfur. Photosynthesis at near-zero photon flux." , pigment:"#5fd47a" },
+  { id:"prosthecochloris",name:"Prosthecochloris",depth:6, hp:22, atk:10, glyph:"P", genes:["csmA","aclB"], note:"Prosthecate green sulfur. Fixes carbon via rTCA." , pigment:"#4fc98e" },
+  { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." , pigment:"#a6acb6" },
+  { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA"], note:"Oxidises acetate completely to CO2." , pigment:"#949ba6" },
+  { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB"], note:"The most metabolically flexible methanogen known." , pigment:"#dcc179" },
+  { id:"methanobacterium",name:"Methanobacterium",depth:8, hp:32, atk:13, glyph:"m", genes:["mcrA"],        note:"Hydrogenotrophic. CO2 + H2. The last respiration." , pigment:"#cdba8b" },
 ];
 
 export interface Stratum {

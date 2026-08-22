@@ -7,6 +7,8 @@ import { Genome } from "./genome.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
+import { drawBar, drawColumn, drawPlasmidRing, type HudLayout } from "./hud.js";
+import { paintWallMotif, paletteForPigment, playerSprite, sprite } from "./paint.js";
 import { DEFAULT_SETTINGS, readSave, writeSave, type Settings } from "./save.js";
 
 const TILE = 32;
@@ -85,7 +87,7 @@ class Game {
   }
 
   attack(m: Mob): void {
-    m.hp -= this.atk();
+    m.hp = Math.max(m.hp - Math.max(Math.round(this.atk()), 1), 0);
     if (m.hp <= 0) {
       m.alive = false;
       this.note(`${m.name} destroyed.`);
@@ -99,8 +101,8 @@ class Game {
                        : `${bio.GENES[pick].name} — ${r.err}`);
       }
     } else {
-      this.player.hp -= m.atk * 0.5;
-      this.note(`${m.name}: ${Math.max(m.hp, 0).toFixed(0)} hp left.`);
+      this.player.hp = Math.max(this.player.hp - Math.round(m.atk * 0.5), 0);
+      this.note(`${m.name}: ${Math.max(m.hp, 0)} hp left.`);
     }
     this.mobTurn();
     this.save();
@@ -111,7 +113,10 @@ class Game {
       if (!m.alive) continue;
       const dx = this.player.x - m.x, dy = this.player.y - m.y;
       if (dx * dx + dy * dy > 64) continue;
-      if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) { this.player.hp -= m.atk * 0.35; continue; }
+      if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
+        this.player.hp = Math.max(this.player.hp - Math.max(Math.round(m.atk * 0.35), 1), 0);
+        continue;
+      }
       const sx = Math.sign(dx), sy = Math.sign(dy);
       if (this.level.grid.isFloor(m.x + sx, m.y + sy) && !this.dungeon.mobAt(m.x + sx, m.y + sy)) {
         m.x += sx; m.y += sy;
@@ -256,7 +261,6 @@ class Game {
     this.settings = s.settings;
     this.enter(this.dungeon.current(), { x: s.px, y: s.py });
     this.player.hp = s.hp;
-    this.note("Resumed.");
     return true;
   }
 
@@ -385,20 +389,8 @@ class Game {
         const rx = Math.round(x * px);
         const ry = Math.round(y * px);
         ctx.fillRect(rx, ry, Math.round((x + 1) * px) - rx + 1, Math.round((y + 1) * px) - ry + 1);
-        if (s.hatch && !hc) {
-          // Inset ticks, not full-width rules. Drawn edge-to-edge, adjacent
-          // tiles merged into continuous stripes and the wall read as lined
-          // paper. Insetting keeps a gap at every tile border so the marks
-          // stay per-tile texture, and countable: N ticks = deeper stratum.
-          const w = Math.round(px * 0.34);
-          const t = Math.max(Math.round(px * 0.035), 1);
-          const x0 = rx + Math.round((px - w) / 2);
-          ctx.globalAlpha = 0.32;
-          ctx.fillStyle = s.floor;
-          for (let i = 1; i <= s.hatch; i++) {
-            ctx.fillRect(x0, ry + Math.round((i * px) / (s.hatch + 1)) - (t >> 1), w, t);
-          }
-          ctx.globalAlpha = 1;
+        if (!hc) {
+          paintWallMotif(ctx, s.depth, x, y, rx, ry, px, s.floor);
           ctx.fillStyle = s.wall;
         }
       }
@@ -432,26 +424,38 @@ class Game {
     for (const m of this.level.mobs) {
       if (!m.alive) continue;
       const f = Math.max(m.hp / m.maxhp, 0);
-      ctx.fillStyle = hc ? "#fff" : "#e04a3a";
-      ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.15, px * 0.7, px * 0.7);
-      // health as a bar, not as colour saturation
-      // Inset so it reads as a gauge, not a stray sliver at the tile edge.
-      const bx = m.x * px + px * 0.2;
-      const by = m.y * px + px * 0.68;
-      const bw = px * 0.6;
-      const bh = Math.max(px * 0.09, 3);
-      ctx.fillStyle = hc ? "#000" : "#1e0806";
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.fillStyle = hc ? "#fff" : "#ffd08a";
-      ctx.fillRect(bx, by, bw * f, bh);
-      ctx.fillStyle = hc ? "#000" : "#1a0503";
-      ctx.font = `bold ${px * 0.5}px ui-monospace,monospace`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(m.glyph, m.x * px + px / 2, m.y * px + px * 0.4);
+      const img = hc ? null : sprite(m.id, px * 0.92, paletteForPigment(m.pigment));
+      if (img) {
+        ctx.drawImage(img, m.x * px + px * 0.04, m.y * px + px * 0.04);
+      } else {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.15, px * 0.7, px * 0.7);
+        ctx.fillStyle = "#000000";
+        ctx.font = `bold ${px * 0.5}px ui-monospace,monospace`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(m.glyph, m.x * px + px / 2, m.y * px + px * 0.4);
+      }
+      // Only once damaged, so a fresh level is not wallpapered in gauges.
+      if (f < 1) {
+        const bx = m.x * px + px * 0.2;
+        const by = m.y * px + px * 0.87;
+        const bw = px * 0.6;
+        const bh = Math.max(px * 0.08, 3);
+        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = "#ffd08a";
+        ctx.fillRect(bx, by, bw * f, bh);
+      }
     }
 
-    ctx.fillStyle = hc ? "#0ff" : "#ffffff";
-    ctx.fillRect(this.player.ax * px + px * 0.18, this.player.ay * px + px * 0.18, px * 0.64, px * 0.64);
+    const me = hc ? null : playerSprite(px * 0.92);
+    if (me) {
+      ctx.drawImage(me, this.player.ax * px + px * 0.04, this.player.ay * px + px * 0.04);
+    } else {
+      ctx.fillStyle = "#0ff";
+      ctx.fillRect(this.player.ax * px + px * 0.18, this.player.ay * px + px * 0.18,
+                   px * 0.64, px * 0.64);
+    }
 
     ctx.strokeStyle = hc ? "#ff0" : (this.path ? "#ffffff" : "#777777");
     ctx.lineWidth = 2;
@@ -473,24 +477,49 @@ class Game {
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
 
-    // Two lines: identity, then vitals. One line did not fit a phone.
-    const lineA = `D${this.dungeon.depth}/${bio.MAX_DEPTH}  ${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV`;
-    const lineB = `hp ${Math.max(this.player.hp, 0).toFixed(0)}/${this.player.maxhp}` +
-      `   plasmid ${this.genome.used().toFixed(1)}/${this.genome.capacity}kb` +
-      `   hostiles ${this.dungeon.aliveCount()}`;
+    const L: HudLayout = {
+      u, left: ins.left, right: ins.right, top: ins.top, bottom: ins.bottom, w: W, h: H,
+    };
 
-    const size = Math.min(
-      this.fitFont(lineA, maxW, 13 * u),
-      this.fitFont(lineB, maxW, 13 * u),
-    );
+    // The column gauge: eight bands in their stratum colours, your depth
+    // marked. The game's structure, drawn literally.
+    const gaugeW = drawColumn(ctx, L, this.dungeon.depth);
+
+    const barX = left + gaugeW;
+    const barW = Math.min(W - barX - ins.right - pad, 260 * u);
+    const size = Math.min(this.fitFont(s.name, barW - 12, 13 * u), 13 * u);
     ctx.font = `${size}px ui-monospace,monospace`;
     const lh = size * 1.35;
-    const barH = lh * 2 + pad;
+    const barH = lh * 2.6 + pad;
     const barTop = H - ins.bottom - barH;
 
-    // Wrap the log first, so the backdrop can cover it too. Drawn over bright
-    // wall tiles with no panel behind it, the text was unreadable.
-    ctx.font = `${size}px ui-monospace,monospace`;
+    ctx.fillStyle = "rgba(0,0,0,0.62)";
+    ctx.fillRect(0, barTop, W, barH + ins.bottom);
+
+    ctx.fillStyle = s.accent;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(`${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV`,
+                 barX, barTop + lh * 0.9);
+
+    const gaugeH = Math.max(lh * 0.8, 12);
+    drawBar(ctx, barX, barTop + lh * 1.15, barW * 0.52, gaugeH,
+            this.player.hp / this.player.maxhp, "#4fbf6a",
+            `hp ${Math.max(this.player.hp, 0)}/${this.player.maxhp}`,
+            `${size * 0.86}px ui-monospace,monospace`);
+
+    const ringR = gaugeH * 0.95;
+    const ringX = barX + barW * 0.6 + ringR;
+    drawPlasmidRing(ctx, ringX, barTop + lh * 1.15 + gaugeH / 2, ringR,
+                    this.genome, this.dungeon.depth);
+    ctx.font = `${size * 0.86}px ui-monospace,monospace`;
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${this.genome.used().toFixed(1)}/${this.genome.capacity}kb   ` +
+                 `${this.dungeon.aliveCount()} hostile`,
+                 ringX + ringR + 8 * u, barTop + lh * 1.15 + gaugeH / 2);
+    ctx.textBaseline = "alphabetic";
+
     const LIFE = 9000;
     const FADE = 2000;
     const now = performance.now();
@@ -501,24 +530,23 @@ class Game {
       const alpha = age > LIFE - FADE ? (LIFE - age) / FADE : 1;
       for (const line of this.wrap(entry.text, maxW)) wrapped.push({ line, alpha });
     }
-    const shown = wrapped.slice(-5);
-    const logH = shown.length * lh + (shown.length > 0 ? pad * 0.5 : 0);
+    const shown = wrapped.slice(-4);
+    // +lh: text is positioned by baseline, so the top line's ascender sits
+    // ABOVE its y. Sizing the panel to shown.length*lh left it exposed.
+    const logH = shown.length > 0 ? (shown.length + 0.4) * lh + pad * 0.5 : 0;
 
-    ctx.fillStyle = "rgba(0,0,0,0.72)";
-    ctx.fillRect(0, barTop - logH, W, barH + logH + ins.bottom);
-
+    if (logH > 0) {
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(0, barTop - logH, W, logH);
+    }
     ctx.font = `${size}px ui-monospace,monospace`;
-    ctx.fillStyle = s.accent;
-    ctx.fillText(lineA, left, barTop + lh * 0.85);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(lineB, left, barTop + lh * 1.85);
 
     for (let i = shown.length - 1; i >= 0; i--) {
       const row = shown[i];
       if (row === undefined) continue;
       ctx.globalAlpha = row.alpha;
       ctx.fillStyle = "#cfe8d4";
-      ctx.fillText(row.line, left, barTop - (shown.length - i) * lh - pad * 0.25);
+      ctx.fillText(row.line, barX, barTop - (shown.length - i) * lh - pad * 0.25);
     }
     ctx.globalAlpha = 1;
   }
