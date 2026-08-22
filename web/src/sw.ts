@@ -7,7 +7,7 @@
 
 declare const self: ServiceWorkerGlobalScope;
 
-const VERSION = "microgue-v10";
+const VERSION = "microgue-v11";
 const ASSETS: readonly string[] = [
   "./",
   "./index.html",

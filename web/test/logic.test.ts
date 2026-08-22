@@ -6,6 +6,11 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { DEFAULT_SETTINGS, parseSave } from "../src/save.js";
+import { Plasmid, SLOTS } from "../src/plasmid.js";
+import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.js";
+import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
+import { classify, traceWalls } from "../src/walls.js";
+import { PIXELS, PX_SIZE, validate as validatePixels } from "../src/pixels.js";
 
 describe("redox tower", () => {
   const depthOf = (t: bio.Teap) => bio.STRATA.find((s) => s.teap === t)!.depth;
@@ -256,13 +261,16 @@ describe("rng", () => {
 
 describe("save validation", () => {
   const good = { depth: 4, seed: 7, px: 10, py: 12, hp: 22,
-                 genes: [["mtrC", true], ["psbA", false]],
+                 ring: [{ kind: "promoter", strength: "strong" },
+                        { kind: "gene", id: "mtrC", optimised: true }],
                  settings: { uiScale: 1.5, highContrast: true, reduceMotion: false, diagonal: false } };
 
   it("round-trips a valid save", () => {
     const s = parseSave(good);
     expect(s?.depth).toBe(4);
-    expect(s?.genes).toEqual([["mtrC", true], ["psbA", false]]);
+    expect(s?.ring[0]).toEqual({ kind: "promoter", strength: "strong" });
+    expect(s?.ring[1]).toEqual({ kind: "gene", id: "mtrC", optimised: true });
+    expect(s?.ring).toHaveLength(SLOTS);
     expect(s?.settings.highContrast).toBe(true);
   });
   it("rejects non-objects outright", () => {
@@ -279,9 +287,22 @@ describe("save validation", () => {
     expect(parseSave({ ...good, depth: -3 })?.depth).toBe(1);
     expect(parseSave({ ...good, depth: "four" })?.depth).toBe(1);
   });
-  it("drops genes that do not exist", () => {
-    const s = parseSave({ ...good, genes: [["mtrC", true], ["notAGene", true], "junk", 7] });
-    expect(s?.genes).toEqual([["mtrC", true]]);
+  it("drops ring entries that are not real parts", () => {
+    const s = parseSave({ ...good, ring: [
+      { kind: "gene", id: "mtrC", optimised: true },
+      { kind: "gene", id: "notAGene" }, "junk", 7,
+      { kind: "gene", id: "mtrC" },                    // duplicate
+    ]});
+    expect(s?.ring[0]).toEqual({ kind: "gene", id: "mtrC", optimised: true });
+    expect(s?.ring[1]).toBeNull();
+    expect(s?.ring[2]).toBeNull();
+    expect(s?.ring[4]).toBeNull();
+  });
+  it("clamps an over-long ring and defaults a bad promoter strength", () => {
+    const long = Array.from({ length: 40 }, () => ({ kind: "terminator" }));
+    expect(parseSave({ ...good, ring: long })?.ring).toHaveLength(SLOTS);
+    const s = parseSave({ ...good, ring: [{ kind: "promoter", strength: "nuclear" }] });
+    expect(s?.ring[0]).toEqual({ kind: "promoter", strength: "medium" });
   });
   it("falls back to defaults on malformed settings", () => {
     expect(parseSave({ ...good, settings: "corrupt" })?.settings).toEqual(DEFAULT_SETTINGS);
@@ -289,9 +310,422 @@ describe("save validation", () => {
   });
   it("survives a hand-edited hostile payload", () => {
     const s = parseSave({ depth: {}, seed: [], px: 1, py: 1, hp: -50,
-                          genes: "all of them", settings: null });
+                          ring: "all of them", settings: null });
     expect(s).not.toBeNull();
     expect(s?.hp).toBeGreaterThan(0);
-    expect(s?.genes).toEqual([]);
+    expect(s?.ring.every((p) => p === null)).toBe(true);
+  });
+});
+
+describe("plasmid operons", () => {
+  const P = () => new Plasmid();
+
+  it("starts transcribing an origin", () => {
+    const p = P();
+    expect(p.has("ori")).toBe(true);
+    expect(p.operons()).toHaveLength(1);
+    expect(p.operons()[0]!.genes.map((g) => g.id)).toEqual(["ori"]);
+  });
+
+  it("a gene outside any operon is not expressed", () => {
+    const p = P();
+    p.put(8, { kind: "gene", id: "mtrC", optimised: false });   // no promoter
+    expect(p.has("mtrC")).toBe(true);
+    expect(p.operonOf("mtrC")).toBeNull();
+    expect(p.expression("mtrC", 4)).toBe(0);
+  });
+
+  it("a promoter upstream switches it on", () => {
+    const p = P();
+    p.put(7, { kind: "promoter", strength: "medium" });
+    p.put(8, { kind: "gene", id: "mtrC", optimised: false });
+    expect(p.expression("mtrC", 4)).toBeGreaterThan(0);
+  });
+
+  it("a terminator ends the operon", () => {
+    const p = P();
+    p.put(7, { kind: "promoter", strength: "strong" });
+    p.put(8, { kind: "terminator" });
+    p.put(9, { kind: "gene", id: "mtrC", optimised: false });
+    expect(p.expression("mtrC", 4)).toBe(0);
+  });
+
+  it("a gap ends the operon", () => {
+    const p = P();
+    p.put(7, { kind: "promoter", strength: "strong" });
+    p.put(9, { kind: "gene", id: "mtrC", optimised: false });   // slot 8 empty
+    expect(p.expression("mtrC", 4)).toBe(0);
+  });
+
+  it("promoter strength scales output", () => {
+    const build = (s: "weak" | "medium" | "strong") => {
+      const p = P();
+      p.put(7, { kind: "promoter", strength: s });
+      p.put(8, { kind: "gene", id: "mtrC", optimised: false });
+      return p.expression("mtrC", 4);
+    };
+    expect(build("weak")).toBeLessThan(build("medium"));
+    expect(build("medium")).toBeLessThan(build("strong"));
+  });
+
+  it("polarity starves the tail of a long operon", () => {
+    const p = P();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    p.put(6, { kind: "gene", id: "omcS", optimised: false });
+    const near = p.expression("mtrC", 4);
+    const far = p.expression("omcS", 4);
+    expect(far).toBeLessThan(near);
+  });
+
+  it("same-pathway neighbours co-regulate", () => {
+    const lone = P();
+    lone.put(4, { kind: "promoter", strength: "medium" });
+    lone.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    const solo = lone.expression("mtrC", 4);
+
+    const clustered = P();
+    clustered.put(4, { kind: "promoter", strength: "medium" });
+    clustered.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    clustered.put(6, { kind: "gene", id: "omcS", optimised: false });  // also iron
+    expect(clustered.expression("mtrC", 4)).toBeGreaterThan(solo);
+  });
+
+  it("a mixed-pathway operon beats nothing but loses to a clean one", () => {
+    const mixed = P();
+    mixed.put(4, { kind: "promoter", strength: "medium" });
+    mixed.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    mixed.put(6, { kind: "gene", id: "katG", optimised: false });      // defense
+    const clean = P();
+    clean.put(4, { kind: "promoter", strength: "medium" });
+    clean.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    clean.put(6, { kind: "gene", id: "omcS", optimised: false });
+    expect(clean.expression("mtrC", 4)).toBeGreaterThan(mixed.expression("mtrC", 4));
+  });
+
+  it("substrate gating still applies inside an operon", () => {
+    const p = P();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "mcrA", optimised: false });
+    expect(p.expression("mcrA", 4)).toBe(0);          // no CO2 acceptor here
+    expect(p.expression("mcrA", 8)).toBeGreaterThan(0);
+  });
+
+  it("oxygen still destroys nifH regardless of promoter", () => {
+    const p = P();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "nifH", optimised: false });
+    expect(p.expression("nifH", 1)).toBe(0);
+    expect(p.expression("nifH", 5)).toBeGreaterThan(0);
+  });
+
+  it("rotation preserves relative order, so operons survive", () => {
+    const p = P();
+    p.put(4, { kind: "promoter", strength: "medium" });
+    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    const before = p.expression("mtrC", 4);
+    p.rotate(5);
+    expect(p.expression("mtrC", 4)).toBeCloseTo(before, 10);
+  });
+
+  it("swap is the drag primitive and can break an operon", () => {
+    const p = P();
+    p.put(4, { kind: "promoter", strength: "medium" });
+    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    expect(p.expression("mtrC", 4)).toBeGreaterThan(0);
+    p.swap(5, 12);                                     // drag it far away
+    expect(p.expression("mtrC", 4)).toBe(0);
+  });
+
+  it("the origin cannot be excised", () => {
+    const p = P();
+    const i = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    expect(p.remove(i).ok).toBe(false);
+  });
+
+  it("refuses duplicates and reports a full ring", () => {
+    const p = P();
+    expect(p.add({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(true);
+    expect(p.add({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(false);
+    for (let i = 0; i < SLOTS; i++) p.put(i, { kind: "terminator" });
+    expect(p.add({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
+  });
+
+  it("power rises when you arrange well", () => {
+    const bad = P();
+    bad.put(5, { kind: "gene", id: "mtrC", optimised: false });   // orphaned
+    bad.put(9, { kind: "gene", id: "omcS", optimised: false });
+    const good = P();
+    good.put(4, { kind: "promoter", strength: "strong" });
+    good.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    good.put(6, { kind: "gene", id: "omcS", optimised: false });
+    expect(good.power(4)).toBeGreaterThan(bad.power(4));
+  });
+});
+
+describe("plasmid ring geometry", () => {
+  const g = { cx: 200, cy: 300, rInner: 80, rOuter: 130, rot: 0 };
+
+  it("maps a slot centre back to its own index", () => {
+    for (let i = 0; i < SLOTS; i++) {
+      const c = slotCentre(g, i);
+      expect(slotAt(g, c.x, c.y), `slot ${i}`).toBe(i);
+    }
+  });
+  it("survives rotation", () => {
+    const r = { ...g, rot: 1.3 };
+    for (let i = 0; i < SLOTS; i++) {
+      const c = slotCentre(r, i);
+      expect(slotAt(r, c.x, c.y)).toBe(i);
+    }
+  });
+  it("rejects points inside and outside the band", () => {
+    expect(slotAt(g, g.cx, g.cy)).toBeNull();
+    expect(slotAt(g, g.cx + 400, g.cy)).toBeNull();
+  });
+  it("describe() flags an untranscribed gene", () => {
+    const p = new Plasmid();
+    p.put(9, { kind: "gene", id: "mtrC", optimised: false });
+    expect(describeSlot(p, 9, 4).join(" ")).toContain("NOT TRANSCRIBED");
+  });
+});
+
+describe("button layout", () => {
+  it("stays inside the viewport and meets the 44pt target", () => {
+    for (const [W, H] of [[1080, 2340], [720, 1600], [1179, 2556]] as const) {
+      const bs = makeButtons();
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      layoutButtons(bs, W, H, { right: 0, bottom: 48 }, u, 90 * u);
+      for (const b of bs) {
+        expect(b.w, `${W}x${H}`).toBeGreaterThanOrEqual(44);
+        expect(b.x).toBeGreaterThanOrEqual(0);
+        expect(b.x + b.w).toBeLessThanOrEqual(W);
+        expect(b.y).toBeGreaterThanOrEqual(0);
+        expect(b.y + b.h).toBeLessThanOrEqual(H);
+      }
+    }
+  });
+  it("hit-tests each button at its own centre", () => {
+    const bs = makeButtons();
+    layoutButtons(bs, 1080, 2340, { right: 0, bottom: 48 }, 2.5, 200);
+    for (const b of bs) {
+      expect(buttonAt(bs, b.x + b.w / 2, b.y + b.h / 2)?.id).toBe(b.id);
+    }
+  });
+  it("ignores disabled buttons", () => {
+    const bs = makeButtons();
+    layoutButtons(bs, 1080, 2340, { right: 0, bottom: 48 }, 2.5, 200);
+    const first = bs[0]!;
+    first.enabled = false;
+    expect(buttonAt(bs, first.x + 2, first.y + 2)?.id).not.toBe(first.id);
+  });
+});
+
+describe("hud geometry", () => {
+  it("the column gauge stops above the reserved status bar", () => {
+    // Mirrors drawColumn's arithmetic: it must not extend past H - bottom - reserve.
+    const H = 2340, bottom = 48, reserve = 220, pad = 15;
+    const top = pad;
+    const h = H - top - bottom - reserve - pad * 2;
+    expect(top + h).toBeLessThanOrEqual(H - bottom - reserve);
+    expect(h).toBeGreaterThan(0);
+  });
+  it("survives a short viewport without inverting", () => {
+    const H = 320, bottom = 0, reserve = 60, pad = 6;
+    const h = H - pad - bottom - reserve - pad * 2;
+    expect(h).toBeGreaterThan(0);
+  });
+});
+
+describe("organic wall contours", () => {
+  // 0 = floor, 1 = wall
+  const G = (rows: number[][]) => mg.Grid.from(rows);
+
+  it("an isolated wall tile is rounded on all four corners", () => {
+    const g = G([
+      [0,0,0,0,0],
+      [0,0,0,0,0],
+      [0,0,1,0,0],
+      [0,0,0,0,0],
+      [0,0,0,0,0],
+    ]);
+    for (const c of ["tl","tr","br","bl"] as const) {
+      expect(classify(g, 2, 2, c), c).toBe("convex");
+    }
+  });
+
+  it("a tile in the middle of a slab has no rounded corners", () => {
+    const g = G([[1,1,1],[1,1,1],[1,1,1]]);
+    for (const c of ["tl","tr","br","bl"] as const) {
+      expect(classify(g, 1, 1, c), c).toBe("square");
+    }
+  });
+
+  it("an L junction produces exactly one concave fillet", () => {
+    //  . 1        NW floor, N wall, W wall -> the corner at (1,1) is an inside
+    //  1 1        corner and must be filleted
+    const g = G([
+      [0,0,0,0],
+      [0,0,1,0],
+      [0,1,1,0],
+      [0,0,0,0],
+    ]);
+    expect(classify(g, 2, 2, "tl")).toBe("concave");
+  });
+
+  it("each inside corner is emitted by exactly one tile", () => {
+    const g = G([
+      [0,0,0,0],
+      [0,0,1,0],
+      [0,1,1,0],
+      [0,0,0,0],
+    ]);
+    // the same physical corner, seen from the other two tiles of the L
+    expect(classify(g, 2, 1, "bl")).not.toBe("concave");
+    expect(classify(g, 1, 2, "tr")).not.toBe("concave");
+  });
+
+  it("a straight edge stays straight -- no seams opened along it", () => {
+    // Kept off the grid border on purpose: Grid.get is total and reads
+    // out-of-bounds as WALL, so a tile at x=0 has a solid neighbour to its west.
+    const g = G([
+      [0,0,0,0,0],
+      [0,1,1,1,0],
+      [0,1,1,1,0],
+    ]);
+    // interior of the top edge: exposed north, but east and west are wall
+    expect(classify(g, 2, 1, "tl")).toBe("square");
+    expect(classify(g, 2, 1, "tr")).toBe("square");
+    // the ends of that edge do get rounded
+    expect(classify(g, 1, 1, "tl")).toBe("convex");
+    expect(classify(g, 3, 1, "tr")).toBe("convex");
+  });
+
+  it("out of bounds reads as solid, so the map border never rounds inward", () => {
+    const g = G([[1,1],[1,1]]);
+    expect(classify(g, 0, 0, "tl")).toBe("square");
+  });
+
+  it("a diagonal chain rounds on both open sides", () => {
+    const g = G([
+      [0,0,0,0,0],
+      [0,1,0,0,0],
+      [0,0,1,0,0],
+      [0,0,0,1,0],
+      [0,0,0,0,0],
+    ]);
+    expect(classify(g, 2, 2, "tr")).toBe("convex");
+    expect(classify(g, 2, 2, "bl")).toBe("convex");
+  });
+
+  it("classification never throws at the grid edge", () => {
+    const g = G([[1,1],[1,1]]);
+    for (const [x, y] of [[0,0],[1,0],[0,1],[1,1],[-1,-1],[5,5]] as const) {
+      for (const c of ["tl","tr","br","bl"] as const) {
+        expect(() => classify(g, x, y, c)).not.toThrow();
+      }
+    }
+  });
+
+  it("a real generated cave has both corner kinds in quantity", () => {
+    const grid = mg.generate(80, 60, makeRng(7), { density: 0.46, passes: 5 });
+    let convex = 0, concave = 0;
+    for (let y = 0; y < grid.h; y++) {
+      for (let x = 0; x < grid.w; x++) {
+        if (!grid.isWall(x, y)) continue;
+        for (const c of ["tl","tr","br","bl"] as const) {
+          const k = classify(grid, x, y, c);
+          if (k === "convex") convex++;
+          if (k === "concave") concave++;
+        }
+      }
+    }
+    expect(convex).toBeGreaterThan(50);
+    expect(concave).toBeGreaterThan(20);
+  });
+});
+
+describe("wall contour tracing", () => {
+  // A minimal canvas-context stand-in that records the path ops.
+  const recorder = () => {
+    const ops: string[] = [];
+    return {
+      ops,
+      ctx: {
+        moveTo: () => ops.push("moveTo"),
+        lineTo: () => ops.push("lineTo"),
+        arc: () => ops.push("arc"),
+        closePath: () => ops.push("close"),
+      } as unknown as CanvasRenderingContext2D,
+    };
+  };
+
+  it("emits nothing for an all-floor region", () => {
+    const g = new mg.Grid(6, 6, mg.FLOOR);
+    const r = recorder();
+    traceWalls(r.ctx, g, 1, 1, 4, 4);
+    expect(r.ops).toHaveLength(0);
+  });
+
+  it("emits one closed subpath per wall tile", () => {
+    const g = mg.Grid.from([[0,0,0],[0,1,0],[0,0,0]]);
+    const r = recorder();
+    traceWalls(r.ctx, g, 0, 0, 2, 2);
+    expect(r.ops.filter((o) => o === "close")).toHaveLength(1);
+    expect(r.ops.filter((o) => o === "arc")).toHaveLength(4);  // fully exposed
+  });
+
+  it("emits extra subpaths for inside corners", () => {
+    const g = mg.Grid.from([[0,0,0,0],[0,0,1,0],[0,1,1,0],[0,0,0,0]]);
+    const r = recorder();
+    traceWalls(r.ctx, g, 0, 0, 3, 3);
+    // three wall tiles, plus one fillet patch for the single inside corner
+    expect(r.ops.filter((o) => o === "close")).toHaveLength(4);
+  });
+
+  it("radius is clamped into [0, 0.5]", () => {
+    const g = mg.Grid.from([[0,0,0],[0,1,0],[0,0,0]]);
+    for (const bad of [-5, 99, Number.NaN]) {
+      const r = recorder();
+      expect(() => { traceWalls(r.ctx, g, 0, 0, 2, 2, bad); }).not.toThrow();
+    }
+  });
+
+  it("a zero radius emits no arcs at all", () => {
+    const g = mg.Grid.from([[0,0,0],[0,1,0],[0,0,0]]);
+    const r = recorder();
+    traceWalls(r.ctx, g, 0, 0, 2, 2, 0);
+    expect(r.ops.filter((o) => o === "arc")).toHaveLength(0);
+  });
+});
+
+describe("pixel art", () => {
+  it("every sprite is a well-formed 16x16 role grid", () => {
+    for (const [id, art] of Object.entries(PIXELS)) {
+      expect(validatePixels(art), id).toBeNull();
+    }
+  });
+  it("covers every organism plus the player", () => {
+    for (const m of bio.MICROBES) expect(PIXELS[m.id], m.id).toBeDefined();
+    expect(PIXELS["player"]).toBeDefined();
+  });
+  it("no sprite is blank", () => {
+    for (const [id, art] of Object.entries(PIXELS)) {
+      const filled = art.join("").split("").filter((c) => c !== ".").length;
+      expect(filled, id).toBeGreaterThan(12);
+    }
+  });
+  it("no sprite fills the whole tile -- silhouettes need air", () => {
+    for (const [id, art] of Object.entries(PIXELS)) {
+      const filled = art.join("").split("").filter((c) => c !== ".").length;
+      expect(filled / (PX_SIZE * PX_SIZE), id).toBeLessThan(0.92);
+    }
+  });
+  it("validate rejects malformed art", () => {
+    expect(validatePixels(["...."])).not.toBeNull();
+    expect(validatePixels(Array.from({ length: PX_SIZE }, () => "x".repeat(PX_SIZE))))
+      .not.toBeNull();
+    expect(validatePixels(Array.from({ length: PX_SIZE }, () => ".".repeat(3))))
+      .not.toBeNull();
   });
 });
