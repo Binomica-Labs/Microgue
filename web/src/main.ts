@@ -374,9 +374,19 @@ class Game {
         const ry = Math.round(y * px);
         ctx.fillRect(rx, ry, Math.round((x + 1) * px) - rx + 1, Math.round((y + 1) * px) - ry + 1);
         if (s.hatch && !hc) {
+          // Inset ticks, not full-width rules. Drawn edge-to-edge, adjacent
+          // tiles merged into continuous stripes and the wall read as lined
+          // paper. Insetting keeps a gap at every tile border so the marks
+          // stay per-tile texture, and countable: N ticks = deeper stratum.
+          const w = Math.round(px * 0.34);
+          const t = Math.max(Math.round(px * 0.035), 1);
+          const x0 = rx + Math.round((px - w) / 2);
+          ctx.globalAlpha = 0.32;
           ctx.fillStyle = s.floor;
-          const n = s.hatch;
-          for (let i = 1; i <= n; i++) ctx.fillRect(x * px, y * px + (i * px) / (n + 1), px, Math.max(px * 0.06, 1));
+          for (let i = 1; i <= s.hatch; i++) {
+            ctx.fillRect(x0, ry + Math.round((i * px) / (s.hatch + 1)) - (t >> 1), w, t);
+          }
+          ctx.globalAlpha = 1;
           ctx.fillStyle = s.wall;
         }
       }
