@@ -26,11 +26,26 @@ export class Dungeon {
     this.w = w; this.h = h; this.seed = seed;
   }
 
+  /** Below this the level has nowhere to fight. */
+  private static readonly MIN_OPEN = 0.25;
+
   private build(depth: number): Level {
     const s = stratum(depth);
     const rng: Rng = makeRng(this.seed).fork(depth);
-    const grid = mg.generate(this.w, this.h, rng, { density: s.density, passes: s.passes });
-    const { seed } = mg.keepLargestRegion(grid);
+
+    // Cellular automata fragment above roughly 0.48 initial density: the open
+    // space breaks into pockets and keepLargestRegion seals almost all of it.
+    // Densities are tuned below that, but a bad seed can still land short, so
+    // back off and retry rather than hand out a solid level.
+    let grid = mg.generate(this.w, this.h, rng, { density: s.density, passes: s.passes });
+    let region = mg.keepLargestRegion(grid);
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      if (grid.countFloor() / (grid.w * grid.h) >= Dungeon.MIN_OPEN) break;
+      const relaxed = Math.max(s.density - attempt * 0.03, 0.3);
+      grid = mg.generate(this.w, this.h, rng, { density: relaxed, passes: s.passes });
+      region = mg.keepLargestRegion(grid);
+    }
+    const { seed } = region;
     const up = seed ?? mg.carveSpawn(grid, 4);
     const down = depth < MAX_DEPTH ? mg.farthestFrom(grid, up) : null;
 

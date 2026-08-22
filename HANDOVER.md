@@ -19,46 +19,53 @@ the hard way; none are arbitrary.
    Actions run goes green, and the app keeps serving the old bundle forever. It
    looks exactly like "my change did nothing."
 
-2. **Fe(III) reduction belongs at D4, not at the bottom.** The original brief
+2. **Keep stratum `density` under about 0.47.** The cellular automaton is
+   bistable: past that the open space fragments into pockets and
+   `keepLargestRegion` seals almost all of it. D5–D8 once shipped at 0.50–0.58
+   and generated levels with 1–3% open floor — solid rock with twenty microbes
+   in it. `Dungeon.build` retries at lower density as a backstop and `spec`
+   asserts every level clears 25% open, but the tuning is the real fix.
+
+3. **Fe(III) reduction belongs at D4, not at the bottom.** The original brief
    said "down to anaerobic iron reducers," and that is wrong. In real columns
    Fe²⁺ *declines* below ~50 cm as sulfide precipitates it as FeS — which is
    what blackens the sediment — and methanogenesis is the floor. The ladder is
    O₂ → NO₃⁻ → Mn(IV) → Fe(III) → S⁰ → H₂S → SO₄²⁻ → CO₂. `spec` asserts this;
    if a test starts failing there, the test is right.
 
-3. **Sprites are role grids, not colours.** `pixels.ts` stores `.1234` per
+4. **Sprites are role grids, not colours.** `pixels.ts` stores `.1234` per
    pixel — transparent, dark, body, accent, hi — which is why the organism's
    own pigment still tints them. Writing hex into a sprite breaks that. If a
    sprite is missing from `PIXELS`, `paint.ts` falls back to the vector
    morphology in `shapes.ts`, so both paths must keep working.
 
-4. **Mob colour comes from `pigment`, never from the stratum.** An earlier
+5. **Mob colour comes from `pigment`, never from the stratum.** An earlier
    version derived it from `stratum.wall`, which made Geobacter rust-coloured on
    a rust-coloured wall — invisible. Pigments are the organisms' real
    pigmentation (phycocyanin, fucoxanthin, bacteriochlorophyll, FeS grey), and
    they double as the contrast guarantee. The soft halo in `paint.ts` is the
    other half of that guarantee; don't remove it.
 
-5. **`Grid` is a class over a `Uint8Array` for type safety, not speed.** Its
+6. **`Grid` is a class over a `Uint8Array` for type safety, not speed.** Its
    `get` is total — out of bounds returns `WALL`, because the world genuinely is
    solid outside the map — so it returns `Tile`, never `Tile | undefined`.
    Reverting to `Tile[][]` reintroduces ~20 non-null assertions. Benchmarks say
    the typed array is *not* faster here; V8 already packs small-int arrays.
 
-6. **Pathfinding is `DIAGONAL` with tunnelling off.** Not orthogonal. A
+7. **Pathfinding is `DIAGONAL` with tunnelling off.** Not orthogonal. A
    diagonal step is refused only when *both* orthogonal neighbours are walls, so
    routes cut across open ground but cannot squeeze a wall pinch. Orthogonal
    made every route a right-angle detour: 20% longer on a real level, 89% on
    clear ground.
 
-7. **Walls are traced, not tiled.** `walls.ts` rounds a corner where both
+8. **Walls are traced, not tiled.** `walls.ts` rounds a corner where both
    orthogonal neighbours are floor and adds a meniscus fillet where three tiles
    meet in an L. Every tile is a subpath filled together under nonzero winding,
    so shared edges merge seamlessly — drawing them separately reopens the seams.
    Radius 0.5 was chosen by rendering a sweep; below ~0.4 the grid is still
    legible in the silhouette.
 
-8. **`npm run verify` gates the build and everything in it is an error, not a
+9. **`npm run verify` gates the build and everything in it is an error, not a
    warning.** `any`, `@ts-ignore`, non-null `!`, `==`, implicit coercion, and
    any `.js` file appearing under `src/` or `test/` all fail the build. That is
    deliberate; the owner explicitly wants TypeScript, not JavaScript with types

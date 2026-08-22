@@ -11,7 +11,7 @@ import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.
 import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
 import { classify, traceWalls } from "../src/walls.js";
 import { PIXELS, PX_SIZE, validate as validatePixels } from "../src/pixels.js";
-import { classifyDown, inBox, type Gesture } from "../src/gesture.js";
+import { classifyDown, classifyKey, inBox, type Gesture } from "../src/gesture.js";
 
 describe("redox tower", () => {
   const depthOf = (t: bio.Teap) => bio.STRATA.find((s) => s.teap === t)!.depth;
@@ -496,7 +496,7 @@ describe("button layout", () => {
     for (const [W, H] of [[1080, 2340], [720, 1600], [1179, 2556]] as const) {
       const bs = makeButtons();
       const u = Math.max(Math.min(W, H) / 420, 1);
-      layoutButtons(bs, W, H, { right: 0, bottom: 48 }, u, 90 * u);
+      layoutButtons(bs, W, H, { top: 40, right: 0, bottom: 48 }, u, 300);
       for (const b of bs) {
         expect(b.w, `${W}x${H}`).toBeGreaterThanOrEqual(44);
         expect(b.x).toBeGreaterThanOrEqual(0);
@@ -508,14 +508,33 @@ describe("button layout", () => {
   });
   it("hit-tests each button at its own centre", () => {
     const bs = makeButtons();
-    layoutButtons(bs, 1080, 2340, { right: 0, bottom: 48 }, 2.5, 200);
+    layoutButtons(bs, 1080, 2340, { top: 40, right: 0, bottom: 48 }, 2.5, 300);
     for (const b of bs) {
       expect(buttonAt(bs, b.x + b.w / 2, b.y + b.h / 2)?.id).toBe(b.id);
     }
   });
+  it("never overlaps the reserved log + status bar", () => {
+    for (const [W, H] of [[1080, 2340], [720, 1600], [1179, 2556]] as const) {
+      const bs = makeButtons();
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      const reserve = 340;
+      layoutButtons(bs, W, H, { top: 40, right: 0, bottom: 48 }, u, reserve);
+      for (const b of bs) {
+        expect(b.y + b.h, `${W}x${H} ${b.id}`).toBeLessThanOrEqual(H - 48 - reserve);
+      }
+    }
+  });
+
+  it("stays a single column, so nothing sits under the log text", () => {
+    const bs = makeButtons();
+    layoutButtons(bs, 1080, 2340, { top: 40, right: 0, bottom: 48 }, 2.5, 300);
+    const xs = new Set(bs.map((b) => b.x));
+    expect(xs.size).toBe(1);
+  });
+
   it("ignores disabled buttons", () => {
     const bs = makeButtons();
-    layoutButtons(bs, 1080, 2340, { right: 0, bottom: 48 }, 2.5, 200);
+    layoutButtons(bs, 1080, 2340, { top: 40, right: 0, bottom: 48 }, 2.5, 300);
     const first = bs[0]!;
     first.enabled = false;
     expect(buttonAt(bs, first.x + 2, first.y + 2)?.id).not.toBe(first.id);
@@ -782,5 +801,93 @@ describe("pointer gestures", () => {
     expect(inBox(closeBox, 900, 40)).toBe(true);
     expect(inBox(closeBox, 946, 86)).toBe(true);
     expect(inBox(closeBox, 899, 40)).toBe(false);
+  });
+});
+
+describe("level openness", () => {
+  it("no level at any depth is a solid block", () => {
+    // Densities past ~0.48 fragment the caves and keepLargestRegion seals
+    // nearly everything: D8 was arriving at 2% open floor with 22 microbes
+    // packed into it.
+    for (const seed of [1, 7, 42, 99]) {
+      const d = new Dungeon(110, 80, seed);
+      for (let depth = 1; depth <= bio.MAX_DEPTH; depth++) {
+        const g = d.level(depth).grid;
+        const open = g.countFloor() / (g.w * g.h);
+        expect(open, `seed ${seed} D${depth}`).toBeGreaterThan(0.25);
+      }
+    }
+  });
+
+  it("openness decreases with depth on average", () => {
+    const d = new Dungeon(110, 80, 7);
+    const frac = (k: number) => {
+      const g = d.level(k).grid;
+      return g.countFloor() / (g.w * g.h);
+    };
+    expect(frac(1)).toBeGreaterThan(frac(8));
+  });
+
+  it("every level has far more open tiles than microbes", () => {
+    for (const seed of [3, 11]) {
+      const d = new Dungeon(110, 80, seed);
+      for (let depth = 1; depth <= bio.MAX_DEPTH; depth++) {
+        const lvl = d.level(depth);
+        const open = lvl.grid.countFloor();
+        expect(open / Math.max(lvl.mobs.length, 1), `seed ${seed} D${depth}`)
+          .toBeGreaterThan(20);
+      }
+    }
+  });
+});
+
+describe("keyboard while the plasmid is open", () => {
+  const MOVE_KEYS = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight",
+                     "w","a","s","d","y","u","b","n"];
+  const WORLD_KEYS = [...MOVE_KEYS, "+", "=", "-", ">", ".", "<", ",", "c", "Tab"];
+
+  it("no key can move the player while the inventory is up", () => {
+    for (const k of MOVE_KEYS) {
+      expect(classifyKey(k, true).kind, k).not.toBe("move");
+    }
+  });
+
+  it("no key can zoom the world while the inventory is up", () => {
+    for (const k of ["+", "=", "-"]) {
+      expect(classifyKey(k, true).kind, k).not.toBe("zoom");
+    }
+  });
+
+  it("no world action of any kind gets through", () => {
+    const worldKinds = ["move", "zoom", "descend", "ascend", "toggleContrast"];
+    for (const k of WORLD_KEYS) {
+      expect(worldKinds, k).not.toContain(classifyKey(k, true).kind);
+    }
+  });
+
+  it("only closing gets through", () => {
+    for (const k of ["i", "p", "Escape"]) {
+      expect(classifyKey(k, true).kind, k).toBe("closePlasmid");
+    }
+  });
+
+  it("the same keys work normally when it is closed", () => {
+    expect(classifyKey("ArrowUp", false)).toEqual({ kind: "move", dx: 0, dy: -1 });
+    expect(classifyKey("n", false)).toEqual({ kind: "move", dx: 1, dy: 1 });
+    expect(classifyKey("=", false).kind).toBe("zoom");
+    expect(classifyKey(">", false).kind).toBe("descend");
+    expect(classifyKey("i", false).kind).toBe("togglePlasmid");
+  });
+
+  it("unknown keys are inert either way", () => {
+    for (const open of [true, false]) {
+      expect(classifyKey("F5", open).kind).toBe("none");
+      expect(classifyKey("Shift", open).kind).toBe("none");
+    }
+  });
+
+  it("Escape closes the inventory rather than quitting", () => {
+    expect(classifyKey("Escape", true).kind).toBe("closePlasmid");
+    expect(classifyKey("Escape", false).kind).toBe("quit");
   });
 });

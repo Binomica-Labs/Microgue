@@ -30,12 +30,17 @@ export function drawColumn(
   const band = h / MAX_DEPTH;
 
   ctx.save();
+  // Opaque backing. Without it the dimmed bands composite against whatever
+  // wall colour happens to be behind, and the palette reads wrong.
+  ctx.fillStyle = "rgba(0,0,0,0.82)";
+  ctx.fillRect(x - pad * 0.5, top - pad * 0.5, w + pad, h + pad);
+
   for (let i = 0; i < MAX_DEPTH; i++) {
     const s: Stratum | undefined = STRATA[i];
     if (!s) continue;
     const y = top + i * band;
     const here = s.depth === depth;
-    ctx.globalAlpha = here ? 1 : 0.5;
+    ctx.globalAlpha = here ? 1 : 0.62;
     ctx.fillStyle = s.wall;
     ctx.fillRect(x, y, w, band - 1);
 

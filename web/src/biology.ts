@@ -105,13 +105,13 @@ export interface Stratum {
 
 export const STRATA: readonly Stratum[] = [
   { depth:1, name:"Oxic water column",  teap:"O2",      e0: 820, light:1.00, wall:"#6ec78d", floor:"#050d0a", accent:"#d8ffe8", hatch:0, density:0.38, passes:4, blurb:"Sunlit, oxygen-saturated. Everything here burns you slowly." },
-  { depth:2, name:"Sediment interface", teap:"NO3-",    e0: 430, light:0.70, wall:"#8cb86b", floor:"#0a0c06", accent:"#e6ffc9", hatch:1, density:0.42, passes:4, blurb:"Oxygen is running out. Nitrate takes over as acceptor." },
-  { depth:3, name:"Suboxic Mn/S front", teap:"Mn(IV)",  e0: 400, light:0.42, wall:"#c7bd6e", floor:"#0d0b06", accent:"#fff4c2", hatch:1, density:0.46, passes:5, blurb:"The O2/H2S interface. Beggiatoa mats hold the boundary." },
-  { depth:4, name:"Ferruginous zone",   teap:"Fe(III)", e0:   0, light:0.22, wall:"#c26b41", floor:"#0f0703", accent:"#ffcaa8", hatch:2, density:0.48, passes:5, blurb:"Rust. Fe(III) minerals respired by contact and by wire." },
-  { depth:5, name:"Purple sulfur band", teap:"S0",      e0:-120, light:0.12, wall:"#a4529c", floor:"#0c050c", accent:"#f0c2ec", hatch:2, density:0.50, passes:5, blurb:"Anoxygenic photosynthesis. Sulfide is the donor now." },
-  { depth:6, name:"Green sulfur band",  teap:"H2S",     e0:-180, light:0.05, wall:"#4da767", floor:"#050b07", accent:"#c4f0d2", hatch:3, density:0.52, passes:6, blurb:"Almost no light reaches here. Chlorosomes catch what does." },
-  { depth:7, name:"Sulfidogenic black", teap:"SO4",     e0:-220, light:0.01, wall:"#6b6875", floor:"#060608", accent:"#ccc8d8", hatch:3, density:0.55, passes:6, blurb:"FeS precipitate. Sulfide everywhere. The column's black floor." },
-  { depth:8, name:"Methanogenic floor", teap:"CO2",     e0:-240, light:0.00, wall:"#8a7a52", floor:"#080602", accent:"#ffe9b0", hatch:3, density:0.58, passes:6, blurb:"The last acceptor. Nothing below is left to reduce." },
+  { depth:2, name:"Sediment interface", teap:"NO3-",    e0: 430, light:0.70, wall:"#8cb86b", floor:"#0a0c06", accent:"#e6ffc9", hatch:1, density:0.4, passes:4, blurb:"Oxygen is running out. Nitrate takes over as acceptor." },
+  { depth:3, name:"Suboxic Mn/S front", teap:"Mn(IV)",  e0: 400, light:0.42, wall:"#c7bd6e", floor:"#0d0b06", accent:"#fff4c2", hatch:1, density:0.41, passes:5, blurb:"The O2/H2S interface. Beggiatoa mats hold the boundary." },
+  { depth:4, name:"Ferruginous zone",   teap:"Fe(III)", e0:   0, light:0.22, wall:"#c26b41", floor:"#0f0703", accent:"#ffcaa8", hatch:2, density:0.42, passes:5, blurb:"Rust. Fe(III) minerals respired by contact and by wire." },
+  { depth:5, name:"Purple sulfur band", teap:"S0",      e0:-120, light:0.12, wall:"#a4529c", floor:"#0c050c", accent:"#f0c2ec", hatch:2, density:0.43, passes:5, blurb:"Anoxygenic photosynthesis. Sulfide is the donor now." },
+  { depth:6, name:"Green sulfur band",  teap:"H2S",     e0:-180, light:0.05, wall:"#4da767", floor:"#050b07", accent:"#c4f0d2", hatch:3, density:0.44, passes:6, blurb:"Almost no light reaches here. Chlorosomes catch what does." },
+  { depth:7, name:"Sulfidogenic black", teap:"SO4",     e0:-220, light:0.01, wall:"#6b6875", floor:"#060608", accent:"#ccc8d8", hatch:3, density:0.45, passes:6, blurb:"FeS precipitate. Sulfide everywhere. The column's black floor." },
+  { depth:8, name:"Methanogenic floor", teap:"CO2",     e0:-240, light:0.00, wall:"#8a7a52", floor:"#080602", accent:"#ffe9b0", hatch:3, density:0.47, passes:6, blurb:"The last acceptor. Nothing below is left to reduce." },
 ];
 
 export const MAX_DEPTH = STRATA.length;

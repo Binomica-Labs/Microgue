@@ -6,7 +6,7 @@ import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { Plasmid } from "./plasmid.js";
 import { drawRing, describe as describeSlot, slotAt, type RingGeom } from "./plasmid_ui.js";
 import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
-import { classifyDown, type Gesture } from "./gesture.js";
+import { classifyDown, classifyKey, type Gesture } from "./gesture.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
@@ -44,6 +44,7 @@ class Game {
   selected: number | null = null;
   spinFrom: number | null = null;
   barH = 0;
+  logH = 0;
   settings: Settings = DEFAULT_SETTINGS;
   private last = 0;
 
@@ -78,7 +79,6 @@ class Game {
     this.path = null; this.walk = null;
     this.zoom = this.tileZoom();
     const s = level.stratum;
-    this.note(`D${String(s.depth)} ${s.name} — ${s.teap} ${s.e0 >= 0 ? "+" : ""}${String(s.e0)} mV`);
     if (!level.visited) { level.visited = true; this.note(s.blurb); }
     this.save();
   }
@@ -198,31 +198,32 @@ class Game {
     this.canvas.addEventListener("pointercancel", release);
 
     addEventListener("keydown", (e) => {
-      const k = e.key;
-      const dirs: Record<string, [number, number]> = {
-        ArrowUp: [0,-1], ArrowDown: [0,1], ArrowLeft: [-1,0], ArrowRight: [1,0],
-        w:[0,-1], s:[0,1], a:[-1,0], d:[1,0],
-        y:[-1,-1], u:[1,-1], b:[-1,1], n:[1,1],
-      };
-      const dir = dirs[k];
-      if (dir) {
-        e.preventDefault();
-        this.walk = null;
-        const [dx, dy] = dir;
-        const pinch = dx && dy
-          && !this.level.grid.isFloor(this.player.x + dx, this.player.y)
-          && !this.level.grid.isFloor(this.player.x, this.player.y + dy);
-        if (!pinch) this.step(this.player.x + dx, this.player.y + dy);
-        return;
-      }
-      if (k === "i" || k === "p") this.showPlasmid = !this.showPlasmid;
-      else if (k === ">" || k === ".") this.descend();
-      else if (k === "<" || k === ",") this.ascend();
-      else if (k === "+" || k === "=") this.zoom = Math.min(this.zoom * 1.25, 8);
-      else if (k === "-") this.zoom = Math.max(this.zoom / 1.25, 0.3);
-      else if (k === "c") {
-        this.settings = { ...this.settings, highContrast: !this.settings.highContrast };
-        this.save();
+      const act = classifyKey(e.key, this.showPlasmid);
+      if (act.kind === "none") return;
+      e.preventDefault();
+      switch (act.kind) {
+        case "move": {
+          this.walk = null;
+          const pinched = act.dx !== 0 && act.dy !== 0
+            && !this.level.grid.isFloor(this.player.x + act.dx, this.player.y)
+            && !this.level.grid.isFloor(this.player.x, this.player.y + act.dy);
+          if (!pinched) this.step(this.player.x + act.dx, this.player.y + act.dy);
+          break;
+        }
+        case "zoom":
+          this.zoom = Math.min(Math.max(this.zoom * act.factor, 0.3), 8);
+          break;
+        case "togglePlasmid": this.openPlasmid(true); break;
+        case "closePlasmid": this.openPlasmid(false); break;
+        case "toggleHud": break;      // the HUD is always on now
+        case "toggleContrast":
+          this.settings = { ...this.settings, highContrast: !this.settings.highContrast };
+          this.save();
+          break;
+        case "fullscreen": break;
+        case "descend": this.descend(); break;
+        case "ascend": this.ascend(); break;
+        case "quit": break;
       }
     });
 
@@ -231,6 +232,7 @@ class Game {
     let d0 = 0;
     let z0 = 1;
     this.canvas.addEventListener("pointermove", (e) => {
+      if (this.showPlasmid) return;         // the ring owns the pointer here
       if (!pts.has(e.pointerId)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size === 2) {
@@ -240,6 +242,7 @@ class Game {
       }
     });
     this.canvas.addEventListener("pointerdown", (e) => {
+      if (this.showPlasmid) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size === 2) {
         const [a, b] = [...pts.values()] as [Point, Point];
@@ -363,7 +366,9 @@ class Game {
             && Math.abs(this.player.y - this.player.ay) < 0.02;
     if (at) { this.player.ax = this.player.x; this.player.ay = this.player.y; }
 
-    if (this.walk && at) {
+    // Belt and braces: openPlasmid() clears the walk, but the loop refuses to
+    // advance one while the screen is up regardless.
+    if (this.walk && at && !this.showPlasmid) {
       this.walk.i++;
       const n = this.walk.nodes[this.walk.i];
       if (!n || this.dungeon.mobAt(n.x, n.y) || !this.step(n.x, n.y)) this.walk = null;
@@ -493,7 +498,7 @@ class Game {
     if (this.showPlasmid) {
       this.drawPlasmid(W, H);
     } else {
-      layoutButtons(this.buttons, W, H, this.insets(), u, this.barH);
+      layoutButtons(this.buttons, W, H, this.insets(), u, this.barH + this.logH);
       drawButtons(ctx, this.buttons, u);
     }
   }
@@ -576,6 +581,7 @@ class Game {
     // +lh: text is positioned by baseline, so the top line's ascender sits
     // ABOVE its y. Sizing the panel to shown.length*lh left it exposed.
     const logH = shown.length > 0 ? (shown.length + 0.4) * lh + pad * 0.5 : 0;
+    this.logH = logH;
 
     if (logH > 0) {
       ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -732,7 +738,7 @@ class Game {
         break;
       }
       case "dismiss":
-        if (this.inClose(x, y)) { this.showPlasmid = false; this.selected = null; }
+        if (this.inClose(x, y)) this.openPlasmid(false);
         break;
       case "none": case "spin": case "world": break;
     }
@@ -743,9 +749,23 @@ class Game {
     this.spinFrom = null;
   }
 
+  /** Single entry point, so nothing can open the screen without also parking
+   *  the world. An in-flight walk used to keep stepping underneath it. */
+  openPlasmid(open: boolean): void {
+    this.showPlasmid = open;
+    this.selected = null;
+    this.dragFrom = null;
+    this.dragXY = null;
+    this.spinFrom = null;
+    if (open) {
+      this.walk = null;                     // stop mid-path movement
+      this.path = null;
+    }
+  }
+
   press(id: string): void {
     switch (id) {
-      case "plasmid": this.showPlasmid = !this.showPlasmid; this.selected = null; break;
+      case "plasmid": this.openPlasmid(!this.showPlasmid); break;
       case "down": this.descend(); break;
       case "up": this.ascend(); break;
       case "zoomIn": this.zoom = Math.min(this.zoom * 1.25, 8); break;

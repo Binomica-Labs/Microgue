@@ -23,25 +23,32 @@ export function makeButtons(): Button[] {
   ];
 }
 
-/** Lay the bar out along the bottom-right, inside the safe area and above the
- *  status bar. Targets are at least 44pt, which is the usual minimum. */
+/** A single column down the right edge, vertically centred in the space above
+ *  the status bar. A 3x2 block at the bottom-right overlapped both the message
+ *  log and the bar text, because it only reserved the bar's height and the log
+ *  sits above that. A strip can collide with neither. Targets are at least
+ *  44pt, the usual minimum. */
 export function layoutButtons(
   bs: Button[], W: number, H: number,
-  ins: { right: number; bottom: number }, u: number, barH: number,
+  ins: { top: number; right: number; bottom: number }, u: number, reserve: number,
 ): void {
   const size = Math.max(Math.round(46 * u), 44);
-  const gap = Math.round(8 * u);
-  const cols = 3;
-  const rows = Math.ceil(bs.length / cols);
-  const x0 = W - ins.right - gap - cols * (size + gap) + gap;
-  const y0 = H - ins.bottom - barH - gap - rows * (size + gap) + gap;
-  bs.forEach((btn, i) => {
-    const c = i % cols, r = Math.floor(i / cols);
-    btn.x = x0 + c * (size + gap);
-    btn.y = y0 + r * (size + gap);
+  const gap = Math.round(9 * u);
+  const stack = bs.length * size + (bs.length - 1) * gap;
+  const usableTop = ins.top + gap;
+  const usableBottom = H - ins.bottom - reserve - gap;
+  const x = W - ins.right - gap - size;
+  let y = usableTop + Math.max((usableBottom - usableTop - stack) / 2, 0);
+  // If the stack cannot fit, pin it to the top and let it run to the reserve.
+  if (stack > usableBottom - usableTop) y = usableTop;
+
+  for (const btn of bs) {
+    btn.x = x;
+    btn.y = Math.round(y);
     btn.w = size;
     btn.h = size;
-  });
+    y += size + gap;
+  }
 }
 
 export function buttonAt(bs: Button[], x: number, y: number): Button | null {
