@@ -23,7 +23,7 @@ class Game {
   path: Point[] | null = null;
   walk: { nodes: Point[]; i: number } | null = null;
   zoom = 1;
-  log: string[] = [];
+  log: { text: string; t: number }[] = [];
   showPlasmid = false;
   settings: Settings = DEFAULT_SETTINGS;
   private last = 0;
@@ -41,7 +41,12 @@ class Game {
   }
 
   // ---------------------------------------------------------------- state
-  note(s: string): void { this.log.push(s); while (this.log.length > 5) this.log.shift(); }
+  /** Messages expire. Boot lines -- the stratum banner, the blurb, "Resumed."
+   *  -- were eating four of five slots and crowding out actual play. */
+  note(s: string): void {
+    this.log.push({ text: s, t: performance.now() });
+    while (this.log.length > 8) this.log.shift();
+  }
 
   enter(level: Level, arrive: Point): void {
     this.level = level;
@@ -258,7 +263,12 @@ class Game {
   // ------------------------------------------------------------- render
   /** Notch / gesture-bar insets. Read from CSS env() via a probe element,
    *  since canvas has no access to them directly. */
+  private insetCache: { top: number; right: number; bottom: number; left: number } | null = null;
+
+  /** Notch / gesture-bar insets. Cached: this touches the DOM, and the first
+   *  version ran it on every frame. */
   private insets(): { top: number; right: number; bottom: number; left: number } {
+    if (this.insetCache) return this.insetCache;
     const probe = document.createElement("div");
     probe.style.cssText =
       "position:fixed;visibility:hidden;" +
@@ -272,6 +282,7 @@ class Game {
     };
     const out = { top: px(cs.top), right: px(cs.right), bottom: px(cs.bottom), left: px(cs.left) };
     probe.remove();
+    this.insetCache = out;
     return out;
   }
 
@@ -312,6 +323,7 @@ class Game {
   }
 
   resize(): void {
+    this.insetCache = null;
     const dpr = Math.min(devicePixelRatio || 1, 2);
     this.canvas.width = Math.max(innerWidth * dpr, 1);
     this.canvas.height = Math.max(innerHeight * dpr, 1);
@@ -423,14 +435,19 @@ class Game {
       ctx.fillStyle = hc ? "#fff" : "#e04a3a";
       ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.15, px * 0.7, px * 0.7);
       // health as a bar, not as colour saturation
-      ctx.fillStyle = hc ? "#888" : "#2a0d0a";
-      ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.78, px * 0.7, px * 0.1);
-      ctx.fillStyle = hc ? "#fff" : "#ffd0a0";
-      ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.78, px * 0.7 * f, px * 0.1);
+      // Inset so it reads as a gauge, not a stray sliver at the tile edge.
+      const bx = m.x * px + px * 0.2;
+      const by = m.y * px + px * 0.68;
+      const bw = px * 0.6;
+      const bh = Math.max(px * 0.09, 3);
+      ctx.fillStyle = hc ? "#000" : "#1e0806";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = hc ? "#fff" : "#ffd08a";
+      ctx.fillRect(bx, by, bw * f, bh);
       ctx.fillStyle = hc ? "#000" : "#1a0503";
       ctx.font = `bold ${px * 0.5}px ui-monospace,monospace`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(m.glyph, m.x * px + px / 2, m.y * px + px * 0.45);
+      ctx.fillText(m.glyph, m.x * px + px / 2, m.y * px + px * 0.4);
     }
 
     ctx.fillStyle = hc ? "#0ff" : "#ffffff";
@@ -471,24 +488,37 @@ class Game {
     const barH = lh * 2 + pad;
     const barTop = H - ins.bottom - barH;
 
-    ctx.fillStyle = "rgba(0,0,0,0.65)";
-    ctx.fillRect(0, barTop, W, barH + ins.bottom);
+    // Wrap the log first, so the backdrop can cover it too. Drawn over bright
+    // wall tiles with no panel behind it, the text was unreadable.
+    ctx.font = `${size}px ui-monospace,monospace`;
+    const LIFE = 9000;
+    const FADE = 2000;
+    const now = performance.now();
+    const wrapped: { line: string; alpha: number }[] = [];
+    for (const entry of this.log) {
+      const age = now - entry.t;
+      if (age > LIFE) continue;
+      const alpha = age > LIFE - FADE ? (LIFE - age) / FADE : 1;
+      for (const line of this.wrap(entry.text, maxW)) wrapped.push({ line, alpha });
+    }
+    const shown = wrapped.slice(-5);
+    const logH = shown.length * lh + (shown.length > 0 ? pad * 0.5 : 0);
+
+    ctx.fillStyle = "rgba(0,0,0,0.72)";
+    ctx.fillRect(0, barTop - logH, W, barH + logH + ins.bottom);
+
+    ctx.font = `${size}px ui-monospace,monospace`;
     ctx.fillStyle = s.accent;
     ctx.fillText(lineA, left, barTop + lh * 0.85);
     ctx.fillStyle = "#ffffff";
     ctx.fillText(lineB, left, barTop + lh * 1.85);
 
-    // Log above the bar, wrapped and clipped to the visible area.
-    ctx.font = `${size}px ui-monospace,monospace`;
-    const wrapped: string[] = [];
-    for (const entry of this.log) wrapped.push(...this.wrap(entry, maxW));
-    const shown = wrapped.slice(-5);
     for (let i = shown.length - 1; i >= 0; i--) {
-      const line = shown[i];
-      if (line === undefined) continue;
-      ctx.globalAlpha = 1 - (shown.length - 1 - i) * 0.16;
+      const row = shown[i];
+      if (row === undefined) continue;
+      ctx.globalAlpha = row.alpha;
       ctx.fillStyle = "#cfe8d4";
-      ctx.fillText(line, left, barTop - (shown.length - i) * lh - pad * 0.5);
+      ctx.fillText(row.line, left, barTop - (shown.length - i) * lh - pad * 0.25);
     }
     ctx.globalAlpha = 1;
   }
