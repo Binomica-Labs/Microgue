@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "npm run verify && esbuild src/main.ts --bundle --minify --format=esm --target=es2022 --outfile=public/microgue.js && esbuild src/sw.ts --bundle --minify --format=iife --target=es2022 --outfile=public/sw.js",
-    "dev": "esbuild src/main.ts --bundle --format=esm --sourcemap --outfile=public/microgue.js --watch",
+    "build": "npm run verify && node build.mjs",
+    "dev": "node build.mjs --dev && esbuild src/main.ts --bundle --format=esm --sourcemap --outfile=public/microgue.js --watch",
     "test": "vitest run",
     "check": "tsc --noEmit && tsc --noEmit -p tsconfig.sw.json",
     "lint": "eslint src test",

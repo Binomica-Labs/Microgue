@@ -14,10 +14,12 @@ Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 Six things a reasonable-looking change will break. Each of these was arrived at
 the hard way; none are arbitrary.
 
-1. **Bump `VERSION` in `web/src/sw.ts` whenever a bundled asset changes.** The
-   service worker is cache-first. Forget this and the deploy succeeds, the
-   Actions run goes green, and the app keeps serving the old bundle forever. It
-   looks exactly like "my change did nothing."
+1. **The service worker cache name is derived, not written.** `build.mjs`
+   hashes the bundle, index.html, manifest and icons and injects the result as
+   `__BUILD__`. Do not replace it with a constant: a hand-bumped version was
+   forgotten twice, and a forgotten bump ships a deploy that CI passes and no
+   user ever receives. The build fails if the hash does not reach `sw.js`.
+   `public/BUILD` records the current value.
 
 2. **Keep stratum `density` under about 0.47.** The cellular automaton is
    bistable: past that the open space fragments into pockets and
@@ -211,6 +213,35 @@ it fails with a reason rather than shuffling the ring. The arrangement puzzle --
 promoter strength, polarity ordering, what you displace -- stays the player's.
 Making it always succeed would turn the ring into decoration; there are tests
 for each refusal.
+
+## Guards
+
+Cross-table invariants live in `spec` and exist to catch data drift rather than
+any single wrong value:
+
+- every gene is obtainable from some organism, or is a documented starter
+- every complex and every KEGG module is assemblable from what actually drops
+- every hazard is escapable — the gene that clears it must be findable
+- no gene exceeds plasmid capacity; no module needs more slots than the ring has
+- every microbe has a sprite and a pigment; ids are unique and self-consistent
+
+Add a gene, organism, complex or module without wiring it up and one of these
+fails, instead of the feature silently being unreachable.
+
+`save.ts` enforces `SCHEMA`. An older save is discarded rather than
+half-loaded — `version` was previously written and never read, which would have
+fed a flat gene list into ring code during the plasmid rewrite.
+
+## Measured, and deliberately not optimised
+
+The plasmid read path — `power`, `armour`, `regen`, `reach`, `aura` and an
+operon count, everything the HUD touches — is 21.8 us per frame, 0.13% of the
+budget. `traceWalls` over a viewport is 16.5 us. `complexes()` is 10 us. None
+of it is worth caching, and caching it would add invalidation bugs.
+
+The one real cost was `insets()`: `createElement` plus `getComputedStyle`
+forces a style recalculation, and it ran four times a frame. It is cached now
+and cleared on resize.
 
 ## Failure modes seen repeatedly
 

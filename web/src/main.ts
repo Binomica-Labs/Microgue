@@ -15,7 +15,7 @@ import { findPath } from "./path.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { paintWallMotif, paletteForPigment, playerSprite, sprite } from "./paint.js";
 import { traceWalls } from "./walls.js";
-import { DEFAULT_SETTINGS, readSave, writeSave, type Settings } from "./save.js";
+import { DEFAULT_SETTINGS, SCHEMA, readSave, writeSave, type Settings } from "./save.js";
 
 const TILE = 32;
 const SAVE_KEY = "microgue:v1";
@@ -299,7 +299,7 @@ class Game {
   // ------------------------------------------------------------ persist
   save(): void {
     writeSave(SAVE_KEY, {
-      version: 1,
+      version: SCHEMA,
       depth: this.dungeon.depth,
       seed: this.dungeon.seed,
       px: this.player.x,

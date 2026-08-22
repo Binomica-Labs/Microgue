@@ -7,7 +7,11 @@
 
 declare const self: ServiceWorkerGlobalScope;
 
-const VERSION = "microgue-v16";
+// Injected at build time from a hash of the bundled assets. Bumping this by
+// hand was the single most reliable way to ship a change that never reached
+// anyone: the deploy goes green and the cache keeps serving the old bundle.
+declare const __BUILD__: string;
+const VERSION = `microgue-${__BUILD__}`;
 const ASSETS: readonly string[] = [
   "./",
   "./index.html",

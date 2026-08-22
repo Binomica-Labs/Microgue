@@ -15,8 +15,13 @@ export interface Settings {
   readonly diagonal: boolean;
 }
 
+/** Bump when the shape changes incompatibly. A save from an older schema is
+ *  discarded rather than half-loaded: `version` was being written and never
+ *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
+export const SCHEMA = 2;
+
 export interface SaveData {
-  readonly version: 1;
+  readonly version: number;
   readonly depth: number;
   readonly seed: number;
   readonly px: number;
@@ -108,12 +113,14 @@ function parseSettings(v: unknown): Settings {
 /** Narrows unknown -> SaveData, or null if the payload is unusable. */
 export function parseSave(raw: unknown): SaveData | null {
   if (!isRecord(raw)) return null;
+  const v = raw["version"];
+  if (typeof v !== "number" || v !== SCHEMA) return null;
   const depth = Math.round(num(raw["depth"], 1));
   const px = num(raw["px"], NaN);
   const py = num(raw["py"], NaN);
   if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
   return {
-    version: 1,
+    version: SCHEMA,
     depth: Math.min(Math.max(depth, 1), MAX_DEPTH),
     seed: Math.round(num(raw["seed"], 7)),
     px: Math.round(px),

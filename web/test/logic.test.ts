@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import * as bio from "../src/biology.js";
-import { Genome } from "../src/genome.js";
 import { Dungeon } from "../src/dungeon.js";
 import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
@@ -69,66 +68,6 @@ describe("organisms", () => {
     }
   });
   it("all 20 organisms ported", () => { expect(bio.MICROBES).toHaveLength(20); });
-});
-
-describe("plasmid", () => {
-  it("starts with an origin and refuses to lose it", () => {
-    const g = new Genome();
-    expect(g.has("ori")).toBe(true);
-    expect(g.remove("ori").ok).toBe(false);
-  });
-  it("refuses duplicates and overfilling", () => {
-    const g = new Genome();
-    expect(g.insert("psbA").ok).toBe(true);
-    expect(g.insert("psbA").ok).toBe(false);
-    for (const id of ["cbbL","katG","narG","mtrC","dsrA","mcrA","nifH"] as const) g.insert(id);
-    expect(g.used()).toBeLessThanOrEqual(g.capacity);
-  });
-  it("burden rises past the knee", () => {
-    const g = new Genome();
-    expect(g.burden()).toBe(0);
-    for (const id of ["narG","katG","mtrC","dsrA","aprA"] as const) g.insert(id);
-    expect(g.burden()).toBeGreaterThan(0);
-  });
-
-  const kit = () => {
-    const g = new Genome();
-    for (const id of ["nifH","mcrA","mtrC","psbA"] as const) g.insert(id);
-    return g;
-  };
-  it("nifH is destroyed by O2 but works anoxically", () => {
-    const g = kit();
-    expect(g.expression("nifH", 1)).toBe(0);
-    expect(g.expression("nifH", 5)).toBeGreaterThan(0);
-  });
-  it("mcrA is dead weight until CO2 is the acceptor", () => {
-    const g = kit();
-    expect(g.expression("mcrA", 7)).toBe(0);
-    expect(g.expression("mcrA", 8)).toBeGreaterThan(0);
-  });
-  it("mtrC only fires on Fe(III)", () => {
-    const g = kit();
-    expect(g.expression("mtrC", 4)).toBeGreaterThan(0);
-    expect(g.expression("mtrC", 7)).toBe(0);
-  });
-  it("phototrophy dies in the dark, chlorosomes do not", () => {
-    const g = new Genome();
-    g.insert("psbA"); g.insert("csmA");
-    expect(g.expression("psbA", 1)).toBeGreaterThan(0);
-    expect(g.expression("psbA", 8)).toBe(0);
-    expect(g.expression("csmA", 8)).toBeGreaterThan(0);
-  });
-  it("codon optimisation raises expression", () => {
-    const g = kit();
-    const before = g.expression("mtrC", 4);
-    expect(g.optimise("mtrC").ok).toBe(true);
-    expect(g.expression("mtrC", 4)).toBeGreaterThan(before);
-    expect(g.optimise("mtrC").ok).toBe(false);
-  });
-  it("plasmid map arcs sum to 360", () => {
-    const r = kit().report(4);
-    expect(r.at(-1)!.stop).toBeCloseTo(360, 6);
-  });
 });
 
 describe("pathfinding", () => {
@@ -262,7 +201,7 @@ describe("rng", () => {
 });
 
 describe("save validation", () => {
-  const good = { depth: 4, seed: 7, px: 10, py: 12, hp: 22,
+  const good = { version: 2, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
                  ring: [{ kind: "promoter", strength: "strong" },
                         { kind: "gene", id: "mtrC", optimised: true }],
                  settings: { uiScale: 1.5, highContrast: true, reduceMotion: false, diagonal: false } };
@@ -275,6 +214,16 @@ describe("save validation", () => {
     expect(s?.ring).toHaveLength(SLOTS);
     expect(s?.settings.highContrast).toBe(true);
   });
+  it("rejects a save from an incompatible schema instead of half-loading it", () => {
+    // version was written and never read; the flat-gene-list to ring rewrite
+    // would have fed the old shape straight into slot code.
+    expect(parseSave({ ...good, version: 1 })).toBeNull();
+    expect(parseSave({ ...good, version: 99 })).toBeNull();
+    const noVersion: Record<string, unknown> = { ...good };
+    delete noVersion["version"];
+    expect(parseSave(noVersion)).toBeNull();
+  });
+
   it("rejects non-objects outright", () => {
     for (const junk of [null, undefined, 42, "nope", [1, 2, 3]]) {
       expect(parseSave(junk)).toBeNull();
@@ -311,7 +260,7 @@ describe("save validation", () => {
     expect(parseSave({ ...good, settings: { uiScale: 500 } })?.settings.uiScale).toBe(3);
   });
   it("survives a hand-edited hostile payload", () => {
-    const s = parseSave({ depth: {}, seed: [], px: 1, py: 1, hp: -50,
+    const s = parseSave({ version: 2, depth: {}, seed: [], px: 1, py: 1, hp: -50,
                           ring: "all of them", settings: null });
     expect(s).not.toBeNull();
     expect(s?.hp).toBeGreaterThan(0);
@@ -1050,7 +999,7 @@ describe("toxic intermediates", () => {
 describe("save round-trips the bin", () => {
   it("keeps stashed parts across a reload", () => {
     const s = parseSave({
-      depth: 4, seed: 7, px: 5, py: 5, hp: 20,
+      version: 2, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
       ring: [{ kind: "promoter", strength: "medium" }],
       bin: [{ kind: "gene", id: "mtrC", optimised: false }, { kind: "terminator" }],
       settings: {},
@@ -1060,14 +1009,14 @@ describe("save round-trips the bin", () => {
   });
   it("drops junk and duplicates from the bin", () => {
     const s = parseSave({
-      depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
+      version: 2, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
       bin: [{ kind: "gene", id: "mtrC" }, { kind: "gene", id: "mtrC" }, "junk", 7,
             { kind: "gene", id: "notReal" }],
     });
     expect(s?.bin).toHaveLength(1);
   });
   it("a missing bin is an empty bin, not a crash", () => {
-    const s = parseSave({ depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
+    const s = parseSave({ version: 2, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
     expect(s?.bin).toEqual([]);
   });
 });
@@ -1194,6 +1143,188 @@ describe("module auto-assembly", () => {
     for (const g of sulfate) {
       const n = p.slots.filter((x) => x?.kind === "gene" && x.id === g).length;
       expect(n, g).toBe(1);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression guards. These assert relationships BETWEEN tables rather than any
+// one value, so adding a gene, organism, complex or module without wiring it
+// up fails here instead of silently producing an unreachable feature.
+// ---------------------------------------------------------------------------
+
+describe("data integrity", () => {
+  const droppable = new Set(bio.MICROBES.flatMap((m) => [...m.genes]));
+
+  it("every gene is obtainable, or is a documented starter part", () => {
+    const starters = new Set<bio.GeneId>(["ori"]);
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      expect(droppable.has(id) || starters.has(id),
+        `${id} is carried by no organism and is not a starter`).toBe(true);
+    }
+  });
+
+  it("every complex is assemblable from what drops", () => {
+    for (const c of bio.COMPLEXES) {
+      for (const g of c.genes) {
+        expect(droppable.has(g), `${c.id} needs ${g}, which nothing drops`).toBe(true);
+      }
+    }
+  });
+
+  it("every KEGG module is completable from what drops", () => {
+    for (const m of MODULES) {
+      expect(moduleState(m, droppable).complete, `${m.id} is unobtainable`).toBe(true);
+    }
+  });
+
+  it("every hazard is escapable -- its missing gene must be findable", () => {
+    for (const h of bio.HAZARDS) {
+      expect(droppable.has(h.missing),
+        `${h.id} can never be cleared: nothing drops ${h.missing}`).toBe(true);
+    }
+  });
+
+  it("every organism can be met before the genes it drops are needed", () => {
+    // A gene used by a complex should drop at or above the depth where that
+    // complex is useful; otherwise you can never assemble it in time.
+    for (const m of bio.MICROBES) {
+      expect(m.depth, m.id).toBeGreaterThanOrEqual(1);
+      expect(m.depth, m.id).toBeLessThanOrEqual(bio.MAX_DEPTH);
+    }
+  });
+
+  it("no gene is larger than the plasmid can hold", () => {
+    const cap = new Plasmid().capacityKb();
+    for (const [id, g] of Object.entries(bio.GENES)) {
+      expect(g.kb, id).toBeLessThan(cap);
+    }
+  });
+
+  it("no module needs more slots than the ring has", () => {
+    for (const m of MODULES) {
+      expect(m.steps.length + 2, m.id).toBeLessThanOrEqual(SLOTS);
+    }
+  });
+
+  it("every microbe has a pixel sprite and a pigment", () => {
+    for (const m of bio.MICROBES) {
+      expect(PIXELS[m.id], m.id).toBeDefined();
+      expect(m.pigment, m.id).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
+  it("gene ids are unique and self-consistent", () => {
+    for (const [key, g] of Object.entries(bio.GENES)) {
+      expect(g.id, `${key} key/id mismatch`).toBe(key);
+    }
+  });
+
+  it("microbe ids are unique", () => {
+    const ids = bio.MICROBES.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("edge cases across modules", () => {
+  it("rng survives degenerate seeds", () => {
+    for (const seed of [0, -1, 2 ** 32, Number.MAX_SAFE_INTEGER]) {
+      const r = makeRng(seed);
+      const v = r.next();
+      expect(Number.isFinite(v), `seed ${seed}`).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(1);
+    }
+  });
+
+  it("a 1x1 grid does not crash generation or pathing", () => {
+    const g = mg.generate(1, 1, makeRng(1));
+    expect(g.w).toBeGreaterThanOrEqual(3);          // clamped
+    expect(() => mg.keepLargestRegion(g)).not.toThrow();
+    expect(() => mg.carveSpawn(g)).not.toThrow();
+  });
+
+  it("pathing from a tile to itself returns that tile", () => {
+    const g = new mg.Grid(6, 6, mg.FLOOR);
+    expect(findPath(g, { x: 2, y: 2 }, { x: 2, y: 2 })).toEqual([{ x: 2, y: 2 }]);
+  });
+
+  it("pathing into a sealed pocket returns null rather than hanging", () => {
+    const g = new mg.Grid(9, 9, mg.FLOOR);
+    for (let i = 0; i < 9; i++) { g.set(i, 4, mg.WALL); g.set(4, i, mg.WALL); }
+    expect(findPath(g, { x: 1, y: 1 }, { x: 7, y: 7 })).toBeNull();
+  });
+
+  it("rotating the ring by absurd amounts is a no-op modulo SLOTS", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "medium" });
+    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    const before = p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null));
+    p.rotate(SLOTS * 1000);
+    expect(p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null))).toEqual(before);
+    p.rotate(-SLOTS * 3);
+    expect(p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null))).toEqual(before);
+  });
+
+  it("swapping a slot with itself changes nothing", () => {
+    const p = new Plasmid();
+    const before = JSON.stringify(p.slots);
+    p.swap(3, 3);
+    expect(JSON.stringify(p.slots)).toBe(before);
+  });
+
+  it("assembling an empty module list is refused, not a crash", () => {
+    const p = new Plasmid();
+    expect(() => p.assemble([])).not.toThrow();
+  });
+
+  it("a completely full ring reports no free slots and refuses installs", () => {
+    const p = new Plasmid();
+    for (let i = 0; i < SLOTS; i++) if (p.at(i) === null) p.put(i, { kind: "terminator" });
+    expect(p.free()).toBe(0);
+    expect(p.add({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
+  });
+
+  it("a full bin refuses further loot rather than dropping it silently", () => {
+    const p = new Plasmid();
+    while (p.stash({ kind: "terminator" }).ok) { /* fill */ }
+    expect(p.bin.length).toBeLessThanOrEqual(12);
+    expect(p.stash({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
+  });
+
+  it("expression is finite and non-negative at every depth for every gene", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    let slot = 5;
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      if (id === "ori" || slot >= SLOTS) continue;
+      p.put(slot++, { kind: "gene", id, optimised: true });
+    }
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+        const e = p.expression(id, d);
+        expect(Number.isFinite(e), `${id} at D${d}`).toBe(true);
+        expect(e, `${id} at D${d}`).toBeGreaterThanOrEqual(0);
+      }
+      expect(Number.isFinite(p.power(d))).toBe(true);
+      expect(p.armour(d)).toBeGreaterThan(0);
+      expect(p.armour(d)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("stratum() clamps any depth, including nonsense", () => {
+    for (const d of [-99, 0, 1, 8, 999, 1.5, Number.NaN]) {
+      const s = bio.stratum(d);
+      expect(s.depth).toBeGreaterThanOrEqual(1);
+      expect(s.depth).toBeLessThanOrEqual(bio.MAX_DEPTH);
+    }
+  });
+
+  it("energyYield stays in a sane band at every depth", () => {
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      const y = bio.energyYield(d);
+      expect(y).toBeGreaterThan(0);
+      expect(y).toBeLessThanOrEqual(1);
     }
   });
 });

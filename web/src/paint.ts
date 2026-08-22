@@ -4,7 +4,6 @@
 
 import { MORPHOLOGY, type Role, type Shape } from "./shapes.js";
 import { PIXELS, PX_SIZE } from "./pixels.js";
-import type { Stratum } from "./biology.js";
 
 export interface Palette { body: string; dark: string; accent: string; hi: string; }
 
@@ -25,10 +24,6 @@ export function paletteForPigment(pigment: string): Palette {
     accent: mix(pigment, 255, 0.45),
     hi: mix(pigment, 255, 0.78),
   };
-}
-
-export function paletteFor(s: Stratum): Palette {
-  return { body: s.wall, dark: s.floor, accent: s.accent, hi: "#fff6d0" };
 }
 
 const PLAYER_PALETTE: Palette =

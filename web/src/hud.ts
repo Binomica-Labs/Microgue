@@ -6,7 +6,6 @@
 // a glance -- how far down you are, and how much darker it gets.
 
 import { MAX_DEPTH, STRATA, type Stratum } from "./biology.js";
-import type { Plasmid } from "./plasmid.js";
 
 export interface HudLayout {
   readonly u: number;          // ui scale
@@ -93,42 +92,5 @@ export function drawBar(
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#ffffff";
   ctx.fillText(label, x + 6, y + h / 2 + 0.5);
-  ctx.restore();
-}
-
-
-/** Miniature plasmid ring: occupancy as arc coverage, burden as ring colour. */
-export function drawPlasmidRing(
-  ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number,
-  genome: Plasmid, depth: number,
-): void {
-  ctx.save();
-  ctx.lineWidth = Math.max(r * 0.36, 3);
-  ctx.strokeStyle = "rgba(255,255,255,0.16)";
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // One arc per operon, brightness by mean expression at this depth.
-  for (const op of genome.operons()) {
-    if (op.genes.length === 0) continue;
-    const step = (Math.PI * 2) / 16;
-    const a0 = op.promoter * step - Math.PI / 2;
-    const a1 = a0 + (op.genes.length + 1) * step;
-    const e = op.genes.reduce((a, g) => a + genome.expression(g.id, depth), 0)
-            / op.genes.length;
-    ctx.strokeStyle = `rgba(${120 + 135 * e},${140 + 110 * e},130,${0.45 + 0.55 * e})`;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, a0 + 0.04, a1 - 0.04);
-    ctx.stroke();
-  }
-
-  const burden = genome.burden();
-  if (burden > 0) {
-    ctx.fillStyle = `rgba(255,${Math.round(180 - 140 * burden)},80,${0.5 + burden * 0.5})`;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * 0.34, 0, Math.PI * 2);
-    ctx.fill();
-  }
   ctx.restore();
 }
