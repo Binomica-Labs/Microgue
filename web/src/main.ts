@@ -11,6 +11,7 @@ import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
 import { drawBar, drawColumn, drawPlasmidRing, type HudLayout } from "./hud.js";
 import { paintWallMotif, paletteForPigment, playerSprite, sprite } from "./paint.js";
+import { traceWalls } from "./walls.js";
 import { DEFAULT_SETTINGS, readSave, writeSave, type Settings } from "./save.js";
 
 const TILE = 32;
@@ -388,23 +389,35 @@ class Game {
     const y0 = Math.max(Math.floor((this.player.ay - H / px / 2) - 1), 0);
     const y1 = Math.min(Math.ceil((this.player.ay + H / px / 2) + 1), this.level.grid.h - 1);
 
-    // Walls: filled, not outlined -- outlines are near-invisible in sunlight.
-    // hatch is a redundant, non-colour depth cue, because hue alone excludes
-    // ~8% of men and D1 and D6 are both green.
-    ctx.fillStyle = hc ? "#fff" : s.wall;
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        if (!this.level.grid.isWall(x, y)) continue;
-        // Round and overlap by a pixel. At fractional zoom (32 * 2.6 = 83.2)
-        // adjacent rects antialias against each other and leave visible seams.
-        const rx = Math.round(x * px);
-        const ry = Math.round(y * px);
-        ctx.fillRect(rx, ry, Math.round((x + 1) * px) - rx + 1, Math.round((y + 1) * px) - ry + 1);
-        if (!hc) {
-          paintWallMotif(ctx, s.depth, x, y, rx, ry, px, s.floor);
-          ctx.fillStyle = s.wall;
+    // Walls as one traced contour, not a grid of squares. Corners round where
+    // they are exposed and fillet where three tiles meet, so the region reads
+    // as organic rather than tiled. All tiles go into a single path and fill
+    // together under nonzero winding, so shared edges leave no seam.
+    ctx.fillStyle = hc ? "#ffffff" : s.wall;
+    ctx.save();
+    ctx.scale(px, px);
+    ctx.beginPath();
+    traceWalls(ctx, this.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
+    ctx.fill();
+    ctx.restore();
+
+    // Motifs afterwards, clipped to the contour so texture never spills into
+    // the floor at a rounded corner.
+    if (!hc && px >= 40) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.save();
+      ctx.scale(px, px);
+      traceWalls(ctx, this.level.grid, x0, y0, x1, y1, 0.5);
+      ctx.restore();
+      ctx.clip();
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          if (!this.level.grid.isWall(x, y)) continue;
+          paintWallMotif(ctx, s.depth, x, y, Math.round(x * px), Math.round(y * px), px, s.floor);
         }
       }
+      ctx.restore();
     }
 
     if (this.path) {
