@@ -247,6 +247,18 @@ earlier push.
 a red deploy; if the update ran after it, a broken sync.sh could never replace
 itself, which is the exact trap that broke CI twice.
 
+**The push status is checked and unpushed commits are detected.** `git push -q`
+followed by an unconditional "pushed" message hid a failed push completely, and
+because the up-to-date guard only looked at `git status --porcelain` -- the
+working TREE -- a stranded commit then looked identical to being in sync. It
+sat on the phone with no deploy and nothing saying so. The guard now also runs
+`git log @{u}..HEAD`, and a failed push exits non-zero telling you to retry.
+
+**The self-update is skipped when running from a source tree.** Exercising the
+script against a scratch repo copied the packaged sync.sh back over the one
+being edited, silently reverting work in progress. It presents as edits that
+"did not apply".
+
 **The self-update is an atomic `mv`, never a `cp` over the file in place.**
 bash reads a script incrementally by byte offset, so overwriting the file it is
 currently executing makes it resume mid-line in the new contents and run

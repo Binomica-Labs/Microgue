@@ -83,6 +83,39 @@ describe("sync.sh", () => {
     expect(SRC).toMatch(/command -v gh/);
   });
 
+  it("checks whether the push actually succeeded", () => {
+    // `git push -q` followed by an unconditional "pushed" message is how a
+    // commit ends up living on the phone while no deploy ever happens.
+    expect(SRC, "a bare push hides its own failure").not.toMatch(/^git push -q\s*$/m);
+    expect(SRC).toMatch(/if ! git push; then/);
+    expect(SRC).toMatch(/PUSH FAILED/);
+  });
+
+  it("treats an unpushed commit as work to do, not as up to date", () => {
+    // git status --porcelain only sees the WORKING TREE. A commit that failed
+    // to push leaves a clean tree and looks identical to being in sync.
+    expect(SRC).toMatch(/git log @\{u\}\.\.HEAD/);
+    const guard = /if \[ -z "\$\(git status --porcelain\)" \] && \[ -z "\$unpushed" \]/;
+    expect(SRC, "the up-to-date guard must consider unpushed commits")
+      .toMatch(guard);
+  });
+
+  it("asks gh for the full SHA, which is the only form --commit resolves", () => {
+    expect(SRC).toMatch(/sha="\$\(git rev-parse HEAD\)"/);
+    expect(SRC, "an abbreviated sha returns no runs")
+      .not.toMatch(/rev-parse --short HEAD\)"\s*$[\s\S]{0,80}--commit/m);
+  });
+
+  it("a real script that ignores push failure is the anti-pattern", () => {
+    // Control: demonstrate that the shape we removed genuinely swallows an
+    // error, so the assertion above is testing something real.
+    const dir = mkdtempSync(join(tmpdir(), "syn-"));
+    const p = join(dir, "bad.sh");
+    writeFileSync(p, "#!/bin/bash\nfalse\necho 'pushed anyway'\n");
+    const out = execFileSync("bash", [p], { encoding: "utf8" });
+    expect(out).toContain("pushed anyway");
+  });
+
   it("mirrors the whole tree, not a hand-listed subset", () => {
     expect(SRC).toMatch(/cp -r "\$src\/\." "\$REPO\/web\/"/);
   });

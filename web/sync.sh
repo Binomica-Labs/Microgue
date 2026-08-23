@@ -32,14 +32,34 @@ if [ -f "$REPO/web/HANDOVER.md" ]; then
 fi
 
 cd "$REPO"
-if [ -z "$(git status --porcelain)" ]; then
+# "Nothing to push" has to mean nothing LOCAL and nothing UNPUSHED. Checking
+# only the working tree meant a failed push looked identical to being in sync,
+# and the commit sat on the phone indefinitely.
+unpushed="$(git log @{u}..HEAD --oneline 2>/dev/null || true)"
+if [ -z "$(git status --porcelain)" ] && [ -z "$unpushed" ]; then
   echo "==> already up to date, nothing to push"
   exit 0
 fi
+if [ -n "$unpushed" ]; then
+  echo "==> $(printf '%s\n' "$unpushed" | wc -l | tr -d ' ') commit(s) not on the remote:"
+  printf '%s\n' "$unpushed" | sed 's/^/    /'
+fi
 git status --short
 git add -A
-git commit -q -m "$MSG"
-git push -q
+# Only commit if there is something to commit: this may be a retry of a push
+# that failed earlier, with the commit already made.
+if [ -n "$(git status --porcelain)" ]; then
+  git commit -q -m "$MSG"
+fi
+
+# NOT -q, and the status IS checked. `git push -q` followed by an
+# unconditional "pushed" message is how a commit ends up living on the phone
+# while the deploy never happens and nothing says so.
+if ! git push; then
+  echo "==> PUSH FAILED. Nothing was deployed."
+  echo "==> fix the remote, then run sync.sh again to retry the same commit."
+  exit 1
+fi
 echo "==> pushed $(git rev-parse --short HEAD)"
 
 # Self-update. This script lives outside the repo, so it cannot be refreshed by
@@ -52,7 +72,12 @@ echo "==> pushed $(git rev-parse --short HEAD)"
 # commands. A rename swaps the directory entry and leaves the running shell on
 # the original inode, so it finishes the version it started.
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-if [ -f "$src/sync.sh" ] && ! cmp -s "$src/sync.sh" "$self"; then
+# Never self-update when running from inside a checkout: exercising this script
+# against a scratch repo would otherwise copy the packaged sync.sh back over
+# the one being edited, silently reverting work in progress. It happened.
+if [ -f "$self" ] && [ -f "$(dirname "$self")/package.json" ]; then
+  echo "==> running from a source tree; skipping self-update"
+elif [ -f "$src/sync.sh" ] && ! cmp -s "$src/sync.sh" "$self"; then
   if cp "$src/sync.sh" "$self.new" && chmod +x "$self.new" \
      && mv -f "$self.new" "$self"; then
     echo "==> sync.sh updated itself; the next run uses the new version"
@@ -70,6 +95,7 @@ fi
 # picks the right one every time and needs nothing from you. The run does not
 # exist the instant the push returns, so poll briefly for it.
 if command -v gh >/dev/null 2>&1; then
+  # Full SHA: `gh run list --commit` will not resolve an abbreviated one.
   sha="$(git rev-parse HEAD)"
   run=""
   i=0
