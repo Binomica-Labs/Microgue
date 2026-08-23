@@ -638,6 +638,21 @@ everything put your own metabolism in a corner of a mostly dark chart at 0.84x;
 leaving the rest to be found by panning. The view is reset each time the map is
 opened, so it reframes as the genome grows.
 
+**Every view transform sanitises non-finite input.** One NaN reaching a `View`
+makes every later transform NaN and the map goes blank with nothing logged --
+a zero starting pinch distance or a lost pointer was enough. `zoomAbout`
+sanitises the INCOMING view too, because falling back to `v.x` is no use when
+`v.x` is the thing that is already broken.
+
+**A pinch is never a tap.** A pinch clears `panFrom`, so `panMoved` stayed near
+zero and lifting a finger over a module caption BUILT that module -- inspecting
+a pathway by pinching it silently assembled it. `pinching` stays set until
+every finger is up. Three or more simultaneous pointers clear the map, so a
+missed pointerup cannot leave an entry that pairs with the next single touch.
+
+**The map view is dropped on resize**, since a view framed for portrait is
+wrong in landscape.
+
 **A pinch has to act on whatever is on screen.** The handler only checked
 `showPlasmid`, so pinching the map silently zoomed the WORLD behind it -- the
 map never moved and the gesture read as broken. `owner()` now decides which
@@ -722,7 +737,36 @@ destroyed." teaches nothing; "The Geobacter ruptures. Cytoplasm spills into the
 pore water." says what a lysis is. Lines vary by damage, by weapon and by
 outcome, and there is a test asserting they are not all identical.
 
-## Found in the adversarial audit
+## Found in the deep adversarial audit
+
+Fuzzing every pure surface with NaN, +-Infinity and 1e308 produced **62
+non-finite results**. None were reachable from normal play, but they share one
+failure mode: a NaN becomes a coordinate or a scale, the thing silently stops
+being drawn, and nothing is logged. Guarded at source in `motion`, `footprint`,
+`fov`, `cycle`, `fx` and `plasmid`. `test/audit.test.ts` re-runs the whole fuzz
+on every build.
+
+**`Plasmid.supply` was the dangerous one.** It is public, assigned from an ATP
+division every turn, and read by expression, power, vitality and all of combat.
+One bad frame would have poisoned the entire run. Clamped on read.
+
+**The origin could be lost, which is a silent soft-lock.** Without `ori` every
+expression is zero and the cell is dead -- and the origin is in no loot table,
+so nothing brings it back. `remove` and `uninstall` refused to excise it but
+`put` is public, and `applySave` writes the whole ring through `put`, so a save
+lacking an origin loaded a permanently dead plasmid. `touch()` now restores it:
+the invariant matters more than the individual write.
+
+**Bodies overlapped at spawn.** Three places asked "can a body stand here" and
+two checked only the ANCHOR tile, so a filament whose anchor was free still
+overlapped a neighbour through its other two tiles. One `canPlace` helper now
+serves all three -- which is the only way the answer stays the same.
+
+`test/soak.test.ts` runs the real Game for 2000 frames, descends all 24 floors,
+and cycles every screen a hundred times, asserting nothing unbounded
+accumulates and the player never reaches an impossible state.
+
+## Found in the earlier audit
 
 Five defects, every one silent:
 

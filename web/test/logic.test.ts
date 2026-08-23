@@ -3968,3 +3968,125 @@ describe("the pathway map frames what you have unlocked", () => {
     }
   });
 });
+
+describe("view maths survives degenerate input", () => {
+  const finite = (v: View, label: string): void => {
+    expect(Number.isFinite(v.x), `${label} x`).toBe(true);
+    expect(Number.isFinite(v.y), `${label} y`).toBe(true);
+    expect(Number.isFinite(v.scale), `${label} scale`).toBe(true);
+  };
+
+  it("a pinch that produces NaN is a no-op, not a poisoned view", () => {
+    // One NaN reaching a View makes every later transform NaN and the map
+    // goes blank with nothing logged anywhere.
+    const base: View = { x: 0, y: 0, scale: 1 };
+    for (const f of [Number.NaN, 0, Infinity, -Infinity, -3]) {
+      finite(zoomAbout(base, 10, 10, f), `factor ${String(f)}`);
+    }
+    for (const s of [Number.NaN, Infinity]) {
+      finite(zoomAbout(base, s, s, 1.2), `screen ${String(s)}`);
+    }
+    finite(zoomAbout({ x: Number.NaN, y: 0, scale: Number.NaN }, 5, 5, 1.1), "view NaN");
+  });
+
+  it("framing survives empty, inverted and non-finite bounds", () => {
+    finite(frame(1080, 2000, { minX: 5, minY: 5, maxX: 5, maxY: 5 }), "zero size");
+    finite(frame(1080, 2000, { minX: 900, minY: 900, maxX: 100, maxY: 100 }), "inverted");
+    finite(frame(1080, 2000, { minX: Number.NaN, minY: 0, maxX: 10, maxY: 10 }), "NaN");
+    finite(frame(0, 0, { minX: 0, minY: 0, maxX: 100, maxY: 100 }), "zero viewport");
+  });
+
+  it("clampView repairs a view rather than propagating its damage", () => {
+    finite(clampView({ x: Number.NaN, y: Number.NaN, scale: Number.NaN }, 1080, 2000), "all NaN");
+    finite(clampView({ x: 1e300, y: -1e300, scale: 1e300 }, 1080, 2000), "huge");
+  });
+
+  it("a repaired view still shows the graph", () => {
+    const v = clampView({ x: Number.NaN, y: Number.NaN, scale: Number.NaN }, 1080, 2000);
+    const b = graphBounds();
+    const onScreen = (b.minX - v.x) * v.scale;
+    expect(Math.abs(onScreen)).toBeLessThan(1e5);
+    expect(v.scale).toBeGreaterThanOrEqual(0.35);
+    expect(v.scale).toBeLessThanOrEqual(2.5);
+  });
+
+  it("repeated zooming never drifts off to infinity", () => {
+    let v: View = { x: 0, y: 0, scale: 1 };
+    for (let i = 0; i < 500; i++) {
+      v = clampView(zoomAbout(v, 540, 1000, i % 2 === 0 ? 1.3 : 0.77), 1080, 2000);
+    }
+    finite(v, "after 500 pinches");
+    expect(v.scale).toBeGreaterThanOrEqual(0.35);
+    expect(v.scale).toBeLessThanOrEqual(2.5);
+  });
+
+  it("litBounds ignores genes that appear in no module", () => {
+    // luxAB is real and carried, but it is in no KEGG module here.
+    expect(litBounds(new Set(["luxAB"]))).toBeNull();
+    expect(litBounds(new Set(["luxAB", "mtrC"]))).not.toBeNull();
+  });
+});
+
+describe("a pinch is never a tap", () => {
+  // Modelled exactly as main.ts does it. The bug: a pinch clears panFrom, so
+  // panMoved stays near zero, and lifting a finger over a module caption
+  // BUILT that module. Inspecting a pathway by pinching it assembled it.
+  interface S { panMoved: number; pinching: boolean; pts: Set<number> }
+  const fresh = (): S => ({ panMoved: 0, pinching: false, pts: new Set() });
+
+  const down = (s: S, id: number): void => {
+    if (s.pts.size > 2) s.pts.clear();
+    s.pts.add(id);
+    if (s.pts.size === 2) { s.pinching = true; s.panMoved = 0; }
+  };
+  const up = (s: S, id: number): void => {
+    s.pts.delete(id);
+    if (s.pts.size === 0) s.pinching = false;
+  };
+  const wouldBuild = (s: S): boolean => s.panMoved < 10 && !s.pinching;
+
+  it("a genuine tap builds", () => {
+    const s = fresh();
+    down(s, 1);
+    expect(wouldBuild(s)).toBe(true);
+  });
+
+  it("a pinch does not, even though it barely moved", () => {
+    const s = fresh();
+    down(s, 1); down(s, 2);
+    expect(wouldBuild(s), "lifting a pinch must not assemble").toBe(false);
+  });
+
+  it("lifting one finger of two still does not build", () => {
+    const s = fresh();
+    down(s, 1); down(s, 2);
+    up(s, 2);
+    expect(wouldBuild(s)).toBe(false);
+  });
+
+  it("tapping again after the pinch fully ends does build", () => {
+    const s = fresh();
+    down(s, 1); down(s, 2);
+    up(s, 1); up(s, 2);
+    down(s, 3);
+    expect(wouldBuild(s)).toBe(true);
+  });
+
+  it("a stale pointer cannot fake a pinch", () => {
+    // A missed pointerup -- a notification, an app switch -- used to leave an
+    // entry that paired with the next single touch.
+    const s = fresh();
+    down(s, 1); down(s, 2); down(s, 3);   // three down, none released
+    up(s, 1); up(s, 2); up(s, 3);
+    down(s, 4);
+    expect(s.pts.size).toBe(1);
+    expect(wouldBuild(s)).toBe(true);
+  });
+
+  it("a drag across a caption does not build either", () => {
+    const s = fresh();
+    down(s, 1);
+    s.panMoved = 40;
+    expect(wouldBuild(s)).toBe(false);
+  });
+});

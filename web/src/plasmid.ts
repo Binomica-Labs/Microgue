@@ -296,6 +296,26 @@ export class Plasmid {
     this.rev++;
     this.memoOperons = null;
     this.memoAtp.clear();
+    this.ensureOrigin();
+  }
+
+  /**
+   * The origin is not optional.
+   *
+   * Without `ori` every expression is zero, so the cell is dead -- and the
+   * origin is in no loot table, so nothing can bring it back. `remove` and
+   * `uninstall` refuse to excise it, but `put` is public and `applySave`
+   * writes the whole ring through it, so a save without an origin loaded a
+   * permanently dead plasmid with nothing said. Restore rather than refuse:
+   * the invariant matters more than the individual write.
+   */
+  private ensureOrigin(): void {
+    if (this.slots.some((s) => s?.kind === "gene" && s.id === "ori")) return;
+    const free = this.slots.findIndex((s) => s === null);
+    const at = free >= 0 ? free : this.slots.findIndex((s) => s?.kind !== "gene");
+    const i = at >= 0 ? at : 0;
+    // Direct assignment: going through put() would recurse into touch().
+    this.slots[i] = { kind: "gene", id: "ori", optimised: false };
   }
 
   /** Revision counter, exposed so tests can assert invalidation. */
@@ -338,7 +358,11 @@ export class Plasmid {
   }
 
   expression(id: GeneId, depth: number): number {
-    return this.rawExpression(id, depth) * this.supply;
+    // `supply` is public and set from an ATP division. Clamping it here means
+    // one bad frame cannot make every downstream number NaN for the rest of
+    // the run -- expression, power, vitality and combat all read through this.
+    const s = Number.isFinite(this.supply) ? Math.min(Math.max(this.supply, 0), 1) : 1;
+    return this.rawExpression(id, depth) * s;
   }
 
   /** ATP drawn per action. Memoised: it depends only on the ring and the

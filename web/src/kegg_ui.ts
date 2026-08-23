@@ -49,12 +49,15 @@ export function litBounds(carried: ReadonlySet<string>): Bounds | null {
 
 /** Frame a region: centre it and pick a scale that fits it comfortably. */
 export function frame(w: number, h: number, b: Bounds, pad = 70): View {
-  const gw = b.maxX - b.minX + pad * 2;
-  const gh = b.maxY - b.minY + pad * 2;
-  const scale = Math.min(Math.max(Math.min(w / gw, h / gh), 0.35), 1.6);
+  const g = graphBounds();
+  const minX = num(b.minX, g.minX), maxX = num(b.maxX, g.maxX);
+  const minY = num(b.minY, g.minY), maxY = num(b.maxY, g.maxY);
+  const gw = Math.max(maxX - minX, 1) + pad * 2;
+  const gh = Math.max(maxY - minY, 1) + pad * 2;
+  const scale = Math.min(Math.max(num(Math.min(w / gw, h / gh), 1), 0.35), 1.6);
   return {
-    x: (b.minX + b.maxX) / 2 - w / scale / 2,
-    y: (b.minY + b.maxY) / 2 - h / scale / 2,
+    x: (minX + maxX) / 2 - w / scale / 2,
+    y: (minY + maxY) / 2 - h / scale / 2,
     scale,
   };
 }
@@ -70,15 +73,31 @@ export function fitView(w: number, h: number, pad = 60): View {
 export function zoomAbout(
   v: View, screenX: number, screenY: number, factor: number,
 ): View {
-  const scale = Math.min(Math.max(v.scale * factor, 0.35), 2.5);
-  const before = toWorld(v, screenX, screenY);
-  const after = toWorld({ ...v, scale }, screenX, screenY);
-  return { scale, x: v.x + (before.x - after.x), y: v.y + (before.y - after.y) };
+  // A pinch that produces NaN -- a zero starting distance, a lost pointer --
+  // must be a no-op, not a permanently broken view.
+  const f = num(factor, 1);
+  const sx = num(screenX, 0), sy = num(screenY, 0);
+  // Sanitise the INCOMING view first. Falling back to v.x is no use when v.x
+  // is the thing that is already NaN.
+  const safe: View = { x: num(v.x, 0), y: num(v.y, 0), scale: num(v.scale, 1) };
+  const scale = Math.min(Math.max(safe.scale * f, 0.35), 2.5);
+  const before = toWorld(safe, sx, sy);
+  const after = toWorld({ ...safe, scale }, sx, sy);
+  return {
+    scale,
+    x: num(safe.x + (before.x - after.x), safe.x),
+    y: num(safe.y + (before.y - after.y), safe.y),
+  };
 }
+
+/** Finite or a stated fallback. One NaN reaching a View poisons every later
+ *  transform, and the map goes blank with nothing logged. */
+const num = (v: number, fallback: number): number =>
+  Number.isFinite(v) ? v : fallback;
 
 export function clampView(v: View, w: number, h: number): View {
   const b = graphBounds();
-  const scale = Math.min(Math.max(v.scale, 0.35), 2.5);
+  const scale = Math.min(Math.max(num(v.scale, 1), 0.35), 2.5);
   const margin = 220;
 
   // When the viewport is larger than the content on an axis, the two clamp
@@ -95,10 +114,10 @@ export function clampView(v: View, w: number, h: number): View {
 
   return {
     scale,
-    x: axis(v.x, b.minX - margin, b.maxX + margin,
-            b.maxX - b.minX + margin * 2, w),
-    y: axis(v.y, b.minY - margin, b.maxY + margin,
-            b.maxY - b.minY + margin * 2, h),
+    x: num(axis(num(v.x, b.minX), b.minX - margin, b.maxX + margin,
+                b.maxX - b.minX + margin * 2, w), b.minX),
+    y: num(axis(num(v.y, b.minY), b.minY - margin, b.maxY + margin,
+                b.maxY - b.minY + margin * 2, h), b.minY),
   };
 }
 

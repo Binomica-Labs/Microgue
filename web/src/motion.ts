@@ -10,16 +10,22 @@ export type Facing =
 
 export const TAU = Math.PI * 2;
 
+/** Finite or a fallback. A NaN heading never recovers: it feeds turnToward,
+ *  which returns NaN, which is stored back as the heading. The body simply
+ *  stops being drawn and nothing anywhere reports it. */
+const fin = (v: number, fallback = 0): number => (Number.isFinite(v) ? v : fallback);
+
 /** Heading for a step, or null when there is no movement. Screen space, so
  *  0 is east and angles increase clockwise. */
 export function headingOf(dx: number, dy: number): number | null {
-  if (dx === 0 && dy === 0) return null;
-  return Math.atan2(dy, dx);
+  const x = fin(dx), y = fin(dy);
+  if (x === 0 && y === 0) return null;
+  return Math.atan2(y, x);
 }
 
 /** Signed shortest angular difference from a to b, in (-PI, PI]. */
 export function angleDelta(a: number, b: number): number {
-  let d = (b - a) % TAU;
+  let d = (fin(b) - fin(a)) % TAU;
   if (d > Math.PI) d -= TAU;
   if (d <= -Math.PI) d += TAU;
   return d;
@@ -27,13 +33,14 @@ export function angleDelta(a: number, b: number): number {
 
 /** Ease `from` toward `to` by at most `maxStep` radians, the short way. */
 export function turnToward(from: number, to: number, maxStep: number): number {
+  const step = Math.max(fin(maxStep), 0);
   const d = angleDelta(from, to);
-  if (Math.abs(d) <= maxStep) return normalise(to);
-  return normalise(from + Math.sign(d) * maxStep);
+  if (Math.abs(d) <= step) return normalise(to);
+  return normalise(fin(from) + Math.sign(d) * step);
 }
 
 export function normalise(a: number): number {
-  let x = a % TAU;
+  let x = fin(a) % TAU;
   if (x > Math.PI) x -= TAU;
   if (x <= -Math.PI) x += TAU;
   return x;
@@ -42,7 +49,7 @@ export function normalise(a: number): number {
 /** Snap to the nearest of eight compass directions. */
 export function snap8(a: number): number {
   const step = TAU / 8;
-  return normalise(Math.round(a / step) * step);
+  return normalise(Math.round(fin(a) / step) * step);
 }
 
 export interface Squash { sx: number; sy: number; }

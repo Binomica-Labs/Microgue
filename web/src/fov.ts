@@ -95,7 +95,10 @@ export function computeFov(
 /** How far you can see. Light dies with depth, which is the column's own
  *  gradient: the photic zone is bright, the methanogenic floor is not. */
 export function sightRadius(light: number): number {
-  return Math.round(6 + light * 5);
+  // Clamped to a band: blind is unplayable and unbounded is a full-level
+  // shadowcast every step.
+  const l = Number.isFinite(light) ? Math.min(Math.max(light, 0), 1) : 0;
+  return Math.round(6 + l * 5);
 }
 
 export function fractionSeen(s: Sight): number {

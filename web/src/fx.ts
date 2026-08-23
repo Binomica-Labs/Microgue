@@ -5,12 +5,17 @@
 
 export type Ease = (t: number) => number;
 
-export const linear: Ease = (t) => t;
-export const easeOutCubic: Ease = (t) => 1 - (1 - t) ** 3;
-export const easeOutQuad: Ease = (t) => 1 - (1 - t) * (1 - t);
-export const easeInQuad: Ease = (t) => t * t;
+/** Every easing clamps its input: progress outside [0,1] is a bug
+ *  elsewhere, and letting it through turns into NaN geometry. */
+const c01 = (t: number): number =>
+  Number.isFinite(t) ? Math.min(Math.max(t, 0), 1) : 0;
+
+export const linear: Ease = (t) => c01(t);
+export const easeOutCubic: Ease = (t) => { const u = c01(t); return 1 - (1 - u) ** 3; };
+export const easeOutQuad: Ease = (t) => { const u = c01(t); return 1 - (1 - u) * (1 - u); };
+export const easeInQuad: Ease = (t) => { const u = c01(t); return u * u; };
 /** Out and back: 0 -> 1 -> 0. The shape of a lunge. */
-export const pulse: Ease = (t) => Math.sin(Math.min(Math.max(t, 0), 1) * Math.PI);
+export const pulse: Ease = (t) => Math.sin(c01(t) * Math.PI);
 
 export interface Lunge {
   kind: "lunge"; t0: number; dur: number;
@@ -45,8 +50,12 @@ export type Fx = Lunge | Flash | FloatText | Burst | Bolt | Ring | Wipe;
 
 /** Deterministic jitter, so a burst looks the same every frame of its life. */
 export function jitter(seed: number, i: number): { x: number; y: number } {
-  const a = Math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
-  const b = Math.sin(seed * 39.3468 + i * 11.135) * 24634.6345;
+  // Wrapped before use: a large seed loses all precision in the multiply and
+  // comes back NaN, which shows up as particles that simply do not appear.
+  const s = Number.isFinite(seed) ? seed % 100000 : 0;
+  const k = Number.isFinite(i) ? i : 0;
+  const a = Math.sin(s * 12.9898 + k * 78.233) * 43758.5453;
+  const b = Math.sin(s * 39.3468 + k * 11.135) * 24634.6345;
   return { x: (a - Math.floor(a)) * 2 - 1, y: (b - Math.floor(b)) * 2 - 1 };
 }
 

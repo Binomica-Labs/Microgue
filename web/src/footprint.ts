@@ -17,7 +17,7 @@ export const FOOTPRINT_TILES: Readonly<Record<Footprint, number>> = {
 
 /** Unit step for the nearest of eight compass directions. */
 function axisStep(heading: number | null): Point {
-  if (heading === null) return { x: 1, y: 0 };
+  if (heading === null || !Number.isFinite(heading)) return { x: 1, y: 0 };
   const a = snap8(heading);
   const step = TAU / 8;
   const k = Math.round(a / step);
@@ -35,7 +35,14 @@ function axisStep(heading: number | null): Point {
  * turning sweeps the tiles it needs -- which is why turning in a tight
  * corridor can be impossible for one.
  */
-export function tilesOf(fp: Footprint, x: number, y: number, heading: number | null): Point[] {
+export function tilesOf(fp: Footprint, x0: number, y0: number, heading: number | null): Point[] {
+  // Anchors come from mob positions; a non-finite one would put a body at a
+  // NaN tile, which is invisible, unhittable and never garbage-collected.
+  // Clamped, not merely checked: 1e308 is finite but still puts a body at a
+  // coordinate no grid contains, and the bounds reduce turns it into Infinity.
+  const lim = 1e6;
+  const x = Number.isFinite(x0) ? Math.min(Math.max(x0, -lim), lim) : 0;
+  const y = Number.isFinite(y0) ? Math.min(Math.max(y0, -lim), lim) : 0;
   switch (fp) {
     case "single":
       return [{ x, y }];

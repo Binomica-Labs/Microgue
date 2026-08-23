@@ -87,6 +87,9 @@ class Game {
   boxes: ModuleBox[] = moduleBoxes();
   panFrom: { x: number; y: number } | null = null;
   panMoved = 0;
+  /** Set while two fingers are down and until they are all lifted, so the
+   *  release at the end of a pinch is never read as a tap. */
+  pinching = false;
   dragXY: { x: number; y: number } | null = null;
   selected: number | null = null;
   spinFrom: number | null = null;
@@ -771,6 +774,9 @@ class Game {
     this.canvas.addEventListener("pointerdown", (e) => {
       const who = owner();
       if (who === "none") return;
+      // A missed pointerup (a notification, an app switch) leaves an entry
+      // behind; it would pair with the next single touch and read as a pinch.
+      if (pts.size > 2) pts.clear();
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size === 2) {
         const [a, b] = [...pts.values()] as [Point, Point];
@@ -778,9 +784,16 @@ class Game {
         z0 = who === "world" ? this.zoom : (this.view?.scale ?? 1);
         this.walk = null;
         this.panFrom = null;              // a pinch is not a pan
+        this.pinching = true;
       }
     });
-    const drop = (e: PointerEvent): void => { pts.delete(e.pointerId); if (pts.size < 2) d0 = 0; };
+    const drop = (e: PointerEvent): void => {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) d0 = 0;
+      // Only when EVERY finger is up. Releasing one of two would otherwise
+      // re-arm tap handling while the second is still down.
+      if (pts.size === 0) this.pinching = false;
+    };
     this.canvas.addEventListener("pointerup", drop);
     this.canvas.addEventListener("pointercancel", drop);
   }
@@ -897,6 +910,9 @@ class Game {
 
   resize(): void {
     this.insetCache = null;
+    // A map view framed for portrait is wrong in landscape, so drop it and
+    // let the next open reframe against the real viewport.
+    this.view = null;
     const dpr = Math.min(devicePixelRatio || 1, 2);
     this.canvas.width = Math.max(innerWidth * dpr, 1);
     this.canvas.height = Math.max(innerHeight * dpr, 1);
@@ -1739,7 +1755,10 @@ class Game {
       case "spin":
         // A tap on a module caption builds it -- but only if the pointer barely
         // moved, so a pan across a caption is never mistaken for a tap.
-        if (this.showMap && this.view && this.panMoved < 10) {
+        // A pinch clears panFrom, so panMoved stays near zero and lifting a
+        // finger over a caption used to BUILD that module. Inspecting a
+        // pathway by pinching it silently assembled it.
+        if (this.showMap && this.view && this.panMoved < 10 && !this.pinching) {
           const p = this.mapPoint(x, y);
           const m = moduleLabelAt({ ...this.view, x: 0, y: 0, scale: this.view.scale },
                                   p.x * this.view.scale, p.y * this.view.scale, this.boxes);

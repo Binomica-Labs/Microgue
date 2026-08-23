@@ -119,15 +119,35 @@ export class Dungeon {
       if (!lvl.grid.isFloor(x, y)) continue;
       if (Math.abs(x - lvl.up.x) <= 4 && Math.abs(y - lvl.up.y) <= 4) continue;
       if (x === lvl.down?.x && y === lvl.down.y) continue;
-      const fp = SIZES[p0.size].footprint;
-      if (tilesOf(fp, x, y, null).some((t) => !lvl.grid.isFloor(t.x, t.y))) continue;
-      if (lvl.mobs.some((m) =>
-        tilesOf(SIZES[m.size].footprint, m.x, m.y, m.heading)
-          .some((a) => tilesOf(fp, x, y, null).some((b2) => a.x === b2.x && a.y === b2.y)))) continue;
+      if (!this.canPlace(lvl, p0.size, x, y)) continue;
 
       // p0 is peeked before placement so the footprint can be validated.
       lvl.mobs.push(this.spawn(p0, x, y));
     }
+  }
+
+  /**
+   * Can a body of this size stand here?
+   *
+   * Three places used to ask this and two of them only tested the ANCHOR
+   * tile, so a filament whose anchor was free still overlapped a neighbour
+   * through its other two tiles. One helper, used everywhere, is the only way
+   * that stays true.
+   */
+  private canPlace(lvl: Level, size: Size, x: number, y: number): boolean {
+    const fp = SIZES[size].footprint;
+    const want = tilesOf(fp, x, y, null);
+    for (const t of want) {
+      if (!lvl.grid.isFloor(t.x, t.y)) return false;
+    }
+    for (const m of lvl.mobs) {
+      if (!m.alive) continue;
+      const mine = SIZES[m.size].footprint;
+      for (const t of want) {
+        if (covers(mine, m.x, m.y, m.heading, t.x, t.y)) return false;
+      }
+    }
+    return true;
   }
 
   /** One microbe, built from its prototype. Factored out so boss placement
@@ -193,9 +213,7 @@ export class Dungeon {
           ? pool[rng.int(pool.length)]        // one species, chosen per room
           : pool[rng.int(pool.length)];
         if (!p) continue;
-        const fp = SIZES[p.size].footprint;
-        if (!tilesOf(fp, t.x, t.y, null).every((q) => lvl.grid.isFloor(q.x, q.y))) continue;
-        if (lvl.mobs.some((m) => covers(SIZES[m.size].footprint, m.x, m.y, m.heading, t.x, t.y))) continue;
+        if (!this.canPlace(lvl, p.size, t.x, t.y)) continue;
         lvl.mobs.push(this.spawn(p, t.x, t.y));
       }
       room.stocked = true;
@@ -217,11 +235,7 @@ export class Dungeon {
         const d2 = rng.next() * r;
         const x = Math.round(at.x + Math.cos(a) * d2);
         const y = Math.round(at.y + Math.sin(a) * d2);
-        const fp = SIZES[size].footprint;
-        if (tilesOf(fp, x, y, null).every((t) => lvl.grid.isFloor(t.x, t.y))
-            && !lvl.mobs.some((m) => covers(SIZES[m.size].footprint, m.x, m.y, m.heading, x, y))) {
-          return { x, y };
-        }
+        if (this.canPlace(lvl, size, x, y)) return { x, y };
       }
       return null;
     };

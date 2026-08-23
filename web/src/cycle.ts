@@ -17,8 +17,10 @@ export interface Clock { turn: number; }
 export const newClock = (): Clock => ({ turn: 0 });
 
 /** Position in the cycle, 0 at dawn through 1. */
-export const phaseOf = (c: Clock): number =>
-  (c.turn % TURNS_PER_DAY) / TURNS_PER_DAY;
+export const phaseOf = (c: Clock): number => {
+  const t = Number.isFinite(c.turn) ? c.turn : 0;
+  return ((t % TURNS_PER_DAY) + TURNS_PER_DAY) % TURNS_PER_DAY / TURNS_PER_DAY;
+};
 
 /** Incident light, 0 at night to 1 at midday. A smooth day with a flat night
  *  rather than a sine, because a column indoors gets a window's worth of light
