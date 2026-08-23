@@ -103,7 +103,7 @@ class Game {
   showNotes = false;
   private exporting = false;
   drops: Drop[] = [];
-  private spotted = new Set<string>();
+  private spotted = new Set<number>();
   private inRoom: Room | null = null;
   won = false;
   clock: Clock = newClock();
@@ -523,25 +523,30 @@ class Game {
     computeFov(s, this.level.grid, this.player.x, this.player.y,
                sightRadius(lit) + glow);
 
-    const nowVisible = new Set<string>();
-    for (const mob of this.level.mobs) {
-      if (!mob.alive) continue;
-      if (isVisible(s, mob.x, mob.y)) nowVisible.add(mob.id + String(mob.x) + String(mob.y));
-    }
+    // Keyed on the INSTANCE. Keying on species-plus-position re-fired every
+    // time a microbe took a step, which is once per turn, for ever.
+    const nowVisible = new Set<number>();
+    const arrivals: Mob[] = [];
     for (const mob of this.level.mobs) {
       if (!mob.alive || !isVisible(s, mob.x, mob.y)) continue;
-      const key = mob.id + String(mob.x) + String(mob.y);
-      if (this.spotted.has(key)) continue;
-      this.spotted.add(key);
-      if (this.walk) {
-        this.walk = null;
-        this.path = null;
-        this.note(`You stop. A ${mob.name} comes into view.`);
-        this.toasts.push(`${mob.name} in view.`, "warn", this.now);
-      }
+      nowVisible.add(mob.uid);
+      if (!this.spotted.has(mob.uid)) arrivals.push(mob);
     }
-    // Forget anything no longer in sight, so re-entering a room re-alerts.
-    for (const k of [...this.spotted]) if (!nowVisible.has(k)) this.spotted.delete(k);
+    // Leaving sight is what re-arms the alert, so a thing pacing in and out of
+    // a doorway does not shout on every step.
+    for (const uid of [...this.spotted]) if (!nowVisible.has(uid)) this.spotted.delete(uid);
+    for (const mob of arrivals) this.spotted.add(mob.uid);
+
+    if (arrivals.length > 0 && this.walk) {
+      this.walk = null;
+      this.path = null;
+      const names = [...new Set(arrivals.map((a) => a.name))];
+      const what = names.length === 1
+        ? `a ${names[0] ?? ""}`
+        : `${String(arrivals.length)} things`;
+      this.note(`You stop. ${what.charAt(0).toUpperCase()}${what.slice(1)} comes into view.`);
+      this.toasts.push(`${what} in view.`, "warn", this.now);
+    }
   }
 
   /** Called after the player lands on a tile. */
@@ -1115,9 +1120,9 @@ class Game {
       // Wake: a cell moving through fluid leaves one.
       for (const w of wake(this.player.heading, v)) {
         drawBody(ctx, me, bx + w.dx * px, by + w.dy * px, px * 0.92,
-                 "rotate", this.player.heading, sq, w.alpha, "north");
+                 "rotate", this.player.heading, sq, w.alpha, "east");
       }
-      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq, 1, "north");
+      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq, 1, "east");
     } else {
       ctx.fillStyle = "#0ff";
       ctx.fillRect((this.player.ax + lx) * px + px * 0.18,

@@ -32,6 +32,10 @@ export interface Player extends Body {
 }
 
 export interface Microbe extends Body {
+  /** Stable per-instance identity. `id` is the SPECIES, so it cannot be used
+   *  to tell two Nitzschia apart, and position changes every time one moves --
+   *  keying anything on either re-fires constantly. */
+  readonly uid: number;
   readonly id: string;
   readonly name: string;
   readonly glyph: string;

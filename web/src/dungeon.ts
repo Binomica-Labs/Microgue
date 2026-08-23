@@ -132,9 +132,12 @@ export class Dungeon {
 
   /** One microbe, built from its prototype. Factored out so boss placement
    *  cannot drift from ordinary spawning. */
+  private nextUid = 1;
+
   private spawn(p: Microbe0, x: number, y: number): Mob {
     const hp = Math.round(p.hp * SIZES[p.size].hp);
     return {
+      uid: this.nextUid++,
       id: p.id, name: p.name, glyph: p.glyph, x, y,
       hp, maxhp: hp, atk: p.atk, genes: p.genes, note: p.note,
       pigment: p.pigment, alive: true,

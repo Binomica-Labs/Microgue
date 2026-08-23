@@ -220,6 +220,29 @@ Revisit if kinds pass roughly six AND behaviours genuinely cross-cut.
 applying it, effects as data. Adding antibiotic exposure or phage infection is
 a table entry rather than a branch in three places.
 
+## Timing assertions are smoke bounds, not measurements
+
+Three tests check wall-clock cost. They caught a real 5.6 ms regression, so
+they earn their place -- but a bound tight enough to measure this machine is a
+bound that fails on a loaded one, and a flaky test is worse than none. Where
+the guarantee can be asserted directly it is: the pathfinding budget is tested
+by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
+cap does the work. The clock bounds that remain are deliberately loose and
+only trip on an order-of-magnitude regression.
+
+## Two identity bugs worth remembering
+
+`Microbe.uid` exists because `id` is the SPECIES and position changes every
+turn. Keying the sighting alert on species-plus-position re-fired it on every
+step, for ever -- "A Nitzschia comes into view" once per turn until you killed
+it. Anything that must happen ONCE per creature keys on `uid`.
+
+The player sprite has been rendered 90 degrees off since v26: `drawBody` was
+given `axis: "north"` when the art pointed north, then the art was redrawn
+pointing east at v32 and the axis was never changed. There is a test asserting
+the player art's long axis is horizontal and that the flagellum sits WEST of
+the body -- behind it, since the cell points east.
+
 ## Sprite art axis
 
 Organism sprites are drawn as horizontal rods, so their long axis is EAST. The
