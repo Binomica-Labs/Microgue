@@ -630,6 +630,20 @@ Cave density was raised to 0.50-0.63 once rooms existed: the rooms and their
 corridors are what keep a dense cave connected, and without them the disc was
 an almost empty circle.
 
+## The pathway map
+
+It opens framed on what you have UNLOCKED, not on the whole diagram. Fitting
+everything put your own metabolism in a corner of a mostly dark chart at 0.84x;
+`litBounds` finds the edges you carry and `frame` centres them at up to 1.6x,
+leaving the rest to be found by panning. The view is reset each time the map is
+opened, so it reframes as the genome grows.
+
+**A pinch has to act on whatever is on screen.** The handler only checked
+`showPlasmid`, so pinching the map silently zoomed the WORLD behind it -- the
+map never moved and the gesture read as broken. `owner()` now decides which
+view the gesture belongs to, and the map zooms about the midpoint between the
+fingers so what you are pinching stays under them.
+
 ## The column has 24 floors and is round
 
 `FLOORS_PER_STRATUM = 3`, so eight strata become twenty-four floors and each

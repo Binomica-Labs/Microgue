@@ -8,8 +8,9 @@ import { binAt, drawBin, drawRing, describe as describeSlot, slotAt,
          type BinGeom, type RingGeom } from "./plasmid_ui.js";
 import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
 import { classifyDown, classifyKey, type Gesture } from "./gesture.js";
-import { clampView, drawGraph, fitView, moduleBoxes, moduleLabelAt, toWorld,
-         type ModuleBox, type View } from "./kegg_ui.js";
+import { clampView, drawGraph, fitView, frame, litBounds, moduleBoxes,
+         moduleLabelAt, toWorld, zoomAbout, type ModuleBox, type View }
+  from "./kegg_ui.js";
 import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
@@ -739,22 +740,44 @@ class Game {
     const pts = new Map<number, Point>();
     let d0 = 0;
     let z0 = 1;
+    // A pinch has to act on whatever is actually on screen. This handler only
+    // checked showPlasmid, so pinching the pathway map silently zoomed the
+    // WORLD behind it -- the map never moved and the gesture felt broken.
+    const owner = (): "none" | "world" | "map" => {
+      if (this.showPlasmid || this.showNotes || this.showSplash || this.openDrop) return "none";
+      return this.showMap ? "map" : "world";
+    };
+
     this.canvas.addEventListener("pointermove", (e) => {
-      if (this.showPlasmid) return;         // the ring owns the pointer here
+      const who = owner();
+      if (who === "none") return;
       if (!pts.has(e.pointerId)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pts.size === 2) {
-        const [a, b] = [...pts.values()] as [Point, Point];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (d0 > 0) this.zoom = Math.min(Math.max(z0 * (d / d0), 0.3), 8);
+      if (pts.size !== 2 || d0 <= 0) return;
+      const [a, b] = [...pts.values()] as [Point, Point];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (who === "world") {
+        this.zoom = Math.min(Math.max(z0 * (d / d0), 0.3), 8);
+      } else if (this.view) {
+        // Zoom about the midpoint between the fingers, so what you are
+        // pinching stays under them.
+        const want = Math.min(Math.max(z0 * (d / d0), 0.35), 2.5);
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        this.view = clampView(
+          zoomAbout(this.view, mid.x, mid.y, want / this.view.scale),
+          innerWidth, innerHeight);
       }
     });
     this.canvas.addEventListener("pointerdown", (e) => {
-      if (this.showPlasmid) return;
+      const who = owner();
+      if (who === "none") return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size === 2) {
         const [a, b] = [...pts.values()] as [Point, Point];
-        d0 = Math.hypot(a.x - b.x, a.y - b.y); z0 = this.zoom; this.walk = null;
+        d0 = Math.hypot(a.x - b.x, a.y - b.y);
+        z0 = who === "world" ? this.zoom : (this.view?.scale ?? 1);
+        this.walk = null;
+        this.panFrom = null;              // a pinch is not a pan
       }
     });
     const drop = (e: PointerEvent): void => { pts.delete(e.pointerId); if (pts.size < 2) d0 = 0; };
@@ -1968,7 +1991,14 @@ class Game {
     ctx.fillStyle = "rgba(4,7,6,0.97)";
     ctx.fillRect(0, 0, W, H);
 
-    this.view ??= fitView(W, H - ins.top - ins.bottom - 60 * u);
+    // Frame what you have unlocked. The whole diagram put your own metabolism
+    // in a corner of a mostly dark chart; this centres it and leaves the rest
+    // to be found by panning.
+    if (!this.view) {
+      const vh = H - ins.top - ins.bottom - 60 * u;
+      const lit = litBounds(this.genome.carried());
+      this.view = lit ? frame(W, vh, lit) : fitView(W, vh);
+    }
     this.view = clampView(this.view, W, H);
 
     ctx.save();
@@ -2028,6 +2058,7 @@ class Game {
       }
       case "map":
         this.showMap = !this.showMap;
+        if (this.showMap) this.view = null;   // reframe on what you now hold
         if (this.showMap) { this.openPlasmid(false); this.showNotes = false; }
         break;
       case "wait":

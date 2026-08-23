@@ -23,17 +23,57 @@ export const toScreen = (v: View, x: number, y: number): { x: number; y: number 
 export const toWorld = (v: View, x: number, y: number): { x: number; y: number } =>
   ({ x: x / v.scale + v.x, y: y / v.scale + v.y });
 
-/** Centre the graph in a viewport and pick a scale that fits it. */
-export function fitView(w: number, h: number, pad = 60): View {
-  const b = graphBounds();
-  const gw = b.maxX - b.minX + NODE_W + pad * 2;
-  const gh = b.maxY - b.minY + NODE_H + pad * 2;
-  const scale = Math.min(w / gw, h / gh, 1.4);
+export interface Bounds { minX: number; minY: number; maxX: number; maxY: number; }
+
+/**
+ * The part of the map you have actually unlocked.
+ *
+ * Fitting the WHOLE graph means the thing you care about -- what you can
+ * currently build -- is a small lit patch somewhere in a large dark diagram.
+ * Framing what you hold instead puts your own metabolism on screen and leaves
+ * the rest to be found by panning, which is the point of a map.
+ */
+export function litBounds(carried: ReadonlySet<string>): Bounds | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let any = false;
+  for (const e of EDGES) {
+    if (!carried.has(e.gene)) continue;
+    any = true;
+    for (const n of [e.from, e.to]) {
+      minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x + NODE_W);
+      minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y + NODE_H);
+    }
+  }
+  return any ? { minX, minY, maxX, maxY } : null;
+}
+
+/** Frame a region: centre it and pick a scale that fits it comfortably. */
+export function frame(w: number, h: number, b: Bounds, pad = 70): View {
+  const gw = b.maxX - b.minX + pad * 2;
+  const gh = b.maxY - b.minY + pad * 2;
+  const scale = Math.min(Math.max(Math.min(w / gw, h / gh), 0.35), 1.6);
   return {
-    x: b.minX - (w / scale - (b.maxX - b.minX)) / 2,
-    y: b.minY - (h / scale - (b.maxY - b.minY)) / 2,
+    x: (b.minX + b.maxX) / 2 - w / scale / 2,
+    y: (b.minY + b.maxY) / 2 - h / scale / 2,
     scale,
   };
+}
+
+/** Centre the whole graph in a viewport. */
+export function fitView(w: number, h: number, pad = 60): View {
+  const b = graphBounds();
+  return frame(w, h, { minX: b.minX, minY: b.minY,
+                       maxX: b.maxX + NODE_W, maxY: b.maxY + NODE_H }, pad);
+}
+
+/** Zoom about a screen point, so a pinch grows what is under the fingers. */
+export function zoomAbout(
+  v: View, screenX: number, screenY: number, factor: number,
+): View {
+  const scale = Math.min(Math.max(v.scale * factor, 0.35), 2.5);
+  const before = toWorld(v, screenX, screenY);
+  const after = toWorld({ ...v, scale }, screenX, screenY);
+  return { scale, x: v.x + (before.x - after.x), y: v.y + (before.y - after.y) };
 }
 
 export function clampView(v: View, w: number, h: number): View {

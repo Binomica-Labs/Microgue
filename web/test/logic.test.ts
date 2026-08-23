@@ -46,8 +46,8 @@ import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
 import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
          orphanMetabolites } from "../src/kegg.js";
-import { NODE_W, NODE_H, clampView, fitView, moduleBoxes, toScreen, toWorld,
-         type View } from "../src/kegg_ui.js";
+import { NODE_W, NODE_H, clampView, fitView, frame, litBounds, moduleBoxes,
+         toScreen, toWorld, zoomAbout, type View } from "../src/kegg_ui.js";
 
 describe("redox tower", () => {
   const depthOf = (t: bio.Teap) => bio.STRATA.find((s) => s.teap === t)!.depth;
@@ -3893,5 +3893,78 @@ describe("the player sprite is a cell", () => {
     let hi = 0;
     for (const row of art) for (const ch of row) if (ch === "4") hi++;
     expect(hi, "no highlighted ring").toBeGreaterThan(8);
+  });
+});
+
+describe("the pathway map frames what you have unlocked", () => {
+  it("reports no lit region for an empty genome", () => {
+    expect(litBounds(new Set())).toBeNull();
+  });
+
+  it("the lit region covers exactly the edges you carry", () => {
+    const b = litBounds(new Set(["mtrC", "omcS"]));
+    expect(b).not.toBeNull();
+    // Both EET edges run between the iron nodes, well right of the nitrogen ring.
+    expect(b!.minX).toBeGreaterThan(0);
+    const wider = litBounds(new Set(["mtrC", "omcS", "nifH"]));
+    expect(wider!.maxX - wider!.minX).toBeGreaterThan(b!.maxX - b!.minX);
+  });
+
+  it("framing centres the region it is given", () => {
+    const b = { minX: 100, minY: 200, maxX: 300, maxY: 400 };
+    const v = frame(1080, 2000, b);
+    const cxScreen = (((b.minX + b.maxX) / 2) - v.x) * v.scale;
+    const cyScreen = (((b.minY + b.maxY) / 2) - v.y) * v.scale;
+    expect(cxScreen).toBeCloseTo(1080 / 2, 6);
+    expect(cyScreen).toBeCloseTo(2000 / 2, 6);
+  });
+
+  it("a small unlocked region is framed larger than the whole graph", () => {
+    const lit = litBounds(new Set(["mtrC", "omcS"]))!;
+    expect(frame(1080, 2000, lit).scale)
+      .toBeGreaterThan(fitView(1080, 2000).scale);
+  });
+
+  it("the rest of the map stays reachable by panning", () => {
+    const lit = litBounds(new Set(["mtrC", "omcS"]))!;
+    const v = clampView(frame(1080, 2000, lit), 1080, 2000);
+    const b = graphBounds();
+    // Panning hard in each direction must be able to bring the far corners in.
+    const far = clampView({ ...v, x: -1e6, y: -1e6 }, 1080, 2000);
+    const near = clampView({ ...v, x: 1e6, y: 1e6 }, 1080, 2000);
+    expect(far.x).toBeLessThan(b.minX + 50);
+    expect(near.x).toBeGreaterThan(v.x);
+  });
+
+  it("zooming about a point keeps that point under the finger", () => {
+    const v = { x: 40, y: -20, scale: 0.8 };
+    for (const [sx, sy] of [[100, 200], [540, 900], [0, 0]] as const) {
+      for (const factor of [1.4, 0.6]) {
+        const z = zoomAbout(v, sx, sy, factor);
+        const before = toWorld(v, sx, sy);
+        const after = toWorld(z, sx, sy);
+        expect(after.x, `x at ${sx},${sy} x${factor}`).toBeCloseTo(before.x, 6);
+        expect(after.y, `y at ${sx},${sy} x${factor}`).toBeCloseTo(before.y, 6);
+      }
+    }
+  });
+
+  it("zoom stays inside its limits however hard you pinch", () => {
+    let v: View = { x: 0, y: 0, scale: 1 };
+    for (let i = 0; i < 40; i++) v = zoomAbout(v, 500, 500, 1.5);
+    expect(v.scale).toBeLessThanOrEqual(2.5);
+    for (let i = 0; i < 40; i++) v = zoomAbout(v, 500, 500, 0.5);
+    expect(v.scale).toBeGreaterThanOrEqual(0.35);
+  });
+
+  it("framing a lit region still fits on a portrait phone", () => {
+    const lit = litBounds(new Set(["dsrA", "aprA", "sat"]))!;
+    for (const [w, h] of [[1080, 2200], [720, 1600]] as const) {
+      const v = clampView(frame(w, h, lit), w, h);
+      const topPx = (lit.minY - v.y) * v.scale;
+      const botPx = (lit.maxY - v.y) * v.scale;
+      expect(topPx, `${w}x${h}`).toBeGreaterThan(-h * 0.5);
+      expect(botPx, `${w}x${h}`).toBeLessThan(h * 1.5);
+    }
   });
 });
