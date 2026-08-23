@@ -104,6 +104,10 @@ web/
     weapons.ts    the four ranged mechanisms, line of sight, cloud discs
     projectile.ts travelling particles and lingering gradients
     pursuit.ts    chase-to-kill, re-pathed every turn
+    run.ts        the roguelike layer: resynthesis, notebook, export
+    ncbi.ts       real sequences: Entrez queries, caching, throttling
+    chrome.ts     shared screen furniture: close button, header, wrap
+    screens.ts    splash and notebook, as free functions
     combat.ts     the microbe turn, extracted and testable without a canvas
     saves.ts      named characters in numbered slots
     toast.ts      transient notices + guard(), the error boundary
@@ -236,6 +240,46 @@ rather than being scripted:
 `covers()` and `tilesOf()` are the only sources of truth for occupancy;
 `mobAt`, `occupiedBy`, `decideStep` and spawning all go through them. A test
 runs 25 turns of mixed footprints and asserts no two bodies ever share a tile.
+
+## The original brief, and what it demands
+
+The design is from a thread of Sebastian's, July 2021. Two clauses in it are
+the whole game and are easy to lose:
+
+**"Each layer poses an environmental risk due to lack of means to keep ATP
+pumps going so lifebar slowly drops until metab genes found."** When ATP hits
+zero and the balance is negative, hp bleeds. That is not a flourish -- it is
+the reason to descend carefully and the reason a looted gene matters. Do not
+soften it into a cosmetic warning.
+
+**"If your character dies, you get resynthesized with some of the genes you
+acquired in the previous run."** Death ends the run and reseeds the dungeon,
+but the lineage keeps the earliest-acquired half of its loci. Not permadeath,
+not a free respawn.
+
+Also from the thread: layers run on the WASTE of their neighbours -- biomass
+sinks, sulfide rises -- which is why every stratum names a `donor` and a
+`donorFrom`. And the notebook exists because the brief says "recording the
+bugs you find along the way".
+
+The export emits real FASTA, with sequences pulled from NCBI at export time.
+
+Two choices worth keeping. **Queries, not accessions**: `SOURCES` holds an
+Entrez query per locus (`mtrC[Gene] AND "Shewanella oneidensis"[Organism]`)
+rather than a baked accession, because a query is self-documenting, survives
+reannotation, and is legible when wrong. **Fetched, not bundled**: two dozen
+coding sequences are tens of kilobytes of bases, more than the whole rest of
+the game, so they are pulled on demand and cached in localStorage.
+
+`parseFasta` refuses anything that is not bases, so an NCBI error page cannot
+become a sequence. A locus that fails to fetch is emitted as a comment
+carrying its query -- never as invented bases, and there is a test asserting
+that. NCBI asks for at most three requests a second without an API key, hence
+the 400 ms throttle.
+
+CORS on eutils could not be verified from the build environment, so the path
+is written to degrade rather than assume: if the fetch is blocked the export
+still succeeds, with queries in place of sequences.
 
 ## How microbes shoot
 
@@ -451,6 +495,31 @@ merely getting wider.
 
 `turnToward` takes the short arc. Turning from 170 to -170 degrees is a 20
 degree turn, not 340; the suite checks every pair of 64 x 64 angles.
+
+## Found in the adversarial audit
+
+Five defects, every one silent:
+
+1. **The lineage was never saved.** `run` -- notebook, deepest depth, death
+   count -- was written nowhere, so every sighting was discarded when the tab
+   closed. It is in `SaveData` now and validated: unknown organism ids and
+   duplicates dropped, depth clamped to the column. Schema 4.
+2. **A failed A* was exhaustive.** `findPath` walked all 8800 tiles before
+   giving up and `nextAction` did it eight times: 5.6 ms whenever a target sat
+   behind a wall, a guaranteed dropped frame. There is a node budget now
+   (`maxNodes`, default 4000) and pursuit tries two goals rather than eight,
+   since all of them ring the same body and share its component.
+   5577 us -> 828 us, with a test asserting the bound.
+3. **A new slot inherited the previous culture's notebook**, because `run` was
+   only ever initialised as a field default.
+4. **Three overlays hand-rolled the same close button** -- three places to fix
+   a layout bug and three to forget one. `chrome.ts` owns it.
+5. **`entity.ts` was dead.** The tagged union was argued for, built, and never
+   wired in; `Mob` was a parallel declaration free to drift from it. `Mob` is
+   now `Microbe` from `entity.ts`, so the union is load-bearing and adding a
+   field in one place cannot silently miss the other.
+
+Every one is now a test that fails if it returns.
 
 ## Failure modes seen repeatedly
 

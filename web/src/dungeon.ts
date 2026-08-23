@@ -1,29 +1,17 @@
 // Multi-level descent. One cave per stratum, generated from that stratum's
 // parameters, cached so climbing back finds the same level.
 
-import { MAX_DEPTH, microbesAt, stratum, type GeneId, type Stratum } from "./biology.js";
-import type { Facing } from "./motion.js";
-import { SIZES, type Behaviour, type Size } from "./behaviour.js";
+import { MAX_DEPTH, microbesAt, stratum, type Stratum } from "./biology.js";
+import type { Microbe } from "./entity.js";
+import { SIZES } from "./behaviour.js";
 import { covers, tilesOf } from "./footprint.js";
-import type { WeaponKind } from "./weapons.js";
-import type { Status } from "./status.js";
 import * as mg from "./mapgen.js";
 import type { Grid, Point } from "./mapgen.js";
 import { makeRng, type Rng } from "./rng.js";
 
-export interface Mob {
-  id: string; name: string; glyph: string;
-  x: number; y: number; hp: number; maxhp: number; atk: number;
-  genes: readonly GeneId[]; note: string; pigment: string; alive: boolean;
-  facing: Facing; heading: number | null;
-  ax: number; ay: number;          // drawn position, eased toward x,y
-  behaviour: Behaviour; size: Size;
-  weapon: WeaponKind;
-  /** Turns until it may fire again, and how long it has been winding up. */
-  reload: number; charging: number;
-  cooldown: number;                // turns until it may act again
-  status: Status[];
-}
+/** The microbe entity, defined once in entity.ts so the union stays the
+ *  single source of truth rather than a parallel declaration that drifts. */
+export type Mob = Microbe;
 
 export interface Level {
   depth: number; grid: Grid; stratum: Stratum;

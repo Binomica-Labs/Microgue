@@ -13,6 +13,7 @@ import type { GeneId } from "./biology.js";
 import type { Facing } from "./motion.js";
 import type { Status } from "./status.js";
 import type { Behaviour, Size } from "./behaviour.js";
+import type { WeaponKind } from "./weapons.js";
 
 /** Fields every entity has, whatever its kind. */
 export interface Body {
@@ -31,7 +32,6 @@ export interface Player extends Body {
 }
 
 export interface Microbe extends Body {
-  readonly kind: "microbe";
   readonly id: string;
   readonly name: string;
   readonly glyph: string;
@@ -41,7 +41,11 @@ export interface Microbe extends Body {
   readonly facing: Facing;
   readonly behaviour: Behaviour;
   readonly size: Size;
+  readonly weapon: WeaponKind;
   atk: number;
+  /** Turns until it may fire again, and how long it has been winding up. */
+  reload: number;
+  charging: number;
   /** Turns until this entity may act again. Slow, large bodies act less often. */
   cooldown: number;
 }
@@ -61,9 +65,13 @@ export interface Item extends Body {
   readonly gene: GeneId | null;
 }
 
-export type Entity = Player | Microbe | Hazard | Item;
+/** A microbe as it appears in the union. `Mob` in dungeon.ts is this type;
+ *  the discriminant is added here rather than stored on every instance. */
+export type MicrobeEntity = Microbe & { readonly kind: "microbe" };
 
-export const isMicrobe = (e: Entity): e is Microbe => e.kind === "microbe";
+export type Entity = Player | MicrobeEntity | Hazard | Item;
+
+export const isMicrobe = (e: Entity): e is MicrobeEntity => e.kind === "microbe";
 export const isPlayer = (e: Entity): e is Player => e.kind === "player";
 
 /** Display name, exhaustive over the union. Adding a kind breaks this. */

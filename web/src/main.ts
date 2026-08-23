@@ -27,9 +27,14 @@ import { nextAction, type Action } from "./pursuit.js";
 import { cloudAlpha, cloudTiles, stepClouds, stepPackets,
          type Cloud, type Packet } from "./projectile.js";
 import { WEAPONS } from "./weapons.js";
+import { drawClose, inBox as inBoxOf, type Box } from "./chrome.js";
+import { drawNotes, drawSplash } from "./screens.js";
+import { exportAnnotation, newRun, recordLocus, recordSighting,
+         resynthesise, type RunState } from "./run.js";
+import { SOURCES, cached, fetchAll } from "./ncbi.js";
 import { STATUS, apply as applyStatus, tick as tickStatus, type Status }
   from "./status.js";
-import { NAME_POOL, SLOTS as SAVE_SLOTS, listSlots, loadSlot, migrateLegacy,
+import { NAME_POOL, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
 import { makeRng } from "./rng.js";
 import { TOAST_COLOUR, TOAST_EDGE, Toasts, guard } from "./toast.js";
@@ -62,7 +67,7 @@ class Game {
   // a stray dismiss check close it again on up, in the same tap.
   gesture: Gesture = "none";
   gestureBtn: Button | null = null;
-  closeBox = { x: 0, y: 0, w: 0, h: 0 };
+  closeBox: Box = { x: 0, y: 0, w: 0, h: 0 };
   dragFrom: number | null = null;
   dragBin: number | null = null;
   bin: BinGeom = { x: 0, y: 0, cell: 0, gap: 0, cols: 6 };
@@ -87,6 +92,9 @@ class Game {
   target: Mob | null = null;
   autoAttack = false;
   private autoAt = 0;
+  run: RunState = newRun();
+  showNotes = false;
+  private exporting = false;
   packets: Packet[] = [];
   clouds: Cloud[] = [];
   started = false;
@@ -171,8 +179,22 @@ class Game {
       // Brownout: you cannot power the proteome you are carrying.
       this.genome.supply = this.player.atp / Math.max(cost, 0.001);
       this.player.atp = 0;
-      if (Math.random() < 0.15) {
-        this.note(`ATP exhausted — expression at ${(this.genome.supply * 100) | 0}%.`);
+
+      // "Each layer poses an environmental risk due to lack of means to keep
+      // ATP pumps going so lifebar slowly drops until metab genes found."
+      // Without a respiration that works at this depth you cannot hold the
+      // membrane potential, and you bleed until you find one.
+      const shortfall = cost - gain;
+      if (shortfall > 0) {
+        const bleed = Math.max(Math.round(shortfall * 0.5), 1);
+        this.player.hp = Math.max(this.player.hp - bleed, 0);
+        applyStatus(this.player.status, "starved", 2, 1);
+        this.fx.add({ kind: "text", t0: this.now, dur: 700, x: this.player.x,
+                      y: this.player.y, text: `-${bleed}`, colour: "#7fc4e8" });
+        if (Math.random() < 0.2) {
+          const s = bio.stratum(d);
+          this.note(`ATP pumps failing. ${s.donor} is the donor here — find a gene that uses ${s.teap}.`);
+        }
       }
     }
     const tox = this.genome.toxicity(d);
@@ -227,6 +249,9 @@ class Game {
     m.hp = Math.max(m.hp - dmg, 0);
     if (m.hp <= 0) {
       m.alive = false;
+      if (recordSighting(this.run, m.id)) {
+        this.note(`Recorded ${m.name} in the notebook.`);
+      }
       // Lysis: the cell bursts. Bigger shake, longer stop, scattered debris.
       this.fx.add({ kind: "burst", t0: this.now + 40, dur: 520, x: m.x, y: m.y,
                     colour: m.pigment, n: 14, seed: this.now + m.x * 31 + m.y });
@@ -248,6 +273,7 @@ class Game {
                         y: this.player.y - 0.5, text: bio.GENES[pick].name,
                         colour: "#a0ffd0" });
         }
+        recordLocus(this.run, pick);
         this.note(r.ok ? `HGT: ${bio.GENES[pick].name} from ${m.name} \u2192 parts bin.`
                        : `${bio.GENES[pick].name} — ${r.err}`);
       }
@@ -331,14 +357,7 @@ class Game {
                     y: this.player.y, text: `-${selfDmg}`, colour: "#c8a0ff" });
     }
 
-    if (this.player.hp <= 0) {
-      this.player.hp = this.player.maxhp;
-      this.player.status.length = 0;
-      this.note("Lysed. Reassembled at the last stair.");
-      const u = this.level.up;
-      this.player.x = u.x; this.player.y = u.y;
-      this.player.ax = u.x; this.player.ay = u.y;
-    }
+    if (this.player.hp <= 0) this.die();
     this.save();
   }
 
@@ -371,6 +390,34 @@ class Game {
         this.target = null;
         return false;
     }
+  }
+
+  /** The run ends. The lineage keeps the loci it has had longest and starts
+   *  again at the surface -- "resynthesized with some of the genes you
+   *  acquired in the previous run". */
+  die(): void {
+    const carried = [...this.genome.carried()];
+    const kept = resynthesise(carried);
+    this.run.deaths += 1;
+    this.run.deepest = Math.max(this.run.deepest, this.dungeon.depth);
+
+    this.toasts.push(
+      `Lysed at D${this.dungeon.depth}. ${kept.length}/${carried.length - 1} loci ` +
+      `survived resynthesis.`, "warn", this.now);
+
+    this.dungeon = new Dungeon(110, 80, (Date.now() & 0xffff) ^ this.run.deaths);
+    this.genome = new Plasmid();
+    for (const g of kept) this.genome.stash({ kind: "gene", id: g, optimised: false });
+    this.player.hp = this.player.maxhp;
+    this.player.atp = this.player.atpMax;
+    this.player.status.length = 0;
+    this.target = null;
+    this.autoAttack = false;
+    this.packets.length = 0;
+    this.clouds.length = 0;
+    this.enter(this.dungeon.current(), this.dungeon.current().up);
+    this.note(`Resynthesised. Deepest so far: D${this.run.deepest}.`);
+    this.save();
   }
 
   stairs(): boolean {
@@ -508,6 +555,8 @@ class Game {
       atp: this.player.atp,
       ring: this.genome.slots.map((p) => (p === null ? null : { ...p })),
       bin: this.genome.bin.map((p) => ({ ...p })),
+      run: { deepest: this.run.deepest, deaths: this.run.deaths,
+             bestiary: [...this.run.bestiary], library: [...this.run.library] },
       settings: this.settings,
     };
     writeSave(SAVE_KEY, data);
@@ -526,6 +575,10 @@ class Game {
     this.enter(this.dungeon.current(), { x: s.px, y: s.py });
     this.player.hp = s.hp;
     this.player.atp = s.atp;
+    this.run = {
+      deepest: s.run.deepest, deaths: s.run.deaths,
+      bestiary: [...s.run.bestiary], library: [...s.run.library],
+    };
   }
 
   load(): boolean {
@@ -705,7 +758,8 @@ class Game {
     // function, the error it queued was never drawn either. Black screen, no
     // diagnostic, which is precisely the failure this was meant to prevent.
     if (this.showSplash || !this.started) {
-      this.drawSplash(W, H);
+      this.closeBox = drawSplash(ctx, W, H, this.insets(),
+        Math.max(Math.min(W, H) / 420, 1), this.slotBoxes, NAME_POOL);
       this.drawToasts(W, H);
       return;
     }
@@ -898,6 +952,13 @@ class Game {
     this.drawHud(W, H);
     this.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
+    if (this.showNotes) {
+      this.closeBox = drawNotes(ctx, W, H, this.insets(),
+        Math.max(Math.min(W, H) / 420, 1), this.run,
+        (t, w) => this.wrap(t, w));
+      this.drawToasts(W, H);
+      return;
+    }
     if (this.showMap) {
       this.drawMapScreen(W, H);
     } else if (this.showPlasmid) {
@@ -1199,25 +1260,11 @@ class Game {
 
     // A real close target. "Tap outside" was ambiguous, and it was what let a
     // button press dismiss the screen in the same gesture that opened it.
-    const cs = Math.max(46 * u, 44);
-    this.closeBox = { x: W - ins.right - cs - 12 * u, y: ins.top + 12 * u, w: cs, h: cs };
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = Math.max(1.5 * u, 1.5);
-    ctx.beginPath();
-    ctx.roundRect(this.closeBox.x, this.closeBox.y, cs, cs, cs * 0.28);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `${cs * 0.42}px ui-monospace,monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("\u2715", this.closeBox.x + cs / 2, this.closeBox.y + cs / 2);
+    this.closeBox = drawClose(ctx, W, ins, u);
   }
 
   private inClose(x: number, y: number): boolean {
-    const c = this.closeBox;
-    return x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h;
+    return inBoxOf(this.closeBox, x, y);
   }
 
   pointerDown(x: number, y: number): void {
@@ -1225,6 +1272,12 @@ class Game {
       const i = this.slotBoxes.findIndex(
         (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
       if (i >= 0) this.startRun(i);
+      this.gesture = "none";
+      return;
+    }
+    if (this.showNotes) {
+      if (this.inClose(x, y)) { this.showNotes = false; }
+      else { this.exportPlasmid(); }
       this.gesture = "none";
       return;
     }
@@ -1431,80 +1484,6 @@ class Game {
     ctx.restore();
   }
 
-  drawSplash(W: number, H: number): void {
-    const { ctx } = this;
-    const ins = this.insets();
-    const u = Math.max(Math.min(W, H) / 420, 1);
-    ctx.fillStyle = "#050d0a";
-    ctx.fillRect(0, 0, W, H);
-
-    // The column itself as the backdrop: eight bands, top to bottom.
-    const bandH = H / bio.MAX_DEPTH;
-    for (let i = 0; i < bio.MAX_DEPTH; i++) {
-      const st = bio.STRATA[i];
-      if (!st) continue;
-      ctx.globalAlpha = 0.16;
-      ctx.fillStyle = st.wall;
-      ctx.fillRect(0, i * bandH, W, bandH);
-    }
-    ctx.globalAlpha = 1;
-
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `${34 * u}px ui-monospace,monospace`;
-    ctx.fillText("MICROGUE", W / 2, ins.top + 72 * u);
-    ctx.fillStyle = "#9fd8b4";
-    ctx.font = `${11 * u}px ui-monospace,monospace`;
-    ctx.fillText("descend the Winogradsky column", W / 2, ins.top + 94 * u);
-    ctx.fillStyle = "#6f8f7c";
-    ctx.fillText("O2 · NO3- · Mn(IV) · Fe(III) · S0 · H2S · SO4 · CO2",
-                 W / 2, ins.top + 112 * u);
-
-    const slots = listSlots();
-    const cardH = 62 * u;
-    const gap = 10 * u;
-    const top = ins.top + 148 * u;
-    this.slotBoxes = [];
-    for (let i = 0; i < SAVE_SLOTS; i++) {
-      const y = top + i * (cardH + gap);
-      const x = ins.left + 20 * u;
-      const w = W - ins.left - ins.right - 40 * u;
-      this.slotBoxes.push({ x, y, w, h: cardH });
-      const info = slots[i];
-
-      ctx.fillStyle = info ? "rgba(20,34,26,0.9)" : "rgba(0,0,0,0.5)";
-      ctx.strokeStyle = info ? "#5ec98a" : "rgba(255,255,255,0.18)";
-      ctx.lineWidth = Math.max(1.5 * u, 1.5);
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, cardH, 8 * u);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.textAlign = "left";
-      if (info) {
-        const st = bio.stratum(info.depth);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = `${15 * u}px ui-monospace,monospace`;
-        ctx.fillText(info.name, x + 14 * u, y + 26 * u);
-        ctx.fillStyle = st.accent;
-        ctx.font = `${10.5 * u}px ui-monospace,monospace`;
-        ctx.fillText(`D${info.depth} ${st.name}  ·  ${info.genes} loci`,
-                     x + 14 * u, y + 45 * u);
-      } else {
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
-        ctx.font = `${13 * u}px ui-monospace,monospace`;
-        ctx.fillText(`new culture  ${NAME_POOL[i % NAME_POOL.length] ?? ""}`,
-                     x + 14 * u, y + 36 * u);
-      }
-    }
-
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#6f8f7c";
-    ctx.font = `${10 * u}px ui-monospace,monospace`;
-    ctx.fillText("tap a culture to begin  ·  long-press to discard",
-                 W / 2, H - ins.bottom - 20 * u);
-  }
 
   startRun(slot: number): void {
     this.slot = slot;
@@ -1518,6 +1497,7 @@ class Game {
     } else {
       this.dungeon = new Dungeon(110, 80, (Date.now() & 0xffff) + slot);
       this.genome = new Plasmid();
+      this.run = newRun();          // a new culture has seen nothing
       this.player.hp = this.player.maxhp;
       this.player.atp = this.player.atpMax;
       this.player.status.length = 0;
@@ -1527,6 +1507,68 @@ class Game {
     this.started = true;
     this.showSplash = false;
     this.save();
+  }
+
+  /** The field notebook. "Recording the bugs you find along the way." */
+
+  /** Copy the plasmid to the clipboard as FASTA, with real sequences.
+   *
+   *  Fetches anything not already cached. A locus that cannot be retrieved is
+   *  emitted with its Entrez query rather than with invented bases. */
+  exportPlasmid(): void {
+    if (this.exporting) return;
+    const genes = this.genome.slots
+      .flatMap((p) => (p?.kind === "gene" && SOURCES[p.id] ? [p.id] : []));
+    const missing = genes.filter((g) => cached(g) === null);
+
+    if (missing.length === 0) { this.emitExport(); return; }
+
+    this.exporting = true;
+    this.toasts.push(
+      `Fetching ${String(missing.length)} sequence${missing.length === 1 ? "" : "s"} from NCBI…`,
+      "info", this.now);
+    void fetchAll(missing, undefined, (p) => {
+      if (!p.ok) {
+        this.toasts.push(`${p.gene}: no record returned.`, "warn", this.now);
+      }
+    }).then((got) => {
+      this.exporting = false;
+      if (got.size === 0 && missing.length > 0) {
+        this.toasts.push(
+          "NCBI unreachable. Exporting queries instead of sequences.", "warn", this.now);
+      }
+      this.emitExport();
+    }).catch(() => {
+      this.exporting = false;
+      this.toasts.push("Sequence fetch failed. Exporting queries instead.", "warn", this.now);
+      this.emitExport();
+    });
+  }
+
+  private emitExport(): void {
+    const seqs = new Map(this.genome.slots
+      .flatMap((p) => {
+        if (p?.kind !== "gene") return [];
+        const rec = cached(p.id);
+        return rec ? [[p.id, rec] as const] : [];
+      }));
+    const text = exportAnnotation(this.runName, this.dungeon.depth,
+                                  this.genome.slots, seqs);
+    const withSeq = seqs.size;
+    // The type says clipboard always exists; on http:// and older browsers it
+    // does not, so the check is real even though TypeScript disbelieves it.
+    const nav: { clipboard?: { writeText(s: string): Promise<void> } } = navigator;
+    if (nav.clipboard !== undefined) {
+      void nav.clipboard.writeText(text)
+        .then(() => {
+          this.toasts.push(
+            `Plasmid copied. ${String(withSeq)} sequence${withSeq === 1 ? "" : "s"} included.`,
+            "info", this.now);
+        })
+        .catch(() => { this.toasts.push("Clipboard refused. Nothing copied.", "warn", this.now); });
+    } else {
+      this.toasts.push("No clipboard available on this browser.", "warn", this.now);
+    }
   }
 
   drawMapScreen(W: number, H: number): void {
@@ -1557,20 +1599,7 @@ class Game {
     ctx.fillText("drag to pan · pinch to zoom · tap a complete module to build it",
                  ins.left + 14 * u, ins.top + 40 * u);
 
-    const cs = Math.max(46 * u, 44);
-    this.closeBox = { x: W - ins.right - cs - 12 * u, y: ins.top + 4 * u, w: cs, h: cs };
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = Math.max(1.5 * u, 1.5);
-    ctx.beginPath();
-    ctx.roundRect(this.closeBox.x, this.closeBox.y, cs, cs, cs * 0.28);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `${cs * 0.42}px ui-monospace,monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("\u2715", this.closeBox.x + cs / 2, this.closeBox.y + cs / 2);
+    this.closeBox = drawClose(ctx, W, ins, u);
   }
 
   /** Graph-space point for a screen point, accounting for the header offset. */
@@ -1609,7 +1638,11 @@ class Game {
       }
       case "map":
         this.showMap = !this.showMap;
-        if (this.showMap) this.openPlasmid(false);
+        if (this.showMap) { this.openPlasmid(false); this.showNotes = false; }
+        break;
+      case "notes":
+        this.showNotes = !this.showNotes;
+        if (this.showNotes) { this.openPlasmid(false); this.showMap = false; }
         break;
       case "down": this.descend(); break;
       case "up": this.ascend(); break;

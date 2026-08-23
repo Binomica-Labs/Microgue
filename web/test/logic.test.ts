@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as bio from "../src/biology.js";
 import { Dungeon } from "../src/dungeon.js";
 import * as mg from "../src/mapgen.js";
@@ -25,9 +25,14 @@ import { FOOTPRINT_TILES, centreOf, covers, stretchOf, tilesOf }
   from "../src/footprint.js";
 import { distanceTo, nextAction } from "../src/pursuit.js";
 import { WEAPONS, lineOfSight } from "../src/weapons.js";
+import { completeness, exportAnnotation, newRun, notebook, recordLocus,
+         recordSighting, resynthesise } from "../src/run.js";
+import { SOURCES, cached, fetchAll, fetchOne, parseFasta, parseFirstId }
+  from "../src/ncbi.js";
 import { launch, stepClouds, stepPackets, type Cloud, type Packet }
   from "../src/projectile.js";
 import { Toasts, guard } from "../src/toast.js";
+import { drawClose, inBox as inBoxChrome } from "../src/chrome.js";
 import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
 import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
@@ -223,7 +228,7 @@ describe("rng", () => {
 });
 
 describe("save validation", () => {
-  const good = { version: 3, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
+  const good = { version: 4, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
                  ring: [{ kind: "promoter", strength: "strong" },
                         { kind: "gene", id: "mtrC", optimised: true }],
                  settings: { uiScale: 1.5, highContrast: true, reduceMotion: false, diagonal: false } };
@@ -239,7 +244,7 @@ describe("save validation", () => {
   it("rejects a save from an incompatible schema instead of half-loading it", () => {
     // version was written and never read; the flat-gene-list to ring rewrite
     // would have fed the old shape straight into slot code.
-    expect(parseSave({ ...good, version: 2 })).toBeNull();
+    expect(parseSave({ ...good, version: 3 })).toBeNull();
     expect(parseSave({ ...good, version: 99 })).toBeNull();
     const noVersion: Record<string, unknown> = { ...good };
     delete noVersion["version"];
@@ -282,7 +287,7 @@ describe("save validation", () => {
     expect(parseSave({ ...good, settings: { uiScale: 500 } })?.settings.uiScale).toBe(3);
   });
   it("survives a hand-edited hostile payload", () => {
-    const s = parseSave({ version: 3, depth: {}, seed: [], px: 1, py: 1, hp: -50,
+    const s = parseSave({ version: 4, depth: {}, seed: [], px: 1, py: 1, hp: -50,
                           ring: "all of them", settings: null });
     expect(s).not.toBeNull();
     expect(s?.hp).toBeGreaterThan(0);
@@ -1021,7 +1026,7 @@ describe("toxic intermediates", () => {
 describe("save round-trips the bin", () => {
   it("keeps stashed parts across a reload", () => {
     const s = parseSave({
-      version: 3, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
+      version: 4, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
       ring: [{ kind: "promoter", strength: "medium" }],
       bin: [{ kind: "gene", id: "mtrC", optimised: false }, { kind: "terminator" }],
       settings: {},
@@ -1031,14 +1036,14 @@ describe("save round-trips the bin", () => {
   });
   it("drops junk and duplicates from the bin", () => {
     const s = parseSave({
-      version: 3, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
+      version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
       bin: [{ kind: "gene", id: "mtrC" }, { kind: "gene", id: "mtrC" }, "junk", 7,
             { kind: "gene", id: "notReal" }],
     });
     expect(s?.bin).toHaveLength(1);
   });
   it("a missing bin is an empty bin, not a crash", () => {
-    const s = parseSave({ version: 3, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
+    const s = parseSave({ version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
     expect(s?.bin).toEqual([]);
   });
 });
@@ -2110,7 +2115,8 @@ describe("entity model", () => {
       { ...body, kind: "player", atp: 10, atpMax: 10, speed: 18 },
       { ...body, kind: "microbe", id: "x", name: "X", glyph: "x", genes: [],
         note: "", pigment: "#fff", facing: "none", behaviour: "drift",
-        size: "small", atk: 1, cooldown: 0 },
+        size: "small", weapon: "melee", atk: 1, cooldown: 0,
+        reload: 0, charging: 0 },
       { ...body, kind: "hazard", id: "peroxide", radius: 2, potency: 1 },
       { ...body, kind: "item", id: "cassette", gene: "mtrC" },
     ];
@@ -2127,7 +2133,8 @@ describe("entity model", () => {
   it("a dead microbe stops blocking", () => {
     const m: Entity = { ...makeBody(0, 0, 10), kind: "microbe", id: "x", name: "X",
       glyph: "x", genes: [], note: "", pigment: "#fff", facing: "none",
-      behaviour: "drift", size: "small", atk: 1, cooldown: 0 };
+      behaviour: "drift", size: "small", weapon: "melee", atk: 1, cooldown: 0,
+      reload: 0, charging: 0 };
     expect(blocks(m)).toBe(true);
     m.alive = false;
     expect(blocks(m)).toBe(false);
@@ -2785,5 +2792,337 @@ describe("ranged weapons", () => {
 
   it("every microbe declares a weapon that exists", () => {
     for (const m of bio.MICROBES) expect(WEAPONS[m.weapon], m.id).toBeDefined();
+  });
+});
+
+describe("the run, as a roguelike", () => {
+  it("death keeps the loci the lineage has had longest", () => {
+    const carried: bio.GeneId[] = ["ori", "psbA", "cbbL", "katG", "narG", "nosZ", "mtrC"];
+    const kept = resynthesise(carried);
+    expect(kept).not.toContain("ori");            // the origin is always fresh
+    expect(kept).toHaveLength(3);                 // half of six real loci
+    expect(kept).toEqual(["psbA", "cbbL", "katG"]);
+  });
+
+  it("resynthesis is stable, so a lineage does not thrash", () => {
+    const carried: bio.GeneId[] = ["ori", "psbA", "cbbL", "katG", "narG"];
+    expect(resynthesise(carried)).toEqual(resynthesise(carried));
+  });
+
+  it("a first death from a bare plasmid loses nothing it did not have", () => {
+    expect(resynthesise(["ori"])).toEqual([]);
+    expect(resynthesise([])).toEqual([]);
+  });
+
+  it("the notebook records each organism once, in column order", () => {
+    const run = newRun();
+    expect(recordSighting(run, "desulfovibrio")).toBe(true);
+    expect(recordSighting(run, "desulfovibrio")).toBe(false);
+    recordSighting(run, "synechococcus");
+    expect(notebook(run).map((s) => s.depth)).toEqual([1, 7]);
+  });
+
+  it("completeness tracks against the full roster", () => {
+    const run = newRun();
+    expect(completeness(run)).toEqual({ seen: 0, total: bio.MICROBES.length });
+    for (const m of bio.MICROBES) recordSighting(run, m.id);
+    expect(completeness(run).seen).toBe(bio.MICROBES.length);
+  });
+
+  it("the library accumulates loci without duplicates", () => {
+    const run = newRun();
+    recordLocus(run, "mtrC");
+    recordLocus(run, "mtrC");
+    recordLocus(run, "dsrA");
+    expect(run.library).toEqual(["mtrC", "dsrA"]);
+  });
+
+  it("the export names real loci and refuses to invent sequence", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "dsrA", optimised: true });
+    const out = exportAnnotation("SP162", 7, p.slots);
+    expect(out).toContain("dsrA");
+    expect(out).toContain("dissimilatory sulfite reductase");
+    expect(out).toContain("SP162");
+    expect(out).toContain("D7");
+    // With no sequences supplied it must emit the query, never invented bases.
+    expect(out).toContain("dsrA[Gene]");
+    expect(out.toLowerCase()).toContain("nothing here is invented");
+    expect(out).not.toMatch(/^[ACGT]{20,}$/m);
+  });
+
+  it("every stratum names its electron donor and where it comes from", () => {
+    for (const s of bio.STRATA) {
+      expect(s.donor, `D${s.depth}`).toBeTruthy();
+      expect(s.donorFrom, `D${s.depth}`).toBeTruthy();
+    }
+  });
+
+  it("sulfide rising from the sulfidogenic zone feeds the layers above it", () => {
+    // The cascade runs both ways in a real column: biomass sinks, sulfide rises.
+    const sulfide = bio.STRATA.filter((s) => s.donor === "H2S").map((s) => s.depth);
+    expect(sulfide).toContain(3);                 // the Beggiatoa front
+    expect(sulfide).toContain(6);                 // green sulfur band
+  });
+});
+
+describe("running out of ATP is lethal, not cosmetic", () => {
+  const bare = () => new Plasmid();
+
+  it("a plasmid with no respiration for this depth runs a deficit", () => {
+    // A load of structural genes and no generator, deep down.
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    (["katG", "cbbL", "aclB"] as const).forEach((g, i) => {
+      p.put(5 + i, { kind: "gene", id: g, optimised: true });
+    });
+    expect(p.atpBalance(8)).toBeLessThan(0);
+  });
+
+  it("acquiring the right respiration turns the deficit around", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    (["katG", "cbbL", "aclB"] as const).forEach((g, i) => {
+      p.put(5 + i, { kind: "gene", id: g, optimised: true });
+    });
+    const before = p.atpBalance(8);
+    p.put(8, { kind: "gene", id: "mcrA", optimised: true });
+    p.put(9, { kind: "gene", id: "hdrB", optimised: true });
+    expect(p.atpBalance(8)).toBeGreaterThan(before);
+  });
+
+  it("a bare lineage survives at the surface but is squeezed at the floor", () => {
+    expect(bare().atpBalance(1)).toBeGreaterThan(bare().atpBalance(8));
+  });
+});
+
+describe("NCBI sequence retrieval", () => {
+  // A stub Entrez, so nothing in the suite touches the network.
+  const REAL_FASTA = [
+    ">NC_004347.2:c1234-1 mtrC [Shewanella oneidensis MR-1]",
+    "ATGAAATTTAGACTTAACTTAATCACCTTAGCACTGCTAACAGGATTAGCA",
+    "GGCTGTGGCGGCAGCGATGGCAACGGCGATGGCGGCAGCAGCGGCAGCGGC",
+  ].join("\n");
+
+  const stub = (opts: { ids?: string; fasta?: string; fail?: boolean } = {}) =>
+    (url: string): Promise<string> => {
+      if (opts.fail) return Promise.reject(new Error("network down"));
+      if (url.includes("esearch")) {
+        return Promise.resolve(
+          opts.ids ?? "<eSearchResult><IdList><Id>24375140</Id></IdList></eSearchResult>");
+      }
+      return Promise.resolve(opts.fasta ?? REAL_FASTA);
+    };
+
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v); },
+      removeItem: (k: string) => { store.delete(k); },
+    });
+  });
+
+  it("parses a UID out of the esearch XML", () => {
+    expect(parseFirstId("<eSearchResult><IdList><Id>12345</Id><Id>9</Id></IdList></eSearchResult>"))
+      .toBe("12345");
+    expect(parseFirstId("<eSearchResult><IdList/></eSearchResult>")).toBeNull();
+  });
+
+  it("parses accession, defline and bases from FASTA", () => {
+    const r = parseFasta(REAL_FASTA);
+    expect(r?.accession).toBe("NC_004347.2:c1234-1");
+    expect(r?.defline).toContain("Shewanella");
+    expect(r?.seq).toMatch(/^[ACGT]+$/);
+    expect(r?.seq).toHaveLength(102);
+  });
+
+  it("refuses anything that is not sequence -- an error page is not bases", () => {
+    expect(parseFasta(">hdr\n<html>Service unavailable</html>")).toBeNull();
+    expect(parseFasta("no header here\nACGT")).toBeNull();
+    expect(parseFasta("")).toBeNull();
+  });
+
+  it("fetches a locus and caches it", async () => {
+    const rec = await fetchOne("mtrC", stub());
+    expect(rec?.accession).toBe("NC_004347.2:c1234-1");
+    expect(cached("mtrC")?.seq).toBe(rec?.seq);
+  });
+
+  it("a cached locus does not hit the network again", async () => {
+    let calls = 0;
+    const counting = (url: string): Promise<string> => {
+      calls++;
+      return stub()(url);
+    };
+    await fetchOne("mtrC", counting);
+    const first = calls;
+    await fetchOne("mtrC", counting);
+    expect(calls).toBe(first);
+  });
+
+  it("a failed fetch returns null rather than throwing", async () => {
+    await expect(fetchOne("dsrA", stub({ fail: true }))).resolves.toBeNull();
+    await expect(fetchOne("dsrA", stub({ ids: "<eSearchResult/>" }))).resolves.toBeNull();
+  });
+
+  it("a gene with no NCBI record is never given one", async () => {
+    expect(SOURCES.ori).toBeUndefined();
+    await expect(fetchOne("ori", stub())).resolves.toBeNull();
+  });
+
+  it("every gene except the origin has an Entrez query naming an organism", () => {
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      if (id === "ori") continue;
+      const src = SOURCES[id];
+      expect(src, id).toBeDefined();
+      expect(src?.query, id).toContain("[Gene]");
+      expect(src?.query, id).toContain("[Organism]");
+      expect(src?.organism, id).toBeTruthy();
+    }
+  });
+
+  it("nxrA is sourced from Nitrobacter winogradskyi", () => {
+    // The column is named after him; the gene may as well come from his organism.
+    expect(SOURCES.nxrA?.organism).toContain("winogradskyi");
+  });
+
+  it("the export emits real FASTA when sequences are in hand", async () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "mtrC", optimised: true });
+    const got = await fetchAll(["mtrC"], stub());
+    const out = exportAnnotation("MR-1", 4, p.slots, got);
+    expect(out).toContain(">NC_004347.2");
+    expect(out).toMatch(/^ATGAAATTT/m);
+    expect(out).toContain("decaheme");
+  });
+
+  it("a locus without a sequence exports its query, never invented bases", () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "dsrA", optimised: true });
+    const out = exportAnnotation("Hilden", 7, p.slots, new Map());
+    expect(out).toContain("no sequence retrieved");
+    expect(out).toContain("dsrA[Gene]");
+    expect(out).not.toMatch(/^[ACGT]{20,}$/m);
+  });
+
+  it("the origin is exported as a design element, not a locus", () => {
+    const p = new Plasmid();
+    const out = exportAnnotation("x", 1, p.slots, new Map());
+    expect(out).toContain("design element, no NCBI record");
+  });
+
+  it("fetchAll reports progress and skips loci with no source", async () => {
+    const seen: string[] = [];
+    const got = await fetchAll(["mtrC", "ori", "dsrA"], stub(),
+                               (p) => seen.push(`${p.gene}:${String(p.ok)}`));
+    expect(seen).toEqual(["mtrC:true", "dsrA:true"]);   // ori has no source
+    expect(got.size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guards for bugs found in the adversarial audit. Each of these passed silently
+// before the fix, which is the point.
+// ---------------------------------------------------------------------------
+
+describe("audit regressions", () => {
+  it("the save carries the lineage, not just the plasmid", () => {
+    // The notebook, score and death count were written nowhere. Every sighting
+    // was discarded the moment the tab closed.
+    const s = parseSave({
+      version: 4, depth: 3, seed: 7, px: 5, py: 5, hp: 20, atp: 90,
+      ring: [], bin: [], settings: {},
+      run: { deepest: 6, deaths: 2, bestiary: ["geobacter", "beggiatoa"], library: ["mtrC"] },
+    });
+    expect(s?.run.deepest).toBe(6);
+    expect(s?.run.deaths).toBe(2);
+    expect(s?.run.bestiary).toEqual(["geobacter", "beggiatoa"]);
+    expect(s?.run.library).toEqual(["mtrC"]);
+  });
+
+  it("a corrupt lineage block degrades to an empty one", () => {
+    const base = { version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+                   ring: [], bin: [], settings: {} };
+    expect(parseSave({ ...base, run: "nonsense" })?.run.bestiary).toEqual([]);
+    expect(parseSave(base)?.run.deepest).toBe(1);
+  });
+
+  it("the bestiary rejects organisms that do not exist and drops duplicates", () => {
+    const s = parseSave({
+      version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      ring: [], bin: [], settings: {},
+      run: { deepest: 1, deaths: 0, bestiary: ["geobacter", "geobacter", "sasquatch", 7],
+             library: ["mtrC", "notAGene"] },
+    });
+    expect(s?.run.bestiary).toEqual(["geobacter"]);
+    expect(s?.run.library).toEqual(["mtrC"]);
+  });
+
+  it("deepest depth is clamped to the column", () => {
+    const s = parseSave({
+      version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      ring: [], bin: [], settings: {},
+      run: { deepest: 9999, deaths: -5, bestiary: [], library: [] },
+    });
+    expect(s?.run.deepest).toBeLessThanOrEqual(bio.MAX_DEPTH);
+    expect(s?.run.deaths).toBeGreaterThanOrEqual(0);
+  });
+
+  it("a failed path gives up on a budget instead of walking the whole grid", () => {
+    const g = new mg.Grid(110, 80, mg.FLOOR);
+    for (let y = 0; y < 80; y++) g.set(55, y, mg.WALL);   // impassable divide
+    const t0 = performance.now();
+    for (let i = 0; i < 20; i++) {
+      expect(findPath(g, { x: 10, y: 40 }, { x: 100, y: 40 }, { maxNodes: 900 })).toBeNull();
+    }
+    const perCall = (performance.now() - t0) / 20;
+    expect(perCall, `${perCall.toFixed(1)} ms per failed search`).toBeLessThan(3);
+  });
+
+  it("a budget never turns a reachable path into a failure it should have found", () => {
+    const g = new mg.Grid(40, 40, mg.FLOOR);
+    const path = findPath(g, { x: 2, y: 2 }, { x: 35, y: 35 }, { maxNodes: 4000 });
+    expect(path).not.toBeNull();
+    expect(path?.[0]).toEqual({ x: 2, y: 2 });
+    expect(path?.[path.length - 1]).toEqual({ x: 35, y: 35 });
+  });
+
+  it("pursuing a walled-off target is cheap, not a dropped frame", () => {
+    const g = new mg.Grid(110, 80, mg.FLOOR);
+    for (let y = 0; y < 80; y++) g.set(30, y, mg.WALL);
+    const m: Mob = {
+      id: "x", name: "X", glyph: "x", x: 40, y: 40, ax: 40, ay: 40, hp: 9, maxhp: 9,
+      atk: 1, genes: [], note: "", pigment: "#fff", alive: true, facing: "none",
+      heading: 0, behaviour: "chase", size: "medium", cooldown: 0, status: [],
+      weapon: "melee", reload: 0, charging: 0,
+    };
+    const t0 = performance.now();
+    for (let i = 0; i < 20; i++) {
+      nextAction({ x: 20, y: 40 }, [m], g, m, false, { reach: 1, maxRange: 24 });
+    }
+    const perCall = (performance.now() - t0) / 20;
+    expect(perCall, `${perCall.toFixed(1)} ms per pursuit turn`).toBeLessThan(2);
+  });
+
+  it("screen chrome is shared, so a close button is the same box everywhere", () => {
+    const calls: string[] = [];
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_t, p: string) => (["fillStyle","strokeStyle","font","textAlign",
+        "textBaseline","lineWidth","globalAlpha"].includes(p)
+        ? "" : () => { calls.push(p); }),
+      set: () => true,
+    });
+    const ins = { top: 40, right: 0, bottom: 20, left: 0 };
+    const a = drawClose(ctx, 400, ins, 2);
+    const b = drawClose(ctx, 400, ins, 2);
+    expect(a).toEqual(b);
+    expect(a.w).toBeGreaterThanOrEqual(44);
+    expect(a.x + a.w).toBeLessThanOrEqual(400);
+    expect(inBoxChrome(a, a.x + 1, a.y + 1)).toBe(true);
+    expect(inBoxChrome(a, a.x - 1, a.y)).toBe(false);
   });
 });

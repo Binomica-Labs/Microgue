@@ -5,7 +5,7 @@
 // state and set `depth` to a string. Everything here takes `unknown` and
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
-import { GENES, MAX_DEPTH, type GeneId } from "./biology.js";
+import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
 import { BIN_CAP, SLOTS, type Part, type Strength } from "./plasmid.js";
 
 export interface Settings {
@@ -18,7 +18,7 @@ export interface Settings {
 /** Bump when the shape changes incompatibly. A save from an older schema is
  *  discarded rather than half-loaded: `version` was being written and never
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
-export const SCHEMA = 3;
+export const SCHEMA = 4;
 
 export interface SaveData {
   readonly version: number;
@@ -30,6 +30,9 @@ export interface SaveData {
   readonly atp: number;
   readonly ring: readonly (Part | null)[];
   readonly bin: readonly Part[];
+  /** Lineage state: the notebook, the score, the death count. Omitting this
+   *  silently discarded every sighting the moment the tab closed. */
+  readonly run: { deepest: number; deaths: number; bestiary: string[]; library: GeneId[] };
   readonly settings: Settings;
 }
 
@@ -65,6 +68,24 @@ function parsePart(v: unknown): Part | null {
     return { kind: "gene", id: v["id"], optimised: bool(v["optimised"], false) };
   }
   return null;
+}
+
+function parseRun(v: unknown): SaveData["run"] {
+  const empty = { deepest: 1, deaths: 0, bestiary: [] as string[], library: [] as GeneId[] };
+  if (!isRecord(v)) return empty;
+  const ids = new Set(MICROBES.map((m) => m.id));
+  const bestiary = Array.isArray(v["bestiary"])
+    ? [...new Set((v["bestiary"] as unknown[]).filter(
+        (x): x is string => typeof x === "string" && ids.has(x)))]
+    : [];
+  const library = Array.isArray(v["library"])
+    ? [...new Set((v["library"] as unknown[]).filter(isGeneId))]
+    : [];
+  return {
+    deepest: Math.min(Math.max(num(v["deepest"], 1), 1), MAX_DEPTH),
+    deaths: Math.max(num(v["deaths"], 0), 0),
+    bestiary, library,
+  };
 }
 
 /** The parts bin: a plain list, deduplicated against itself. */
@@ -130,6 +151,7 @@ export function parseSave(raw: unknown): SaveData | null {
     atp: Math.min(Math.max(num(raw["atp"], 100), 0), 100),
     ring: parseRing(raw["ring"]),
     bin: parseBin(raw["bin"]),
+    run: parseRun(raw["run"]),
     settings: parseSettings(raw["settings"]),
   };
 }

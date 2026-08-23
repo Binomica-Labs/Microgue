@@ -16,6 +16,10 @@ const DIAG: readonly (readonly [number, number])[] =
   [[1, 1], [1, -1], [-1, 1], [-1, -1]];
 
 export interface PathOpts {
+  /** Cap on nodes expanded. A failed search would otherwise walk the entire
+   *  grid: on 110x80 that is 5.6 ms, which is a dropped frame every time a
+   *  target happens to be behind a wall. */
+  maxNodes?: number;
   readonly diagonal?: boolean;
   readonly tunnel?: boolean;
 }
@@ -117,7 +121,12 @@ export function findPath(
   gScore[start] = 0;
   open.push(start, heuristic(from.x, from.y));
 
+  const budget = opts.maxNodes ?? 4000;
+  let expanded = 0;
+
   while (open.size > 0) {
+    // Giving up costs a path; not giving up costs a frame.
+    if (++expanded > budget) return null;
     const cur = open.pop();
     if (cur === goal) {
       const out: Point[] = [];
