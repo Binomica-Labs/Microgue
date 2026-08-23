@@ -24,6 +24,9 @@ import { microbeTurn } from "../src/combat.js";
 import { FOOTPRINT_TILES, centreOf, covers, stretchOf, tilesOf }
   from "../src/footprint.js";
 import { distanceTo, nextAction } from "../src/pursuit.js";
+import { WEAPONS, lineOfSight } from "../src/weapons.js";
+import { launch, stepClouds, stepPackets, type Cloud, type Packet }
+  from "../src/projectile.js";
 import { Toasts, guard } from "../src/toast.js";
 import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
@@ -2150,12 +2153,14 @@ describe("the microbe turn", () => {
     player: { x: px, y: py, hp: 30, status: [] as Status[] },
     rng: makeRng(7),
     armour: 1,
+    packets: [], clouds: [],
   });
   const mob = (over: Partial<Mob>): Mob => ({
     id: "pseudomonas", name: "Pseudomonas", glyph: "p", x: 8, y: 5,
     ax: 8, ay: 5, hp: 12, maxhp: 12, atk: 4, genes: [], note: "",
     pigment: "#fff", alive: true, facing: "rotate", heading: null,
     behaviour: "chase", size: "medium", cooldown: 0, status: [],
+    weapon: "melee", reload: 0, charging: 0,
     ...over,
   });
 
@@ -2463,7 +2468,8 @@ describe("footprints in the microbe turn", () => {
     id: "beggiatoa", name: "Beggiatoa", glyph: "B", x: 8, y: 5, ax: 8, ay: 5,
     hp: 40, maxhp: 40, atk: 5, genes: [], note: "", pigment: "#fff",
     alive: true, facing: "rotate", heading: 0, behaviour: "sessile",
-    size: "filament", cooldown: 0, status: [], ...over,
+    size: "filament", cooldown: 0, status: [],
+    weapon: "melee", reload: 0, charging: 0, ...over,
   });
 
   it("a filament strikes from either end of its body", () => {
@@ -2472,7 +2478,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(3), armour: 1,
+      rng: makeRng(3), armour: 1, packets: [], clouds: [],
     };
     for (let i = 0; i < 4; i++) microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);
@@ -2485,7 +2491,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(20, 20, mg.FLOOR), mobs,
       player: { x: 12, y: 12, hp: 999, status: [] as Status[] },
-      rng: makeRng(5), armour: 1,
+      rng: makeRng(5), armour: 1, packets: [], clouds: [],
     };
     for (let step = 0; step < 25; step++) {
       microbeTurn(w);
@@ -2507,7 +2513,8 @@ describe("pursuit", () => {
     id: "pseudomonas", name: "Pseudomonas", glyph: "p", x: 10, y: 5, ax: 10, ay: 5,
     hp: 12, maxhp: 12, atk: 4, genes: [], note: "", pigment: "#fff",
     alive: true, facing: "rotate", heading: 0, behaviour: "chase",
-    size: "medium", cooldown: 0, status: [], ...over,
+    size: "medium", cooldown: 0, status: [],
+    weapon: "melee", reload: 0, charging: 0, ...over,
   });
   const opts = { reach: 1, maxRange: 24 };
 
@@ -2614,5 +2621,169 @@ describe("pursuit", () => {
 
   it("an empty level is idle, not a crash", () => {
     expect(nextAction({ x: 5, y: 5 }, [], grid(), null, true, opts).kind).toBe("idle");
+  });
+});
+
+describe("ranged weapons", () => {
+  const world = (mobs: Mob[], px = 5, py = 5, grid?: mg.Grid) => ({
+    grid: grid ?? new mg.Grid(20, 20, mg.FLOOR),
+    mobs,
+    player: { x: px, y: py, hp: 60, status: [] as Status[] },
+    rng: makeRng(11),
+    armour: 1,
+    packets: [] as Packet[],
+    clouds: [] as Cloud[],
+  });
+  const gun = (over: Partial<Mob>): Mob => ({
+    id: "pseudomonas", name: "Pseudomonas", glyph: "p", x: 5, y: 5, ax: 5, ay: 5,
+    hp: 20, maxhp: 20, atk: 6, genes: [], note: "", pigment: "#fff",
+    alive: true, facing: "rotate", heading: 0, behaviour: "sessile",
+    size: "medium", cooldown: 0, status: [],
+    weapon: "melee", reload: 0, charging: 0, ...over,
+  });
+
+  it("a speargun winds up before it fires -- the tell is real", () => {
+    const m = gun({ weapon: "spear", x: 6, y: 5 });
+    const w = world([m]);
+    const first = microbeTurn(w);
+    expect(first.some((e) => e.kind === "charge")).toBe(true);
+    expect(w.player.hp).toBe(60);                    // no damage yet
+    const second = microbeTurn(w);
+    expect(second.some((e) => e.kind === "fire")).toBe(true);
+    expect(w.player.hp).toBeLessThan(60);
+  });
+
+  it("T6SS hits far harder than a bump but only at contact range", () => {
+    const near = world([gun({ weapon: "spear", x: 6, y: 5 })]);
+    microbeTurn(near); microbeTurn(near);
+    const speared = 60 - near.player.hp;
+
+    const bump = world([gun({ weapon: "melee", x: 6, y: 5 })]);
+    microbeTurn(bump);
+    expect(speared).toBeGreaterThan(60 - bump.player.hp);
+
+    const far = world([gun({ weapon: "spear", x: 9, y: 5 })]);
+    for (let i = 0; i < 6; i++) microbeTurn(far);
+    expect(far.player.hp).toBe(60);                  // out of contact range
+  });
+
+  it("stepping out of range aborts a charge instead of banking it", () => {
+    const m = gun({ weapon: "spear", x: 6, y: 5 });
+    const w = world([m]);
+    microbeTurn(w);
+    expect(m.charging).toBe(1);
+    w.player.x = 15;                                  // you back off
+    microbeTurn(w);
+    expect(m.charging).toBe(0);
+  });
+
+  it("a nanowire needs a clear line", () => {
+    const open = world([gun({ weapon: "bolt", x: 8, y: 5 })]);
+    microbeTurn(open);
+    expect(open.player.hp).toBeLessThan(60);
+
+    const g = new mg.Grid(20, 20, mg.FLOOR);
+    for (let y = 0; y < 20; y++) g.set(7, y, mg.WALL);
+    const walled = world([gun({ weapon: "bolt", x: 8, y: 5 })], 5, 5, g);
+    for (let i = 0; i < 4; i++) microbeTurn(walled);
+    expect(walled.player.hp).toBe(60);
+  });
+
+  it("a tailocin is launched as a particle, not resolved instantly", () => {
+    const w = world([gun({ weapon: "packet", x: 11, y: 5 })]);
+    microbeTurn(w);
+    expect(w.packets).toHaveLength(1);
+    expect(w.player.hp).toBe(60);                     // still in flight
+  });
+
+  it("a particle travels a tile per turn and can be stepped around", () => {
+    const w = world([gun({ weapon: "packet", x: 11, y: 5 })]);
+    microbeTurn(w);
+    const p = w.packets[0]!;
+    const startX = p.x;
+    stepPackets(w.packets, w.grid, w.player, () => false);
+    expect(Math.abs(p.x - startX)).toBe(1);
+
+    // sidestep: the packet passes through the row you left
+    w.player.y = 7;
+    for (let i = 0; i < 8; i++) stepPackets(w.packets, w.grid, w.player, () => false);
+    expect(w.player.hp).toBe(60);
+  });
+
+  it("a particle that connects deals damage and infects", () => {
+    const w = world([gun({ weapon: "packet", x: 11, y: 5 })]);
+    microbeTurn(w);
+    let hits = 0;
+    for (let i = 0; i < 10; i++) {
+      for (const h of stepPackets(w.packets, w.grid, w.player, () => false)) {
+        hits++;
+        w.player.hp -= h.dmg;
+        if (h.inflicts) apply(w.player.status, h.inflicts, 5, 1);
+      }
+    }
+    expect(hits).toBe(1);
+    expect(hasStatus(w.player.status, "phage")).toBe(true);
+  });
+
+  it("particles die on walls and expire, so none can orbit forever", () => {
+    const g = new mg.Grid(20, 20, mg.FLOOR);
+    for (let y = 0; y < 20; y++) g.set(9, y, mg.WALL);
+    const w = world([gun({ weapon: "packet", x: 5, y: 5 })], 5, 5, g);
+    w.packets.push(launch({ x: 6, y: 5 }, { x: 19, y: 5 }, 5, null, "#fff"));
+    for (let i = 0; i < 30; i++) stepPackets(w.packets, g, { x: 0, y: 0 }, () => false);
+    expect(w.packets).toHaveLength(0);
+  });
+
+  it("a gradient lingers on the ground and denies it", () => {
+    const w = world([gun({ weapon: "cloud", x: 8, y: 5 })]);
+    microbeTurn(w);                            // winds up
+    microbeTurn(w);                            // then releases
+    expect(w.clouds).toHaveLength(1);
+    let ticks = 0;
+    for (let i = 0; i < 12; i++) {
+      for (const h of stepClouds(w.clouds, w.player)) { ticks++; void h; }
+    }
+    expect(ticks).toBeGreaterThan(2);          // it kept hurting while you stood in it
+    expect(w.clouds).toHaveLength(0);          // and then dispersed
+  });
+
+  it("walking out of a gradient stops the damage", () => {
+    const clouds: Cloud[] = [{ cx: 5, cy: 5, radius: 2, dmg: 2, ttl: 9,
+                               inflicts: "acid", colour: "#fff" }];
+    expect(stepClouds(clouds, { x: 5, y: 5 })).toHaveLength(1);
+    expect(stepClouds(clouds, { x: 15, y: 15 })).toHaveLength(0);
+  });
+
+  it("reload gates the rate of fire", () => {
+    const m = gun({ weapon: "bolt", x: 7, y: 5 });
+    const w = world([m]);
+    let fired = 0;
+    for (let i = 0; i < 10; i++) {
+      if (microbeTurn(w).some((e) => e.kind === "fire")) fired++;
+    }
+    expect(fired).toBeLessThan(10);
+    expect(fired).toBeGreaterThan(2);
+  });
+
+  it("line of sight is symmetric and stops at walls", () => {
+    const solid = (x: number): ((x: number, y: number) => boolean) =>
+      (px) => px === x;
+    expect(lineOfSight(0, 0, 6, 0, solid(3))).toBe(false);
+    expect(lineOfSight(6, 0, 0, 0, solid(3))).toBe(false);
+    expect(lineOfSight(0, 0, 6, 0, () => false)).toBe(true);
+  });
+
+  it("weapons match what each organism actually secretes", () => {
+    const by = (id: string) => bio.MICROBES.find((m) => m.id === id)!;
+    expect(by("pseudomonas").weapon, "T6SS").toBe("spear");
+    expect(by("geobacter").weapon, "OmcS nanowire").toBe("bolt");
+    expect(by("thiobacillus").weapon, "sulfuric acid").toBe("cloud");
+    expect(by("desulfovibrio").weapon, "exhaled H2S").toBe("cloud");
+    expect(by("prosthecochloris").weapon, "membrane vesicles").toBe("packet");
+    expect(by("chlorella").weapon, "no armament").toBe("melee");
+  });
+
+  it("every microbe declares a weapon that exists", () => {
+    for (const m of bio.MICROBES) expect(WEAPONS[m.weapon], m.id).toBeDefined();
   });
 });

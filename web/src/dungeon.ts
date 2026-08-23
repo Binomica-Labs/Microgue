@@ -5,6 +5,7 @@ import { MAX_DEPTH, microbesAt, stratum, type GeneId, type Stratum } from "./bio
 import type { Facing } from "./motion.js";
 import { SIZES, type Behaviour, type Size } from "./behaviour.js";
 import { covers, tilesOf } from "./footprint.js";
+import type { WeaponKind } from "./weapons.js";
 import type { Status } from "./status.js";
 import * as mg from "./mapgen.js";
 import type { Grid, Point } from "./mapgen.js";
@@ -17,6 +18,9 @@ export interface Mob {
   facing: Facing; heading: number | null;
   ax: number; ay: number;          // drawn position, eased toward x,y
   behaviour: Behaviour; size: Size;
+  weapon: WeaponKind;
+  /** Turns until it may fire again, and how long it has been winding up. */
+  reload: number; charging: number;
   cooldown: number;                // turns until it may act again
   status: Status[];
 }
@@ -93,6 +97,7 @@ export class Dungeon {
         facing: p.facing, heading: null, ax: x, ay: y,
         behaviour: p.behaviour, size: p.size,
         cooldown: 0, status: [],
+        weapon: p.weapon, reload: 0, charging: 0,
       });
     }
   }

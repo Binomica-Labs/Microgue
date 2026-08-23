@@ -1,3 +1,4 @@
+import type { WeaponKind } from "./weapons.js";
 import type { Behaviour, Size } from "./behaviour.js";
 import type { Facing } from "./motion.js";
 // The Winogradsky redox tower as game data.
@@ -83,29 +84,32 @@ export interface Microbe {
    *  holdfast attachment are distinct and diagnostic. */
   readonly behaviour: Behaviour;
   readonly size: Size;
+  /** How it attacks. Follows what the organism actually secretes: T6SS for
+   *  Pseudomonas, a nanowire for Geobacter, sulfuric acid for Thiobacillus. */
+  readonly weapon: WeaponKind;
 }
 
 export const MICROBES: readonly Microbe[] = [
-  { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" },
-  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" },
-  { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" , facing:"rotate" , behaviour:"glide", size:"medium" },
-  { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" },
-  { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["nxrA"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" , facing:"rotate" , behaviour:"drift", size:"small" },
-  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" , facing:"rotate" , behaviour:"chase", size:"medium" },
-  { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" , facing:"rotate" , behaviour:"glide", size:"filament" },
-  { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." , pigment:"#e6e6da" , facing:"none" , behaviour:"sessile", size:"filament" },
-  { id:"thiobacillus",    name:"Thiobacillus",    depth:3, hp:11, atk:6,  glyph:"T", genes:["sqr","soxB"],  note:"Chemolithoautotroph. Generates sulfuric acid." , pigment:"#d8cfa0" , facing:"rotate" , behaviour:"drift", size:"small" },
-  { id:"geobacter",       name:"Geobacter",       depth:4, hp:18, atk:7,  glyph:"G", genes:["omcS","mtrC"], note:"Grows conductive pili. Reduces solid Fe(III) oxides." , pigment:"#d0603c" , facing:"rotate" , behaviour:"wire", size:"medium" },
-  { id:"shewanella",      name:"Shewanella",      depth:4, hp:16, atk:6,  glyph:"S", genes:["mtrC"],        note:"Mtr pathway respires minerals. Wildly versatile." , pigment:"#dd9078" , facing:"rotate" , behaviour:"chase", size:"medium" },
-  { id:"rhodospirillum",  name:"Rhodospirillum",  depth:4, hp:15, atk:5,  glyph:"r", genes:["pufM","nifH"], note:"Purple non-sulfur. Photoheterotroph, fixes N2." , pigment:"#b0527a" , facing:"rotate" , behaviour:"chase", size:"medium" },
-  { id:"allochromatium",  name:"Allochromatium",  depth:5, hp:22, atk:8,  glyph:"C", genes:["pufM","sqr"],  note:"Purple sulfur. Intracellular S0 globules." , pigment:"#b34a86" , facing:"rotate" , behaviour:"swarm", size:"large" },
-  { id:"thiocapsa",       name:"Thiocapsa",       depth:5, hp:20, atk:8,  glyph:"h", genes:["pufM"],        note:"Purple sulfur, capsulate. Colonies in slime." , pigment:"#a34fa8" , facing:"none" , behaviour:"sessile", size:"large" },
-  { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA"], note:"Green sulfur. Photosynthesis at near-zero photon flux." , pigment:"#5fd47a" , facing:"rotate" , behaviour:"drift", size:"medium" },
-  { id:"prosthecochloris",name:"Prosthecochloris",depth:6, hp:22, atk:10, glyph:"P", genes:["csmA","aclB"], note:"Prosthecate green sulfur. Fixes carbon via rTCA." , pigment:"#4fc98e" , facing:"none" , behaviour:"sessile", size:"medium" },
-  { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." , pigment:"#a6acb6" , facing:"rotate" , behaviour:"chase", size:"medium" },
-  { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA","sat"], note:"Oxidises acetate completely to CO2." , pigment:"#949ba6" , facing:"rotate" , behaviour:"drift", size:"large" },
-  { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB"], note:"The most metabolically flexible methanogen known." , pigment:"#dcc179" , facing:"none" , behaviour:"sessile", size:"large" },
-  { id:"methanobacterium",name:"Methanobacterium",depth:8, hp:32, atk:13, glyph:"m", genes:["mcrA"],        note:"Hydrogenotrophic. CO2 + H2. The last respiration." , pigment:"#cdba8b" , facing:"rotate" , behaviour:"drift", size:"medium" },
+  { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" , weapon:"melee" },
+  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
+  { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" , facing:"rotate" , behaviour:"glide", size:"medium" , weapon:"melee" },
+  { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
+  { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["nxrA"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
+  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"spear" },
+  { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" , facing:"rotate" , behaviour:"glide", size:"filament" , weapon:"melee" },
+  { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." , pigment:"#e6e6da" , facing:"none" , behaviour:"sessile", size:"filament" , weapon:"melee" },
+  { id:"thiobacillus",    name:"Thiobacillus",    depth:3, hp:11, atk:6,  glyph:"T", genes:["sqr","soxB"],  note:"Chemolithoautotroph. Generates sulfuric acid." , pigment:"#d8cfa0" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"cloud" },
+  { id:"geobacter",       name:"Geobacter",       depth:4, hp:18, atk:7,  glyph:"G", genes:["omcS","mtrC"], note:"Grows conductive pili. Reduces solid Fe(III) oxides." , pigment:"#d0603c" , facing:"rotate" , behaviour:"wire", size:"medium" , weapon:"bolt" },
+  { id:"shewanella",      name:"Shewanella",      depth:4, hp:16, atk:6,  glyph:"S", genes:["mtrC"],        note:"Mtr pathway respires minerals. Wildly versatile." , pigment:"#dd9078" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"melee" },
+  { id:"rhodospirillum",  name:"Rhodospirillum",  depth:4, hp:15, atk:5,  glyph:"r", genes:["pufM","nifH"], note:"Purple non-sulfur. Photoheterotroph, fixes N2." , pigment:"#b0527a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"melee" },
+  { id:"allochromatium",  name:"Allochromatium",  depth:5, hp:22, atk:8,  glyph:"C", genes:["pufM","sqr"],  note:"Purple sulfur. Intracellular S0 globules." , pigment:"#b34a86" , facing:"rotate" , behaviour:"swarm", size:"large" , weapon:"melee" },
+  { id:"thiocapsa",       name:"Thiocapsa",       depth:5, hp:20, atk:8,  glyph:"h", genes:["pufM"],        note:"Purple sulfur, capsulate. Colonies in slime." , pigment:"#a34fa8" , facing:"none" , behaviour:"sessile", size:"large" , weapon:"melee" },
+  { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA"], note:"Green sulfur. Photosynthesis at near-zero photon flux." , pigment:"#5fd47a" , facing:"rotate" , behaviour:"drift", size:"medium" , weapon:"melee" },
+  { id:"prosthecochloris",name:"Prosthecochloris",depth:6, hp:22, atk:10, glyph:"P", genes:["csmA","aclB"], note:"Prosthecate green sulfur. Fixes carbon via rTCA." , pigment:"#4fc98e" , facing:"none" , behaviour:"sessile", size:"medium" , weapon:"packet" },
+  { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." , pigment:"#a6acb6" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"cloud" },
+  { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA","sat"], note:"Oxidises acetate completely to CO2." , pigment:"#949ba6" , facing:"rotate" , behaviour:"drift", size:"large" , weapon:"melee" },
+  { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB"], note:"The most metabolically flexible methanogen known." , pigment:"#dcc179" , facing:"none" , behaviour:"sessile", size:"large" , weapon:"packet" },
+  { id:"methanobacterium",name:"Methanobacterium",depth:8, hp:32, atk:13, glyph:"m", genes:["mcrA"],        note:"Hydrogenotrophic. CO2 + H2. The last respiration." , pigment:"#cdba8b" , facing:"rotate" , behaviour:"drift", size:"medium" , weapon:"melee" },
 ];
 
 export interface Stratum {

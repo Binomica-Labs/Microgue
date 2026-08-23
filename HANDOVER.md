@@ -101,6 +101,9 @@ web/
     status.ts     status effects: one list per entity, one loop
     behaviour.ts  motility patterns and size classes
     footprint.ts  multi-tile bodies: filaments lie along their own axis
+    weapons.ts    the four ranged mechanisms, line of sight, cloud discs
+    projectile.ts travelling particles and lingering gradients
+    pursuit.ts    chase-to-kill, re-pathed every turn
     combat.ts     the microbe turn, extracted and testable without a canvas
     saves.ts      named characters in numbered slots
     toast.ts      transient notices + guard(), the error boundary
@@ -233,6 +236,27 @@ rather than being scripted:
 `covers()` and `tilesOf()` are the only sources of truth for occupancy;
 `mobAt`, `occupiedBy`, `decideStep` and spawning all go through them. A test
 runs 25 turns of mixed footprints and asserts no two bodies ever share a tile.
+
+## How microbes shoot
+
+Four mechanisms, four mechanics, because they really are different things:
+
+- **spear** — type VI secretion. A contractile phage-tail homolog firing a
+  VgrG/PAAR spike. Contact-dependent, so adjacent only, but 2.6x damage and a
+  visible wind-up turn. Pseudomonas.
+- **bolt** — extracellular electron transfer down an OmcS nanowire. Instant,
+  range 3, requires clear line of sight. Geobacter.
+- **packet** — a tailocin (R-type pyocin) or an outer membrane vesicle. A real
+  particle moving one tile per turn, so it can be sidestepped. Carries the
+  phage status on impact. Prosthecochloris, Methanosarcina.
+- **cloud** — diffusible bacteriocin, sulfuric acid, exhaled H2S. Not a shot:
+  a gradient that lingers on the ground for six turns and denies it.
+  Thiobacillus, Desulfovibrio.
+
+Wind-up is the tell and it is abortable -- stepping out of range clears a
+charge rather than banking it. Readiness is sampled before the reload
+decrement, because doing it the other way round made a cooldown of 1 gate
+nothing.
 
 ## Motility is diagnostic
 

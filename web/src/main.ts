@@ -24,7 +24,11 @@ import { microbeTurn } from "./combat.js";
 import { SIZES } from "./behaviour.js";
 import { boundsOf, centreOf, stretchOf } from "./footprint.js";
 import { nextAction, type Action } from "./pursuit.js";
-import { STATUS, tick as tickStatus, type Status } from "./status.js";
+import { cloudAlpha, cloudTiles, stepClouds, stepPackets,
+         type Cloud, type Packet } from "./projectile.js";
+import { WEAPONS } from "./weapons.js";
+import { STATUS, apply as applyStatus, tick as tickStatus, type Status }
+  from "./status.js";
 import { NAME_POOL, SLOTS as SAVE_SLOTS, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
 import { makeRng } from "./rng.js";
@@ -83,6 +87,8 @@ class Game {
   target: Mob | null = null;
   autoAttack = false;
   private autoAt = 0;
+  packets: Packet[] = [];
+  clouds: Cloud[] = [];
   started = false;
   toasts = new Toasts();
 
@@ -129,6 +135,8 @@ class Game {
     if (!level.visited) { level.visited = true; this.note(s.blurb); }
     // Descending should feel like passing through something.
     this.fx.clear();
+    this.packets.length = 0;
+    this.clouds.length = 0;
     this.fx.add({ kind: "wipe", t0: this.now, dur: 460, colour: s.wall, down: true });
     this.save();
   }
@@ -261,7 +269,27 @@ class Game {
       player: this.player,
       rng: makeRng(this.turnSeed++),
       armour: this.genome.armour(this.dungeon.depth),
+      packets: this.packets,
+      clouds: this.clouds,
     });
+
+    // Particles fly and gradients decay after the microbes have acted, so a
+    // shot fired this turn does not also land this turn.
+    const arm = this.genome.armour(this.dungeon.depth);
+    for (const h of stepPackets(this.packets, this.level.grid, this.player,
+                                (x, y) => this.dungeon.mobAt(x, y) !== undefined)) {
+      const dmg = Math.max(Math.round(h.dmg * arm), 1);
+      this.player.hp = Math.max(this.player.hp - dmg, 0);
+      if (h.inflicts) applyStatus(this.player.status, h.inflicts, 5, 1);
+      this.fx.add({ kind: "burst", t0: this.now, dur: 380, x: this.player.x,
+                    y: this.player.y, colour: "#c8a0ff", n: 8, seed: this.now });
+      this.fx.shake(3, 200, this.now);
+    }
+    for (const h of stepClouds(this.clouds, this.player)) {
+      const dmg = Math.max(Math.round(h.dmg * arm), 1);
+      this.player.hp = Math.max(this.player.hp - dmg, 0);
+      if (h.inflicts) applyStatus(this.player.status, h.inflicts, 3, 1);
+    }
 
     for (const e of events) {
       if (e.kind === "strike") {
@@ -273,6 +301,21 @@ class Game {
         this.fx.add({ kind: "text", t0: this.now + 70, dur: 560, x: this.player.x,
                       y: this.player.y, text: `-${e.dmg ?? 0}`, colour: "#ff8a7a" });
         this.fx.shake(2.5, 180, this.now);
+      } else if (e.kind === "charge") {
+        // The wind-up is the warning. Ring the microbe that is about to fire.
+        this.fx.add({ kind: "ring", t0: this.now, dur: 400, x: e.mob.x, y: e.mob.y,
+                      colour: "#ffd166", r: 1.1 });
+        this.note(`${e.mob.name} is charging ${e.weapon ?? ""}.`);
+      } else if (e.kind === "fire") {
+        const w = WEAPONS[e.mob.weapon];
+        if (w.kind === "bolt" || w.kind === "spear") {
+          this.fx.add({ kind: "bolt", t0: this.now, dur: 240,
+                        colour: w.kind === "spear" ? "#ffd0a0" : "#8fe6ff",
+                        seed: this.now, from: { x: e.mob.x, y: e.mob.y },
+                        to: e.at ?? { x: this.player.x, y: this.player.y } });
+          this.fx.shake(w.kind === "spear" ? 5 : 3, 200, this.now);
+        }
+        this.note(`${e.mob.name} fires ${e.weapon ?? ""}.`);
       } else if (e.kind === "status" && e.status) {
         this.note(`${e.mob.name}: ${STATUS[e.status].name}.`);
         this.fx.add({ kind: "ring", t0: this.now, dur: 420, x: this.player.x,
@@ -826,6 +869,27 @@ class Game {
                      (b.maxX - b.minX + 1) * px, (b.maxY - b.minY + 1) * px);
     } else {
       ctx.strokeRect(this.cursor.x * px, this.cursor.y * px, px, px);
+    }
+    // Gradients under everything, particles over it.
+    for (const c of this.clouds) {
+      ctx.globalAlpha = cloudAlpha(c, WEAPONS.cloud.persist) * 0.28;
+      ctx.fillStyle = c.colour;
+      for (const t of cloudTiles(c.cx, c.cy, c.radius)) {
+        ctx.fillRect(t.x * px, t.y * px, px, px);
+      }
+    }
+    ctx.globalAlpha = 1;
+    for (const p of this.packets) {
+      ctx.fillStyle = p.colour;
+      ctx.beginPath();
+      ctx.arc((p.x + 0.5) * px, (p.y + 0.5) * px, px * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.arc((p.x + 0.5 - p.dx * 0.4) * px, (p.y + 0.5 - p.dy * 0.4) * px,
+              px * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
     this.drawFx(px);
     ctx.restore();

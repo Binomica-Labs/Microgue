@@ -9,6 +9,8 @@ import type { Mob } from "./dungeon.js";
 import type { Grid } from "./mapgen.js";
 import type { Rng } from "./rng.js";
 import { apply, haste, tick, type Status, type StatusId } from "./status.js";
+import { WEAPONS, lineOfSight } from "./weapons.js";
+import { launch, type Cloud, type Packet } from "./projectile.js";
 
 export interface Target {
   x: number; y: number;
@@ -23,13 +25,18 @@ export interface TurnWorld {
   readonly rng: Rng;
   /** Incoming damage multiplier from the player's armour complexes. */
   readonly armour: number;
+  /** Travelling particles and lingering gradients, mutated in place. */
+  readonly packets: Packet[];
+  readonly clouds: Cloud[];
 }
 
 export interface TurnEvent {
-  readonly kind: "strike" | "move" | "status";
+  readonly kind: "strike" | "move" | "status" | "charge" | "fire";
   readonly mob: Mob;
   readonly dmg?: number;
   readonly status?: StatusId;
+  readonly weapon?: string;
+  readonly at?: { x: number; y: number };
 }
 
 /** Which status a microbe inflicts, if any. Grounded in what it actually
@@ -75,7 +82,50 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       .map((t) => chebyshev(t.x, t.y, w.player.x, w.player.y)));
     if (dist > senseRange(m.behaviour) && m.behaviour !== "sessile") continue;
 
-    if (canStrike(m.behaviour, m.size, dist)) {
+    // Ranged weapons resolve before contact. A speargun winds up first, and
+    // that wind-up is the only warning you get.
+    const weapon = WEAPONS[m.weapon];
+    // Readiness is sampled BEFORE the decrement. Decrementing first made a
+    // cooldown of 1 gate nothing at all: the counter dropped to zero and the
+    // very same turn passed the check.
+    const ready = m.reload <= 0;
+    if (m.reload > 0) m.reload -= 1;
+
+    if (weapon.kind !== "melee" && ready && dist <= weapon.range) {
+      const clear = weapon.kind === "cloud" || lineOfSight(
+        m.x, m.y, w.player.x, w.player.y, (x, y) => w.grid.isWall(x, y));
+
+      if (clear) {
+        if (m.charging < weapon.windup) {
+          m.charging += 1;
+          events.push({ kind: "charge", mob: m, weapon: weapon.name });
+          continue;
+        }
+        m.charging = 0;
+        m.reload = weapon.cooldown;
+        const raw = Math.max(Math.round(m.atk * weapon.power), 1);
+
+        if (weapon.kind === "packet") {
+          w.packets.push(launch({ x: m.x, y: m.y }, { x: w.player.x, y: w.player.y },
+                                raw, weapon.inflicts, m.pigment));
+        } else if (weapon.kind === "cloud") {
+          w.clouds.push({
+            cx: w.player.x, cy: w.player.y, radius: weapon.radius, dmg: raw,
+            ttl: weapon.persist, inflicts: weapon.inflicts, colour: m.pigment,
+          });
+        } else {
+          const dmg = Math.max(Math.round(raw * w.armour), 1);
+          w.player.hp = Math.max(w.player.hp - dmg, 0);
+          if (weapon.inflicts) apply(w.player.status, weapon.inflicts, 4, 1);
+        }
+        events.push({ kind: "fire", mob: m, weapon: weapon.name,
+                      at: { x: w.player.x, y: w.player.y } });
+        continue;
+      }
+    }
+    if (m.charging > 0 && dist > weapon.range) m.charging = 0;   // lost the shot
+
+    if (weapon.kind === "melee" && canStrike(m.behaviour, m.size, dist)) {
       const dmg = Math.max(Math.round(m.atk * 0.35 * w.armour), 1);
       w.player.hp = Math.max(w.player.hp - dmg, 0);
       events.push({ kind: "strike", mob: m, dmg });
