@@ -23,6 +23,7 @@ import { blocks, describeEntity, makeBody, type Entity } from "../src/entity.js"
 import { microbeTurn } from "../src/combat.js";
 import { FOOTPRINT_TILES, centreOf, covers, stretchOf, tilesOf }
   from "../src/footprint.js";
+import { distanceTo, nextAction } from "../src/pursuit.js";
 import { Toasts, guard } from "../src/toast.js";
 import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
@@ -2497,5 +2498,121 @@ describe("footprints in the microbe turn", () => {
         }
       }
     }
+  });
+});
+
+describe("pursuit", () => {
+  const grid = () => new mg.Grid(20, 20, mg.FLOOR);
+  const mob = (over: Partial<Mob>): Mob => ({
+    id: "pseudomonas", name: "Pseudomonas", glyph: "p", x: 10, y: 5, ax: 10, ay: 5,
+    hp: 12, maxhp: 12, atk: 4, genes: [], note: "", pigment: "#fff",
+    alive: true, facing: "rotate", heading: 0, behaviour: "chase",
+    size: "medium", cooldown: 0, status: [], ...over,
+  });
+  const opts = { reach: 1, maxRange: 24 };
+
+  it("attacks when already in reach", () => {
+    const m = mob({ x: 6, y: 5 });
+    const a = nextAction({ x: 5, y: 5 }, [m], grid(), m, false, opts);
+    expect(a.kind).toBe("attack");
+  });
+
+  it("steps toward a distant target", () => {
+    const m = mob({ x: 12, y: 5 });
+    const a = nextAction({ x: 5, y: 5 }, [m], grid(), m, false, opts);
+    expect(a.kind).toBe("step");
+    if (a.kind === "step") expect(a.to.x).toBeGreaterThan(5);
+  });
+
+  it("re-paths as the target moves -- the route is never stale", () => {
+    const m = mob({ x: 14, y: 5 });
+    const g = grid();
+    let p = { x: 5, y: 5 };
+    for (let turn = 0; turn < 20; turn++) {
+      const a = nextAction(p, [m], g, m, false, opts);
+      if (a.kind === "attack") break;
+      if (a.kind === "step") p = a.to;
+      m.y += turn % 2 === 0 ? 1 : -1;          // target dodges
+      m.x -= 1;                                 // and closes
+    }
+    expect(nextAction(p, [m], g, m, false, opts).kind).toBe("attack");
+  });
+
+  it("converges on a target that is also chasing you", () => {
+    const m = mob({ x: 16, y: 5 });
+    const g = grid();
+    let p = { x: 2, y: 5 };
+    let turns = 0;
+    for (; turns < 30; turns++) {
+      const a = nextAction(p, [m], g, m, false, opts);
+      if (a.kind === "attack") break;
+      if (a.kind === "step") p = a.to;
+      if (m.x > p.x) m.x -= 1;                  // it closes too
+    }
+    expect(turns).toBeLessThan(12);             // they meet in the middle
+  });
+
+  it("never steps onto the target's body", () => {
+    const m = mob({ x: 12, y: 5, size: "filament" });
+    const g = grid();
+    let p = { x: 2, y: 5 };
+    for (let i = 0; i < 20; i++) {
+      const a = nextAction(p, [m], g, m, false, opts);
+      if (a.kind !== "step") break;
+      p = a.to;
+      for (const t of tilesOf(SIZES[m.size].footprint, m.x, m.y, m.heading)) {
+        expect(`${p.x},${p.y}`).not.toBe(`${t.x},${t.y}`);
+      }
+    }
+  });
+
+  it("reaches a filament from either end", () => {
+    // body spans x = 11..13; standing at 10 is adjacent to its near end
+    const m = mob({ x: 12, y: 5, size: "filament", heading: 0 });
+    expect(distanceTo({ x: 10, y: 5 }, m)).toBe(1);
+    expect(distanceTo({ x: 14, y: 5 }, m)).toBe(1);
+  });
+
+  it("drops a dead target", () => {
+    const m = mob({ x: 6, y: 5, alive: false });
+    expect(nextAction({ x: 5, y: 5 }, [m], grid(), m, false, opts).kind).toBe("idle");
+  });
+
+  it("auto-seek picks the nearest and re-picks when it dies", () => {
+    const near = mob({ x: 8, y: 5 });
+    const far = mob({ x: 17, y: 5 });
+    const a = nextAction({ x: 5, y: 5 }, [near, far], grid(), null, true, opts);
+    expect(a.kind === "step" && a.target).toBe(near);
+    near.alive = false;
+    const b = nextAction({ x: 5, y: 5 }, [near, far], grid(), null, true, opts);
+    expect(b.kind === "step" && b.target).toBe(far);
+  });
+
+  it("does nothing without auto-seek and no target", () => {
+    expect(nextAction({ x: 5, y: 5 }, [mob({})], grid(), null, false, opts).kind)
+      .toBe("idle");
+  });
+
+  it("gives up on a target beyond max range", () => {
+    const m = mob({ x: 19, y: 19 });
+    expect(nextAction({ x: 1, y: 1 }, [m], grid(), m, false,
+                      { reach: 1, maxRange: 5 }).kind).toBe("idle");
+  });
+
+  it("gives up when the target is walled off, rather than looping", () => {
+    const g = new mg.Grid(20, 20, mg.FLOOR);
+    for (let y = 0; y < 20; y++) g.set(9, y, mg.WALL);
+    const m = mob({ x: 14, y: 5 });
+    expect(nextAction({ x: 3, y: 5 }, [m], g, m, false, opts).kind).toBe("idle");
+  });
+
+  it("nanowire reach lets you strike without closing", () => {
+    const m = mob({ x: 8, y: 5 });
+    expect(nextAction({ x: 5, y: 5 }, [m], grid(), m, false,
+                      { reach: 3, maxRange: 24 }).kind).toBe("attack");
+  });
+
+  it("an empty level is idle, not a crash", () => {
+    expect(nextAction({ x: 5, y: 5 }, [], grid(), null, true, opts).kind).toBe("idle");
   });
 });

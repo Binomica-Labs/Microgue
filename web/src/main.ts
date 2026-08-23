@@ -22,7 +22,8 @@ import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad,
 import { headingOf, squashFor, travel, turnToward, wake } from "./motion.js";
 import { microbeTurn } from "./combat.js";
 import { SIZES } from "./behaviour.js";
-import { centreOf, stretchOf } from "./footprint.js";
+import { boundsOf, centreOf, stretchOf } from "./footprint.js";
+import { nextAction, type Action } from "./pursuit.js";
 import { STATUS, tick as tickStatus, type Status } from "./status.js";
 import { NAME_POOL, SLOTS as SAVE_SLOTS, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
@@ -78,6 +79,10 @@ class Game {
   private last = 0;
   fx = new Effects();
   turnSeed = 1;
+  /** The microbe being chased, if any. Cleared when it dies or is lost. */
+  target: Mob | null = null;
+  autoAttack = false;
+  private autoAt = 0;
   started = false;
   toasts = new Toasts();
 
@@ -303,6 +308,28 @@ class Game {
     return true;
   }
 
+  /** One turn of chasing. Returns true if anything happened. */
+  takeTurn(): boolean {
+    const act: Action = nextAction(
+      { x: this.player.x, y: this.player.y }, this.level.mobs, this.level.grid,
+      this.target, this.autoAttack,
+      { reach: this.genome.reach(this.dungeon.depth), maxRange: 24 });
+
+    switch (act.kind) {
+      case "attack":
+        this.target = act.target;
+        this.attack(act.target);
+        return true;
+      case "step":
+        this.target = act.target;
+        this.step(act.to.x, act.to.y);
+        return true;
+      case "idle":
+        this.target = null;
+        return false;
+    }
+  }
+
   stairs(): boolean {
     const { x, y } = this.player;
     const d = this.level.down;
@@ -320,12 +347,15 @@ class Game {
   tap(tx: number, ty: number): void {
     if (tx === this.player.x && ty === this.player.y) { if (this.stairs()) return; }
     const m = this.dungeon.mobAt(tx, ty);
-    // Extracellular electron transfer lets you strike along a nanowire.
-    const reach = this.genome.reach(this.dungeon.depth);
-    if (m !== undefined && Math.abs(tx - this.player.x) <= reach
-                        && Math.abs(ty - this.player.y) <= reach) {
-      this.attack(m); return;
+    if (m !== undefined) {
+      // Tapping a microbe means "go kill that". In range it is a strike; out
+      // of range it becomes a pursuit that re-paths as the target moves.
+      this.target = m;
+      this.walk = null;
+      if (this.takeTurn()) return;
+      return;
     }
+    this.target = null;
     this.cursor = { x: tx, y: ty };
     this.repath();
     if (this.path && this.path.length > 1) this.walk = { nodes: this.path, i: 0 };
@@ -597,6 +627,20 @@ class Game {
             && Math.abs(this.player.y - this.player.ay) < 0.02;
     if (at) { this.player.ax = this.player.x; this.player.ay = this.player.y; }
 
+    // Auto-attack and pursuit both act on a timer so the fight is watchable
+    // rather than resolving instantly.
+    const busy = this.showPlasmid || this.showMap;
+    if (!busy && at && (this.autoAttack || this.target) && t - this.autoAt > 230) {
+      this.autoAt = t;
+      if (!this.takeTurn() && this.autoAttack) {
+        // nothing in range: stop rather than spinning
+        this.autoAttack = false;
+        const btn = this.buttons.find((b) => b.id === "auto");
+        if (btn) btn.active = false;
+        this.note("No targets in range. Auto-attack off.");
+      }
+    }
+
     // Belt and braces: openPlasmid() clears the walk, but the loop refuses to
     // advance one while the screen is up regardless.
     if (this.walk && at && !this.showPlasmid) {
@@ -771,9 +815,18 @@ class Game {
                    (this.player.ay + ly) * px + px * 0.18, px * 0.64, px * 0.64);
     }
 
-    ctx.strokeStyle = hc ? "#ff0" : (this.path ? "#ffffff" : "#777777");
-    ctx.lineWidth = 2;
-    ctx.strokeRect(this.cursor.x * px, this.cursor.y * px, px, px);
+    // The highlight covers the whole body. Boxing one tile of a three-tile
+    // filament reads as though you are aiming at a fragment of it.
+    const under = this.dungeon.mobAt(this.cursor.x, this.cursor.y);
+    ctx.strokeStyle = hc ? "#ff0" : under ? "#ff9a7a" : this.path ? "#ffffff" : "#777777";
+    ctx.lineWidth = under !== undefined && under === this.target ? 3 : 2;
+    if (under) {
+      const b = boundsOf(SIZES[under.size].footprint, under.x, under.y, under.heading);
+      ctx.strokeRect(b.minX * px, b.minY * px,
+                     (b.maxX - b.minX + 1) * px, (b.maxY - b.minY + 1) * px);
+    } else {
+      ctx.strokeRect(this.cursor.x * px, this.cursor.y * px, px, px);
+    }
     this.drawFx(px);
     ctx.restore();
 
@@ -946,9 +999,13 @@ class Game {
     ctx.font = `${size * 0.86}px ui-monospace,monospace`;
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle";
-    ctx.fillText(
-      `${ops} operon${ops === 1 ? "" : "s"}   ${this.dungeon.aliveCount()} hostile`,
-      barX + hpW * 2 + 18 * u, barTop + lh * 1.15 + gaugeH / 2);
+    // Shortened and measured: the long form clipped off the right edge.
+    const tailX = barX + hpW * 2 + 18 * u;
+    const room = W - ins.right - 6 * u - tailX;
+    const long = `${ops} operon${ops === 1 ? "" : "s"}   ${this.dungeon.aliveCount()} hostile`;
+    const short = `${ops}op  ${this.dungeon.aliveCount()}hp`;
+    ctx.fillText(ctx.measureText(long).width <= room ? long : short,
+                 tailX, barTop + lh * 1.15 + gaugeH / 2);
     ctx.textBaseline = "alphabetic";
 
     const LIFE = 9000;
@@ -1478,6 +1535,14 @@ class Game {
   press(id: string): void {
     switch (id) {
       case "plasmid": this.openPlasmid(!this.showPlasmid); this.showMap = false; break;
+      case "auto": {
+        this.autoAttack = !this.autoAttack;
+        const btn = this.buttons.find((b) => b.id === "auto");
+        if (btn) btn.active = this.autoAttack;
+        if (this.autoAttack) { this.walk = null; this.note("Auto-attack engaged."); }
+        else { this.target = null; this.note("Auto-attack off."); }
+        break;
+      }
       case "map":
         this.showMap = !this.showMap;
         if (this.showMap) this.openPlasmid(false);
