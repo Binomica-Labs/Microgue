@@ -41,7 +41,7 @@ git add -A
 git commit -q -m "$MSG"
 git push -q
 echo "==> pushed $(git rev-parse --short HEAD)"
-command -v gh >/dev/null && gh run watch --exit-status 2>/dev/null || true
+
 # Self-update. This script lives outside the repo, so it cannot be refreshed by
 # its own copy step -- which is exactly how a stale sync.sh shipped new source
 # against old tests and broke CI twice.
@@ -51,4 +51,40 @@ if [ -f "$src/sync.sh" ] && ! cmp -s "$src/sync.sh" "$self"; then
   echo "==> sync.sh updated itself; the next run uses the new version"
 fi
 
-echo "==> done. force-close the app and reopen."
+
+# Watch the run this push actually started.
+#
+# `gh run watch` with no argument opens a picker, which needs a keystroke and
+# can list a run from an earlier push. Resolving the id from the commit SHA
+# picks the right one every time and needs nothing from you. The run does not
+# exist the instant the push returns, so poll briefly for it.
+if command -v gh >/dev/null 2>&1; then
+  sha="$(git rev-parse HEAD)"
+  run=""
+  i=0
+  while [ $i -lt 20 ]; do
+    run="$(gh run list --commit "$sha" --limit 1 \
+             --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+    [ -n "$run" ] && break
+    i=$((i + 1))
+    printf '\r==> waiting for the run to appear (%ss)' "$i"
+    sleep 1
+  done
+  if [ $i -gt 0 ]; then printf '\r\033[K'; fi
+
+  if [ -z "$run" ]; then
+    echo "==> no workflow run found for $(git rev-parse --short HEAD)"
+  else
+    echo "==> watching run $run"
+    if gh run watch "$run" --exit-status --interval 3; then
+      echo "==> deploy green"
+    else
+      echo "==> deploy FAILED. failing step log:"
+      gh run view "$run" --log-failed 2>/dev/null | tail -40
+      echo "==> (sync.sh already updated itself, so a fix can be pushed)"
+      exit 1
+    fi
+  fi
+fi
+
+echo "==> done. the app updates itself on next resume."

@@ -231,6 +231,19 @@ by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
 cap does the work. The clock bounds that remain are deliberately loose and
 only trip on an order-of-magnitude regression.
 
+## sync.sh
+
+One command: `~/sync.sh "message"`. It finds the newest tarball in Downloads by
+mtime, mirrors the whole tree into the repo, commits, pushes, and watches the
+run this push started.
+
+Two details that are load-bearing. The run id is resolved from the commit SHA
+rather than letting `gh run watch` open its picker -- the picker needs a
+keystroke and can list a run from an earlier push. And **the self-update runs
+BEFORE the watch**, because the watch exits non-zero on a red deploy; if the
+update ran after it, a broken sync.sh could never replace itself, which is the
+exact trap that broke CI twice.
+
 ## Why an installed app used to run a version behind
 
 `skipWaiting` and `clients.claim` in the worker are necessary and NOT
