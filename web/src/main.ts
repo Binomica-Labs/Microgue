@@ -29,6 +29,7 @@ import { cloudAlpha, cloudTiles, stepClouds, stepPackets,
 import { WEAPONS } from "./weapons.js";
 import { drawClose, inBox as inBoxOf, type Box } from "./chrome.js";
 import { drawNotes, drawSplash } from "./screens.js";
+import { installUpdater } from "./sw_client.js";
 import { SUBSTRATES, addDrop, dropAt, itemColour, itemName, itemNote, removeDrop,
          substratesAt, yieldOf, type Drop, type Item } from "./items.js";
 import * as say from "./flavour.js";
@@ -127,6 +128,12 @@ class Game {
     this.ctx = ctx;
     // The splash decides what to load, so boot does not.
     migrateLegacy();
+    try {
+      if (localStorage.getItem("microgue:updated") === "1") {
+        localStorage.removeItem("microgue:updated");
+        this.toasts.push("Updated to the latest build.", "info", 0);
+      }
+    } catch { /* private browsing */ }
     this.resize();
     addEventListener("resize", () => {
       guard("resize", () => { this.resize(); }, undefined, this.report);
@@ -2052,12 +2059,14 @@ function boot(): void {
   if (!(el instanceof HTMLCanvasElement)) return;
   new Game(el);
   document.getElementById("boot")?.remove();
-  if ("serviceWorker" in navigator) {
-    addEventListener("load", () => {
-      void navigator.serviceWorker.register("./sw.js", { scope: "./" })
-        .catch(() => undefined);
-    });
-  }
+  // Registration used to happen once on `load` with default cache handling,
+  // which left an installed app one or two versions behind. See sw_client.ts.
+  installUpdater({
+    onUpdating: () => {
+      // The game saves continuously, so reloading loses nothing.
+      try { localStorage.setItem("microgue:updated", "1"); } catch { /* ignore */ }
+    },
+  });
 }
 boot();
 

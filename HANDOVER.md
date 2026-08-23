@@ -107,6 +107,7 @@ web/
     run.ts        the roguelike layer: resynthesis, notebook, export
     ncbi.ts       real sequences: Entrez queries, caching, throttling
     chrome.ts     shared screen furniture: close button, header, wrap
+    sw_client.ts  keeping an installed PWA actually up to date
     screens.ts    splash and notebook, as free functions
     items.ts      floor loot: gene cassettes and metabolisable substrates
     flavour.ts    all player-facing combat and pickup text
@@ -229,6 +230,29 @@ the guarantee can be asserted directly it is: the pathfinding budget is tested
 by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
 cap does the work. The clock bounds that remain are deliberately loose and
 only trip on an order-of-magnitude regression.
+
+## Why an installed app used to run a version behind
+
+`skipWaiting` and `clients.claim` in the worker are necessary and NOT
+sufficient. Three client-side failures stacked, and each cold start advanced
+the process by one -- which is why closing and reopening two or three times
+eventually worked:
+
+1. **GitHub Pages serves sw.js with a Cache-Control max-age**, and the browser
+   fetches sw.js THROUGH the HTTP cache when checking for an update. The check
+   could be answered from a stale copy. `updateViaCache: "none"` forces the
+   network.
+2. **Registration ran once, on `load`.** A phone suspends a PWA rather than
+   closing it, so `load` never fires again and the app never asks. It checks on
+   `visibilitychange` now, on focus, and on a timer.
+3. **A new worker taking control does not change the running page**, which is
+   still executing the JavaScript it parsed at startup. The cache is new; the
+   game is old. `controllerchange` reloads it.
+
+The reload is guarded twice: it never fires on the FIRST install (that
+controllerchange is the initial claim, not an update) and never more than once
+per page life. Both are asserted in `test/update.test.ts`. Saving is
+continuous, so the reload costs nothing.
 
 ## The player sprite
 
