@@ -237,12 +237,24 @@ One command: `~/sync.sh "message"`. It finds the newest tarball in Downloads by
 mtime, mirrors the whole tree into the repo, commits, pushes, and watches the
 run this push started.
 
-Two details that are load-bearing. The run id is resolved from the commit SHA
-rather than letting `gh run watch` open its picker -- the picker needs a
-keystroke and can list a run from an earlier push. And **the self-update runs
-BEFORE the watch**, because the watch exits non-zero on a red deploy; if the
-update ran after it, a broken sync.sh could never replace itself, which is the
-exact trap that broke CI twice.
+Three details are load-bearing.
+
+The run id is resolved from the commit SHA rather than letting `gh run watch`
+open its picker -- the picker needs a keystroke and can list a run from an
+earlier push.
+
+**The self-update runs BEFORE the watch**, because the watch exits non-zero on
+a red deploy; if the update ran after it, a broken sync.sh could never replace
+itself, which is the exact trap that broke CI twice.
+
+**The self-update is an atomic `mv`, never a `cp` over the file in place.**
+bash reads a script incrementally by byte offset, so overwriting the file it is
+currently executing makes it resume mid-line in the new contents and run
+fragments of comments as commands. This was harmless while the update was the
+last thing in the script and broke the moment it moved earlier. `bash -n`
+passes on the broken version, so `test/sync.test.ts` runs real scripts: one
+that copies over itself and is asserted to fail, and one that renames and is
+asserted to finish.
 
 ## Why an installed app used to run a version behind
 

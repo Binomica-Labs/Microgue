@@ -45,10 +45,21 @@ echo "==> pushed $(git rev-parse --short HEAD)"
 # Self-update. This script lives outside the repo, so it cannot be refreshed by
 # its own copy step -- which is exactly how a stale sync.sh shipped new source
 # against old tests and broke CI twice.
+#
+# It MUST be an atomic rename, never a copy over the file in place. bash reads
+# a script incrementally by byte offset: overwrite the file it is executing and
+# it resumes mid-line in the new contents, running fragments of comments as
+# commands. A rename swaps the directory entry and leaves the running shell on
+# the original inode, so it finishes the version it started.
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 if [ -f "$src/sync.sh" ] && ! cmp -s "$src/sync.sh" "$self"; then
-  cp "$src/sync.sh" "$self" && chmod +x "$self"
-  echo "==> sync.sh updated itself; the next run uses the new version"
+  if cp "$src/sync.sh" "$self.new" && chmod +x "$self.new" \
+     && mv -f "$self.new" "$self"; then
+    echo "==> sync.sh updated itself; the next run uses the new version"
+  else
+    rm -f "$self.new"
+    echo "==> could not update sync.sh (continuing with this one)"
+  fi
 fi
 
 
