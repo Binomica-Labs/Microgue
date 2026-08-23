@@ -16,15 +16,26 @@ function mix(hex: string, target: number, t: number): string {
   return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
+const paletteCache = new Map<string, Palette>();
+
 /** Built from the organism's own pigment. Deriving it from the stratum made
- *  every mob the same colour as the wall it was standing on. */
+ *  every mob the same colour as the wall it was standing on.
+ *
+ *  Memoised: this parses a hex string four times, and it was being called once
+ *  per mob per frame -- 33 us a frame, the largest single cost in the draw
+ *  path. The input set is the twenty organism pigments, so the cache is tiny
+ *  and never needs invalidating. */
 export function paletteForPigment(pigment: string): Palette {
-  return {
+  const hit = paletteCache.get(pigment);
+  if (hit) return hit;
+  const pal: Palette = {
     body: pigment,
     dark: mix(pigment, 0, 0.72),
     accent: mix(pigment, 255, 0.45),
     hi: mix(pigment, 255, 0.78),
   };
+  paletteCache.set(pigment, pal);
+  return pal;
 }
 
 const PLAYER_PALETTE: Palette =

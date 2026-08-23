@@ -120,6 +120,7 @@ export class Plasmid {
     }
     if (this.bin.length >= BIN_CAP) return { ok: false, err: "parts bin is full" };
     this.bin.push(part);
+    this.touch();
     return { ok: true };
   }
 
@@ -182,12 +183,15 @@ export class Plasmid {
     }
     for (let k = 0; k < SLOTS; k++) {
       const i = this.norm(from + k);
-      if (this.slots[i] === null) { this.slots[i] = part; return { ok: true }; }
+      if (this.slots[i] === null) { this.slots[i] = part; this.touch(); return { ok: true }; }
     }
     return { ok: false, err: "no free slot on the plasmid" };
   }
 
-  put(i: number, part: Part | null): void { this.slots[this.norm(i)] = part; }
+  put(i: number, part: Part | null): void {
+    this.slots[this.norm(i)] = part;
+    this.touch();
+  }
 
   /** Swap two slots -- the drag-and-drop primitive. */
   swap(a: number, b: number): Result {
@@ -197,6 +201,7 @@ export class Plasmid {
     const pb = this.slots[ib] ?? null;
     this.slots[ia] = pb;
     this.slots[ib] = pa;
+    this.touch();
     return { ok: true };
   }
 
@@ -206,6 +211,7 @@ export class Plasmid {
       return { ok: false, err: "cannot excise the origin" };
     }
     this.slots[this.norm(i)] = null;
+    this.touch();
     return { ok: true };
   }
 
@@ -216,10 +222,18 @@ export class Plasmid {
     if (n === 0) return;
     const copy = this.slots.slice();
     for (let i = 0; i < SLOTS; i++) this.slots[this.norm(i + n)] = copy[i] ?? null;
+    this.touch();
   }
 
-  /** Read the ring into operons. */
+  /** Read the ring into operons. Memoised on the revision counter. */
   operons(): Operon[] {
+    if (this.memoOperons?.rev === this.rev) return this.memoOperons.value;
+    const value = this.computeOperons();
+    this.memoOperons = { rev: this.rev, value };
+    return value;
+  }
+
+  private computeOperons(): Operon[] {
     const out: Operon[] = [];
     for (let i = 0; i < SLOTS; i++) {
       const head = this.slots[i];
@@ -264,6 +278,22 @@ export class Plasmid {
     return 1 + same * SYNERGY;
   }
 
+  /** Bumped by every mutation. Memoised reads key on it, so a stale cache is
+   *  impossible as long as `touch()` is the only way the ring changes -- and
+   *  there is a test asserting every public mutator calls it. */
+  private rev = 0;
+  private memoOperons: { rev: number; value: Operon[] } | null = null;
+  private memoAtp = new Map<string, number>();
+
+  private touch(): void {
+    this.rev++;
+    this.memoOperons = null;
+    this.memoAtp.clear();
+  }
+
+  /** Revision counter, exposed so tests can assert invalidation. */
+  revision(): number { return this.rev; }
+
   /** Fraction of demand the ATP pool can actually meet, 0..1. Set each turn.
    *  Under-supply browns expression out rather than switching it off, which is
    *  what a cell does under energy limitation. */
@@ -304,8 +334,18 @@ export class Plasmid {
     return this.rawExpression(id, depth) * this.supply;
   }
 
-  /** ATP drawn per action to maintain the expressed proteome. */
+  /** ATP drawn per action. Memoised: it depends only on the ring and the
+   *  depth, NOT on `supply`, because it is computed from rawExpression. */
   atpCost(depth: number): number {
+    const key = `c${depth}`;
+    const hit = this.memoAtp.get(key);
+    if (hit !== undefined) return hit;
+    const v = this.computeAtpCost(depth);
+    this.memoAtp.set(key, v);
+    return v;
+  }
+
+  private computeAtpCost(depth: number): number {
     let c = 0;
     for (const p of this.slots) {
       if (p?.kind !== "gene") continue;
@@ -317,6 +357,15 @@ export class Plasmid {
   /** ATP produced per action. Scaled by the stratum's energy yield, so the
    *  same kit generates far less on the methanogenic floor than at the surface. */
   atpGain(depth: number): number {
+    const key = `g${depth}`;
+    const hit = this.memoAtp.get(key);
+    if (hit !== undefined) return hit;
+    const v = this.computeAtpGain(depth);
+    this.memoAtp.set(key, v);
+    return v;
+  }
+
+  private computeAtpGain(depth: number): number {
     let g = 1.2;                                    // baseline fermentation
     for (const p of this.slots) {
       if (p?.kind !== "gene") continue;
@@ -341,6 +390,7 @@ export class Plasmid {
     if (p?.kind !== "gene") return { ok: false, err: "not carried" };
     if (p.optimised) return { ok: false, err: "already optimised" };
     p.optimised = true;
+    this.touch();
     return { ok: true };
   }
 

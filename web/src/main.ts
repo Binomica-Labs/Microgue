@@ -26,6 +26,7 @@ import { STATUS, tick as tickStatus, type Status } from "./status.js";
 import { NAME_POOL, SLOTS as SAVE_SLOTS, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
 import { makeRng } from "./rng.js";
+import { TOAST_COLOUR, TOAST_EDGE, Toasts, guard } from "./toast.js";
 import { DEFAULT_SETTINGS, SCHEMA, readSave, writeSave,
          type SaveData, type Settings } from "./save.js";
 
@@ -76,6 +77,11 @@ class Game {
   private last = 0;
   fx = new Effects();
   turnSeed = 1;
+  started = false;
+  toasts = new Toasts();
+
+  /** Every browser entry point routes failures here rather than throwing. */
+  private report = (msg: string): void => { this.toasts.push(msg, "error", this.now); };
   slot = 0;
   runName = "SP162";
   now = 0;
@@ -88,7 +94,9 @@ class Game {
     // The splash decides what to load, so boot does not.
     migrateLegacy();
     this.resize();
-    addEventListener("resize", () => { this.resize(); });
+    addEventListener("resize", () => {
+      guard("resize", () => { this.resize(); }, undefined, this.report);
+    });
     this.bindInput();
     requestAnimationFrame((t) => { this.frame(t); });
   }
@@ -333,18 +341,28 @@ class Game {
   }
 
   private bindInput(): void {
+    this.bindPinch();
     this.canvas.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      this.pointerDown(e.clientX, e.clientY);
+      guard("pointer", () => { this.pointerDown(e.clientX, e.clientY); }, undefined, this.report);
     });
     this.canvas.addEventListener("pointermove", (e) => {
-      this.pointerMove(e.clientX, e.clientY);
+      guard("pointer", () => { this.pointerMove(e.clientX, e.clientY); }, undefined, this.report);
     });
-    const release = (e: PointerEvent): void => { this.pointerUp(e.clientX, e.clientY); };
+    const release = (e: PointerEvent): void => {
+      guard("pointer", () => { this.pointerUp(e.clientX, e.clientY); }, undefined, this.report);
+    };
     this.canvas.addEventListener("pointerup", release);
     this.canvas.addEventListener("pointercancel", release);
 
     addEventListener("keydown", (e) => {
+      if (this.showSplash || !this.started) return;
+      guard("key", () => { this.onKey(e); }, undefined, this.report);
+    });
+  }
+
+  private onKey(e: KeyboardEvent): void {
+    {
       const act = classifyKey(e.key, this.showPlasmid);
       if (act.kind === "none") return;
       e.preventDefault();
@@ -372,8 +390,10 @@ class Game {
         case "ascend": this.ascend(); break;
         case "quit": break;
       }
-    });
+    }
+  }
 
+  private bindPinch(): void {
     // Pinch-zoom, without the gesture fighting a tap.
     const pts = new Map<number, Point>();
     let d0 = 0;
@@ -403,7 +423,7 @@ class Game {
 
   // ------------------------------------------------------------ persist
   save(): void {
-    if (this.showSplash) return;
+    if (this.showSplash || !this.started) return;
     const data = {
       version: SCHEMA,
       depth: this.dungeon.depth,
@@ -516,13 +536,34 @@ class Game {
   }
 
   frame(t: number): void {
+    // The next frame is scheduled in `finally`, so a single bad frame can no
+    // longer kill the loop permanently. Before this, one exception meant a
+    // black screen with no way back short of a reload.
+    try {
+      this.step_(t);
+    } catch (err) {
+      this.toasts.push(
+        `frame: ${err instanceof Error ? err.message : String(err)}`, "error", t);
+    } finally {
+      requestAnimationFrame((tt) => { this.frame(tt); });
+    }
+  }
+
+  private step_(t: number): void {
     this.now = t;
     let dt = Math.min(Math.max((t - this.last) / 1000, 0), 1 / 15);
     this.last = t;
+
+    // No world exists until a slot is chosen, so nothing below may run.
+    if (this.showSplash || !this.started) {
+      this.draw();
+      return;
+    }
     // Hitstop freezes the animation clock only. Turn state already resolved,
     // so nothing desyncs -- the world just holds still for a beat.
     if (this.fx.frozen(t)) dt = 0;
     this.fx.prune(t);
+    this.toasts.prune(t);
 
     // slide toward the logical tile; clamped so a hitch cannot overshoot
     const k = this.settings.reduceMotion ? 1 : Math.min(this.player.speed * dt, 1);
@@ -561,7 +602,6 @@ class Game {
     }
 
     this.draw();
-    requestAnimationFrame((tt) => { this.frame(tt); });
   }
 
   draw(): void {
@@ -588,24 +628,24 @@ class Game {
     // they are exposed and fillet where three tiles meet, so the region reads
     // as organic rather than tiled. All tiles go into a single path and fill
     // together under nonzero winding, so shared edges leave no seam.
+    // One Path2D, used for both the fill and the motif clip. Tracing twice a
+    // frame cost 29 us; this halves it and the geometry is identical by
+    // construction rather than by hoping the two calls match.
+    const wallPath = new Path2D();
+    const tracer = wallPath as unknown as CanvasRenderingContext2D;
+    traceWalls(tracer, this.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
+
     ctx.fillStyle = hc ? "#ffffff" : s.wall;
     ctx.save();
     ctx.scale(px, px);
-    ctx.beginPath();
-    traceWalls(ctx, this.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
-    ctx.fill();
+    ctx.fill(wallPath);
     ctx.restore();
 
-    // Motifs afterwards, clipped to the contour so texture never spills into
-    // the floor at a rounded corner.
     if (!hc && px >= 40) {
       ctx.save();
-      ctx.beginPath();
-      ctx.save();
       ctx.scale(px, px);
-      traceWalls(ctx, this.level.grid, x0, y0, x1, y1, 0.5);
-      ctx.restore();
-      ctx.clip();
+      ctx.clip(wallPath);
+      ctx.scale(1 / px, 1 / px);
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
           if (!this.level.grid.isWall(x, y)) continue;
@@ -640,16 +680,21 @@ class Game {
     if (this.level.down) stair(this.level.down, true);
     if (this.level.depth > 1) stair(this.level.up, false);
 
+    // Lunges indexed once per frame. Scanning the whole effect queue inside
+    // the mob loop was O(mobs x effects) -- 27 us a frame at 14 mobs.
+    const lunges = new Map<string, { x: number; y: number }>();
+    for (const f of this.fx.all()) {
+      if (f.kind !== "lunge") continue;
+      const o = lungeOffset(f, this.now);
+      const cur = lunges.get(f.who);
+      if (cur) { cur.x += o.x; cur.y += o.y; } else { lunges.set(f.who, { x: o.x, y: o.y }); }
+    }
+
     for (const m of this.level.mobs) {
       if (!m.alive) continue;
       const f = Math.max(m.hp / m.maxhp, 0);
-      let mx = 0, my = 0;
-      for (const f of this.fx.all()) {
-        if (f.kind === "lunge" && f.who === m.id) {
-          const o = lungeOffset(f, this.now);
-          mx += o.x; my += o.y;
-        }
-      }
+      const ml = lunges.get(m.id);
+      const mx = ml?.x ?? 0, my = ml?.y ?? 0;
       // Size is real: Synechococcus is about 1 um, a Beggiatoa filament 200.
       const scale = SIZES[m.size].scale;
       const img = hc ? null : sprite(m.id, px * scale, paletteForPigment(m.pigment));
@@ -683,13 +728,8 @@ class Game {
       }
     }
 
-    let lx = 0, ly = 0;
-    for (const f of this.fx.all()) {
-      if (f.kind === "lunge" && f.who === "player") {
-        const o = lungeOffset(f, this.now);
-        lx += o.x; ly += o.y;
-      }
-    }
+    const pl = lunges.get("player");
+    const lx = pl?.x ?? 0, ly = pl?.y ?? 0;
     const me = hc ? null : playerSprite(px * 0.92);
     if (me) {
       const v = travel(this.player.ax, this.player.ay, this.player.x, this.player.y);
@@ -716,9 +756,11 @@ class Game {
 
     this.drawScreenFx(W, H);
     this.drawHud(W, H);
+    this.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
-    if (this.showSplash) {
+    if (this.showSplash || !this.started) {
       this.drawSplash(W, H);
+      this.drawToasts(W, H);
       return;
     }
     if (this.showMap) {
@@ -1040,7 +1082,7 @@ class Game {
   }
 
   pointerDown(x: number, y: number): void {
-    if (this.showSplash) {
+    if (this.showSplash || !this.started) {
       const i = this.slotBoxes.findIndex(
         (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
       if (i >= 0) this.startRun(i);
@@ -1101,6 +1143,7 @@ class Game {
   }
 
   pointerMove(x: number, y: number): void {
+    if (!this.started) return;
     if (this.showMap && this.panFrom && this.view) {
       const dx = x - this.panFrom.x, dy = y - this.panFrom.y;
       this.panMoved += Math.abs(dx) + Math.abs(dy);
@@ -1126,6 +1169,7 @@ class Game {
   }
 
   pointerUp(x: number, y: number): void {
+    if (!this.started) { this.gesture = "none"; return; }
     switch (this.gesture) {
       case "button": {
         const b = this.gestureBtn;
@@ -1181,6 +1225,42 @@ class Game {
     this.spinFrom = null;
     this.spinStart = null;
     this.panFrom = null;
+  }
+
+  /** Toasts, drawn above everything. A silent failure on a phone with no
+   *  console is the worst outcome there is. */
+  drawToasts(W: number, H: number): void {
+    const { ctx } = this;
+    const items = this.toasts.all();
+    if (items.length === 0) return;
+    const ins = this.insets();
+    const u = Math.max(Math.min(W, H) / 420, 1);
+    const pad = 10 * u;
+    let y = ins.top + pad;
+
+    ctx.save();
+    ctx.font = `${11.5 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const t of items) {
+      const lines = this.wrap(t.text, W - ins.left - ins.right - pad * 4);
+      const h = Math.max(lines.length * 15 * u + 14 * u, 34 * u);
+      ctx.globalAlpha = Toasts.alpha(t, this.now);
+      ctx.fillStyle = TOAST_COLOUR[t.level];
+      ctx.strokeStyle = TOAST_EDGE[t.level];
+      ctx.lineWidth = Math.max(1.4 * u, 1.2);
+      ctx.beginPath();
+      ctx.roundRect(ins.left + pad, y, W - ins.left - ins.right - pad * 2, h, 7 * u);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      lines.forEach((line, i) => {
+        ctx.fillText(line, ins.left + pad * 2, y + 17 * u + i * 15 * u);
+      });
+      y += h + 6 * u;
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   drawSplash(W: number, H: number): void {
@@ -1276,6 +1356,7 @@ class Game {
       this.enter(this.dungeon.current(), this.dungeon.current().up);
       this.note(`Culture ${this.runName} inoculated.`);
     }
+    this.started = true;
     this.showSplash = false;
     this.save();
   }

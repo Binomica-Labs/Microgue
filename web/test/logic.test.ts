@@ -21,6 +21,7 @@ import { STATUS, apply, apply as applyStatus, clear as clearStatus,
          has as hasStatus, haste, tick, type Status } from "../src/status.js";
 import { blocks, describeEntity, makeBody, type Entity } from "../src/entity.js";
 import { microbeTurn } from "../src/combat.js";
+import { Toasts, guard } from "../src/toast.js";
 import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
 import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
@@ -2232,5 +2233,143 @@ describe("the microbe turn", () => {
     const w = world([m]);
     for (let i = 0; i < 6; i++) microbeTurn(w);
     expect(m.alive).toBe(false);
+  });
+});
+
+describe("plasmid memoisation cannot go stale", () => {
+  const fresh = () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "narG", optimised: true });
+    return p;
+  };
+
+  // The memo is keyed on a revision counter, so the ONLY way it can serve a
+  // stale value is a mutator that forgets to bump it. Enumerate them.
+  it("every public mutator bumps the revision", () => {
+    const cases: [string, (p: Plasmid) => void][] = [
+      ["put",        (p) => { p.put(9, { kind: "terminator" }); }],
+      ["swap",       (p) => { p.swap(4, 9); }],
+      ["remove",     (p) => { p.remove(5); }],
+      ["rotate",     (p) => { p.rotate(3); }],
+      ["optimise",   (p) => { p.put(9, { kind: "gene", id: "katG", optimised: false });
+                              p.optimise("katG"); }],
+      ["stash",      (p) => { p.stash({ kind: "terminator" }); }],
+      ["add",        (p) => { p.add({ kind: "terminator" }, 9); }],
+      ["install",    (p) => { p.stash({ kind: "gene", id: "katG", optimised: false });
+                              p.install(p.bin.findIndex((x) => x.kind === "gene"), 9); }],
+      ["uninstall",  (p) => { p.uninstall(5); }],
+      ["assemble",   (p) => { p.stash({ kind: "gene", id: "nirS", optimised: false });
+                              p.stash({ kind: "gene", id: "norB", optimised: false });
+                              p.stash({ kind: "gene", id: "nosZ", optimised: false });
+                              p.assemble(["narG", "nirS", "norB", "nosZ"]); }],
+    ];
+    for (const [name, mutate] of cases) {
+      const p = fresh();
+      const before = p.revision();
+      mutate(p);
+      expect(p.revision(), `${name} did not invalidate the memo`).toBeGreaterThan(before);
+    }
+  });
+
+  it("operons reflect a mutation immediately", () => {
+    const p = fresh();
+    expect(p.operonOf("narG")).not.toBeNull();
+    p.put(4, null);                       // pull the promoter
+    expect(p.operonOf("narG")).toBeNull();
+  });
+
+  it("ATP figures reflect a mutation immediately", () => {
+    const p = fresh();
+    const before = p.atpGain(2);
+    p.put(6, { kind: "gene", id: "nosZ", optimised: true });
+    expect(p.atpGain(2)).not.toBeCloseTo(before, 6);
+  });
+
+  it("cost is memoised per depth, not shared across depths", () => {
+    const p = fresh();
+    const a = p.atpGain(1), b = p.atpGain(8);
+    expect(a).not.toBeCloseTo(b, 6);
+    expect(p.atpGain(1)).toBeCloseTo(a, 10);   // second read still correct
+  });
+
+  it("changing supply does not disturb the cost memo", () => {
+    const p = fresh();
+    const c = p.atpCost(2);
+    p.supply = 0.3;
+    expect(p.atpCost(2)).toBeCloseTo(c, 10);
+    expect(p.expression("narG", 2)).toBeLessThan(p.rawExpression("narG", 2));
+  });
+
+  it("a memoised read matches a freshly built plasmid", () => {
+    const a = fresh();
+    a.atpGain(4); a.operons();             // warm the memo
+    a.put(7, { kind: "gene", id: "katG", optimised: true });
+    const b = fresh();
+    b.put(7, { kind: "gene", id: "katG", optimised: true });
+    expect(a.atpGain(4)).toBeCloseTo(b.atpGain(4), 10);
+    expect(a.operons().length).toBe(b.operons().length);
+  });
+});
+
+describe("toasts", () => {
+  it("expire and are bounded", () => {
+    const t = new Toasts();
+    for (let i = 0; i < 50; i++) t.push(`msg ${i}`, "info", i * 4000);
+    expect(t.count()).toBeLessThanOrEqual(4);
+    t.prune(1e9);
+    expect(t.count()).toBe(0);
+  });
+
+  it("collapses a repeated message so a per-frame failure cannot spam", () => {
+    const t = new Toasts();
+    for (let i = 0; i < 100; i++) t.push("boom", "error", 1000 + i);
+    expect(t.count()).toBe(1);
+  });
+
+  it("lets the same message through again after it has aged", () => {
+    const t = new Toasts();
+    t.push("boom", "error", 0);
+    t.push("boom", "error", 5000);
+    expect(t.count()).toBe(2);
+  });
+
+  it("errors last longer than info", () => {
+    const t = new Toasts();
+    t.push("a", "info", 0);
+    t.push("b", "error", 0);
+    t.prune(3000);
+    expect(t.all().map((x) => x.text)).toEqual(["b"]);
+  });
+
+  it("alpha fades to zero and never goes negative", () => {
+    const t = new Toasts();
+    t.push("x", "info", 0);
+    const item = t.all()[0]!;
+    expect(Toasts.alpha(item, 0)).toBe(1);
+    expect(Toasts.alpha(item, item.dur)).toBe(0);
+    expect(Toasts.alpha(item, item.dur * 10)).toBe(0);
+  });
+
+  it("very long messages are truncated, not wrapped forever", () => {
+    const t = new Toasts();
+    t.push("x".repeat(5000), "error", 0);
+    expect(t.all()[0]!.text.length).toBeLessThanOrEqual(160);
+  });
+
+  it("guard returns the value on success and the fallback on throw", () => {
+    const seen: string[] = [];
+    expect(guard("ok", () => 42, -1, (m) => seen.push(m))).toBe(42);
+    expect(seen).toHaveLength(0);
+    expect(guard("bad", () => { throw new Error("nope"); }, -1, (m) => seen.push(m))).toBe(-1);
+    expect(seen[0]).toContain("bad");
+    expect(seen[0]).toContain("nope");
+  });
+
+  it("guard reports non-Error throws without crashing", () => {
+    const seen: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- the point
+    guard("odd", () => { throw "a string"; }, null, (m) => seen.push(m));
+    expect(seen[0]).toContain("a string");
   });
 });

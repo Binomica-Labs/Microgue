@@ -102,6 +102,7 @@ web/
     behaviour.ts  motility patterns and size classes
     combat.ts     the microbe turn, extracted and testable without a canvas
     saves.ts      named characters in numbered slots
+    toast.ts      transient notices + guard(), the error boundary
     fx.ts         effects: easing, lunge, shake decay, hitstop -- all pure
     motion.ts     facing, short-arc turning, squash, wake -- all pure
     hud.ts        Winogradsky column gauge, bars, plasmid ring
@@ -314,6 +315,44 @@ fails, instead of the feature silently being unreachable.
 `save.ts` enforces `SCHEMA`. An older save is discarded rather than
 half-loaded — `version` was previously written and never read, which would have
 fed a flat gene list into ring code during the plasmid rewrite.
+
+## Nothing may throw out of a browser boundary
+
+Every entry point the browser calls into -- frame, pointerdown/move/up, keydown,
+resize -- is wrapped in `guard()`, which reports to a toast and returns a
+fallback rather than propagating. The frame loop reschedules in a `finally`, so
+one bad frame is a bad frame and not a dead game.
+
+This exists because it already happened: a throw in `frame()` before the
+`requestAnimationFrame` call left a permanently black screen with no console to
+read on a phone. A silent failure on a mobile device is the worst outcome
+available, so recovered errors are drawn.
+
+Repeated messages collapse within three seconds, so a per-frame failure cannot
+spam; the queue is capped at four.
+
+## Performance, measured twice
+
+Per-frame costs before and after a caching pass:
+
+| | before | after |
+|---|---|---|
+| `paletteForPigment` x22 | 33.2 us | 0.1 us |
+| mob loop (effect scan) | 27.1 us | 1.7 us |
+| `drawHud` plasmid reads | 27.3 us | 3.8 us |
+| `atpBalance` | 9.7 us | 0.2 us |
+
+`paletteForPigment` re-parsed a hex string four times per mob per frame and was
+the single largest cost in the draw path; the input set is twenty pigments, so
+the cache never needs invalidating. The lunge scan was O(mobs x effects) and is
+now indexed once per frame. `traceWalls` ran twice -- fill then clip -- and now
+builds one `Path2D` used for both, which also makes the two identical by
+construction rather than by hoping the calls match.
+
+**The plasmid memo is the one with a stale-cache risk**, so its invalidation is
+tested rather than trusted: a `rev` counter bumped by `touch()`, and a test
+that enumerates every public mutator and asserts each one bumps it. Adding a
+mutator without invalidating fails that test.
 
 ## Measured, and deliberately not optimised
 
