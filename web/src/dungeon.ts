@@ -4,6 +4,7 @@
 import { MAX_DEPTH, microbesAt, stratum, type GeneId, type Stratum } from "./biology.js";
 import type { Facing } from "./motion.js";
 import { SIZES, type Behaviour, type Size } from "./behaviour.js";
+import { covers, tilesOf } from "./footprint.js";
 import type { Status } from "./status.js";
 import * as mg from "./mapgen.js";
 import type { Grid, Point } from "./mapgen.js";
@@ -72,12 +73,18 @@ export class Dungeon {
     while (lvl.mobs.length < want && tries < want * 200) {
       tries++;
       const x = rng.int(this.w), y = rng.int(this.h);
+      const p0 = rng.pick(pool);
       if (!lvl.grid.isFloor(x, y)) continue;
       if (Math.abs(x - lvl.up.x) <= 4 && Math.abs(y - lvl.up.y) <= 4) continue;
       if (x === lvl.down?.x && y === lvl.down.y) continue;
-      if (lvl.mobs.some((m) => m.x === x && m.y === y)) continue;
+      const fp = SIZES[p0.size].footprint;
+      if (tilesOf(fp, x, y, null).some((t) => !lvl.grid.isFloor(t.x, t.y))) continue;
+      if (lvl.mobs.some((m) =>
+        tilesOf(SIZES[m.size].footprint, m.x, m.y, m.heading)
+          .some((a) => tilesOf(fp, x, y, null).some((b2) => a.x === b2.x && a.y === b2.y)))) continue;
 
-      const p = rng.pick(pool);
+      // p0 is peeked before placement so the footprint can be validated.
+      const p = p0;
       lvl.mobs.push({
         id: p.id, name: p.name, glyph: p.glyph, x, y,
         hp: Math.round(p.hp * SIZES[p.size].hp),
@@ -114,8 +121,10 @@ export class Dungeon {
     return { level, arrive: level.down ?? level.up };
   }
 
+  /** Any mob whose FOOTPRINT covers this tile, not merely its anchor. */
   mobAt(x: number, y: number): Mob | undefined {
-    return this.current().mobs.find((m) => m.alive && m.x === x && m.y === y);
+    return this.current().mobs.find(
+      (m) => m.alive && covers(SIZES[m.size].footprint, m.x, m.y, m.heading, x, y));
   }
 
   aliveCount(): number {

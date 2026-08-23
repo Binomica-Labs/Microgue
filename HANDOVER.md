@@ -100,6 +100,7 @@ web/
     entity.ts     the tagged union -- add a kind and switches stop compiling
     status.ts     status effects: one list per entity, one loop
     behaviour.ts  motility patterns and size classes
+    footprint.ts  multi-tile bodies: filaments lie along their own axis
     combat.ts     the microbe turn, extracted and testable without a canvas
     saves.ts      named characters in numbered slots
     toast.ts      transient notices + guard(), the error boundary
@@ -206,6 +207,32 @@ Revisit if kinds pass roughly six AND behaviours genuinely cross-cut.
 `status.ts` is the useful tenth of an ECS: one list on the entity, one loop
 applying it, effects as data. Adding antibiotic exposure or phage infection is
 a table entry rather than a branch in three places.
+
+## Sprite art axis
+
+Organism sprites are drawn as horizontal rods, so their long axis is EAST. The
+player nanobot has a prow drawn pointing NORTH. `drawBody` takes an `ArtAxis`
+for exactly this reason: between v20 and v25 it assumed north for everything,
+which rendered every rod perpendicular to its own direction of travel. If a new
+sprite is authored vertically, pass `"north"`.
+
+## Multi-tile bodies
+
+Size is not decorative. A Beggiatoa filament reaches 200 um across against
+about 1 um for a Synechococcus cell, so `filament` occupies three tiles along
+its own long axis and `large` occupies a 2x2 block. Consequences that fall out
+rather than being scripted:
+
+- A filament needs its whole footprint clear to move, so it cannot turn in a
+  corridor narrower than itself.
+- Distance is measured from the NEAREST occupied tile, so a filament reaches
+  you from either end.
+- Spawning validates the whole footprint, so a large body never appears half
+  inside rock.
+
+`covers()` and `tilesOf()` are the only sources of truth for occupancy;
+`mobAt`, `occupiedBy`, `decideStep` and spawning all go through them. A test
+runs 25 turns of mixed footprints and asserts no two bodies ever share a tile.
 
 ## Motility is diagnostic
 

@@ -284,13 +284,17 @@ export function paintWallMotif(
 }
 
 
+/** Which way the art itself points. Organism sprites are drawn as horizontal
+ *  rods, so their long axis is EAST; the player nanobot has a prow drawn
+ *  pointing NORTH. Getting this wrong renders every rod perpendicular to its
+ *  own direction of travel, which is what happened between v20 and v25. */
+export type ArtAxis = "east" | "north";
+
 /**
  * Draw a body with facing and squash applied.
  *
- * The sprite is authored pointing NORTH, so a heading of 0 (east) needs a
- * quarter turn. Squash acts along the body's own forward axis after rotation,
- * which is what makes a cell look like it is launching rather than just
- * getting wider.
+ * Squash acts along the body's own forward axis after rotation, which is what
+ * makes a cell look like it is launching rather than just getting wider.
  */
 export function drawBody(
   ctx: CanvasRenderingContext2D,
@@ -298,6 +302,8 @@ export function drawBody(
   cx: number, cy: number, size: number,
   facing: Facing, heading: number | null, squash: Squash,
   alpha = 1,
+  axis: ArtAxis = "east",
+  stretch = 1,
 ): void {
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -305,11 +311,14 @@ export function drawBody(
   ctx.translate(cx, cy);
 
   if (facing === "rotate" && heading !== null) {
-    ctx.rotate(heading + Math.PI / 2);
-    ctx.scale(squash.sy, squash.sx);          // stretch along local forward
+    ctx.rotate(axis === "north" ? heading + Math.PI / 2 : heading);
+    // After rotation the body's forward axis is local +x for east-drawn art
+    // and local +y for north-drawn art.
+    if (axis === "north") ctx.scale(squash.sy, squash.sx * stretch);
+    else ctx.scale(squash.sx * stretch, squash.sy);
   } else if (facing === "flip") {
     if (heading !== null && Math.cos(heading) < 0) ctx.scale(-1, 1);
-    ctx.scale(squash.sx, squash.sy);
+    ctx.scale(squash.sx * stretch, squash.sy);
   } else {
     // No long axis, or anchored. A gentle bob only.
     ctx.scale(1 + (squash.sx - 1) * 0.35, 1 + (squash.sy - 1) * 0.35);

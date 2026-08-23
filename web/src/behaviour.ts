@@ -8,6 +8,7 @@
 
 import type { Grid, Point } from "./mapgen.js";
 import type { Rng } from "./rng.js";
+import { tilesOf, type Footprint } from "./footprint.js";
 
 export type Behaviour =
   | "chase"    // flagellated, chemotactic: heads straight for you
@@ -26,14 +27,17 @@ export interface SizeDef {
   readonly hp: number;       // hp multiplier
   readonly cooldown: number; // turns between actions; big bodies are slow
   readonly reach: number;    // tiles it can strike from
+  readonly footprint: Footprint;
 }
 
 export const SIZES: Readonly<Record<Size, SizeDef>> = {
-  pico:     { scale: 0.55, hp: 0.7, cooldown: 0, reach: 1 },
-  small:    { scale: 0.72, hp: 0.85, cooldown: 0, reach: 1 },
-  medium:   { scale: 0.92, hp: 1.0, cooldown: 0, reach: 1 },
-  large:    { scale: 1.15, hp: 1.5, cooldown: 1, reach: 1 },
-  filament: { scale: 1.3, hp: 1.9, cooldown: 1, reach: 2 },
+  pico:     { scale: 0.55, hp: 0.7, cooldown: 0, reach: 1, footprint: "single" },
+  small:    { scale: 0.72, hp: 0.85, cooldown: 0, reach: 1, footprint: "single" },
+  medium:   { scale: 0.92, hp: 1.0, cooldown: 0, reach: 1, footprint: "single" },
+  // Colonial packets are genuinely hard to slip past.
+  large:    { scale: 1.05, hp: 2.2, cooldown: 1, reach: 1, footprint: "block2" },
+  // A filament lies along its own long axis across three tiles.
+  filament: { scale: 1.1, hp: 3.0, cooldown: 1, reach: 2, footprint: "line3" },
 };
 
 export interface Sensed {
@@ -59,12 +63,26 @@ export function senseRange(b: Behaviour): number {
 }
 
 /** The step a microbe wants to take. `null` means hold position. */
+/** Heading implied by a single step. */
+function headingTo(from: Point, to: Point): number | null {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  return dx === 0 && dy === 0 ? null : Math.atan2(dy, dx);
+}
+
 export function decideStep(
   b: Behaviour, at: Point, s: Sensed, grid: Grid, rng: Rng,
   occupied: (x: number, y: number) => boolean,
+  fp: Footprint = "single",
 ): Point | null {
-  const free = (x: number, y: number): boolean =>
-    grid.isFloor(x, y) && !occupied(x, y);
+  const free = (x: number, y: number): boolean => {
+    // A multi-tile body needs its WHOLE footprint clear, which is why a
+    // filament cannot turn in a tight corridor.
+    for (const t of tilesOf(fp, x, y, headingTo(at, { x, y }))) {
+      if (!grid.isFloor(t.x, t.y)) return false;
+      if (occupied(t.x, t.y)) return false;
+    }
+    return true;
+  };
 
   const toward = (): Point | null => {
     const dx = Math.sign(s.px - at.x);

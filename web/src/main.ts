@@ -22,6 +22,7 @@ import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad,
 import { headingOf, squashFor, travel, turnToward, wake } from "./motion.js";
 import { microbeTurn } from "./combat.js";
 import { SIZES } from "./behaviour.js";
+import { centreOf, stretchOf } from "./footprint.js";
 import { STATUS, tick as tickStatus, type Status } from "./status.js";
 import { NAME_POOL, SLOTS as SAVE_SLOTS, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
@@ -710,17 +711,25 @@ class Game {
       const ml = lunges.get(m.id);
       const mx = ml?.x ?? 0, my = ml?.y ?? 0;
       // Size is real: Synechococcus is about 1 um, a Beggiatoa filament 200.
+      // A multi-tile body is drawn across its whole footprint and stretched
+      // along its own axis, so a filament reads as one long organism rather
+      // than a large blob on a single square.
+      const fp = SIZES[m.size].footprint;
       const scale = SIZES[m.size].scale;
-      const img = hc ? null : sprite(m.id, px * scale, paletteForPigment(m.pigment));
+      const spread = fp === "block2" ? 2 : 1;
+      const c = centreOf(fp, m.ax, m.ay, m.heading);
+      const img = hc ? null : sprite(m.id, px * scale * spread,
+                                     paletteForPigment(m.pigment));
       if (img) {
         const v = travel(m.ax, m.ay, m.x, m.y);
         const sq = squashFor(v, 0.16);
-        const bx = (m.ax + mx + 0.5) * px, by = (m.ay + my + 0.5) * px;
+        const bx = (c.x + mx + 0.5) * px, by = (c.y + my + 0.5) * px;
         for (const w of wake(m.heading, v, 2)) {
-          drawBody(ctx, img, bx + w.dx * px, by + w.dy * px, px * scale,
-                   m.facing, m.heading, sq, w.alpha * 0.7);
+          drawBody(ctx, img, bx + w.dx * px, by + w.dy * px, px * scale * spread,
+                   m.facing, m.heading, sq, w.alpha * 0.7, "east", stretchOf(fp));
         }
-        drawBody(ctx, img, bx, by, px * scale, m.facing, m.heading, sq);
+        drawBody(ctx, img, bx, by, px * scale * spread, m.facing, m.heading, sq,
+                 1, "east", stretchOf(fp));
       } else {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.15, px * 0.7, px * 0.7);
@@ -731,8 +740,8 @@ class Game {
       }
       // Only once damaged, so a fresh level is not wallpapered in gauges.
       if (f < 1) {
-        const bx = m.ax * px + px * 0.2;
-        const by = m.ay * px + px * 0.87;
+        const bx = c.x * px + px * 0.2;
+        const by = c.y * px + px * 0.87;
         const bw = px * 0.6;
         const bh = Math.max(px * 0.08, 3);
         ctx.fillStyle = "rgba(0,0,0,0.8)";
@@ -753,9 +762,9 @@ class Game {
       // Wake: a cell moving through fluid leaves one.
       for (const w of wake(this.player.heading, v)) {
         drawBody(ctx, me, bx + w.dx * px, by + w.dy * px, px * 0.92,
-                 "rotate", this.player.heading, sq, w.alpha);
+                 "rotate", this.player.heading, sq, w.alpha, "north");
       }
-      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq);
+      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq, 1, "north");
     } else {
       ctx.fillStyle = "#0ff";
       ctx.fillRect((this.player.ax + lx) * px + px * 0.18,

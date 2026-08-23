@@ -21,6 +21,8 @@ import { STATUS, apply, apply as applyStatus, clear as clearStatus,
          has as hasStatus, haste, tick, type Status } from "../src/status.js";
 import { blocks, describeEntity, makeBody, type Entity } from "../src/entity.js";
 import { microbeTurn } from "../src/combat.js";
+import { FOOTPRINT_TILES, centreOf, covers, stretchOf, tilesOf }
+  from "../src/footprint.js";
 import { Toasts, guard } from "../src/toast.js";
 import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
@@ -2371,5 +2373,129 @@ describe("toasts", () => {
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- the point
     guard("odd", () => { throw "a string"; }, null, (m) => seen.push(m));
     expect(seen[0]).toContain("a string");
+  });
+});
+
+describe("multi-tile bodies", () => {
+  it("a single body occupies exactly its own tile", () => {
+    expect(tilesOf("single", 4, 4, 0)).toEqual([{ x: 4, y: 4 }]);
+  });
+
+  it("a filament lies along its heading, centred on the anchor", () => {
+    const east = tilesOf("line3", 5, 5, 0);
+    expect(east).toEqual([{ x: 4, y: 5 }, { x: 5, y: 5 }, { x: 6, y: 5 }]);
+    const south = tilesOf("line3", 5, 5, Math.PI / 2);
+    expect(south).toEqual([{ x: 5, y: 4 }, { x: 5, y: 5 }, { x: 5, y: 6 }]);
+  });
+
+  it("a filament turning sweeps different tiles", () => {
+    const a = tilesOf("line3", 5, 5, 0).map((t) => `${t.x},${t.y}`);
+    const b = tilesOf("line3", 5, 5, Math.PI / 2).map((t) => `${t.x},${t.y}`);
+    expect(new Set([...a, ...b]).size).toBeGreaterThan(3);
+  });
+
+  it("every footprint occupies the number of tiles it claims", () => {
+    for (const fp of ["single", "line2", "line3", "block2"] as const) {
+      expect(tilesOf(fp, 5, 5, 0), fp).toHaveLength(FOOTPRINT_TILES[fp]);
+    }
+  });
+
+  it("footprints never contain duplicate tiles at any heading", () => {
+    for (const fp of ["single", "line2", "line3", "block2"] as const) {
+      for (let i = 0; i < 16; i++) {
+        const h = (i / 16) * Math.PI * 2 - Math.PI;
+        const ts = tilesOf(fp, 5, 5, h).map((t) => `${t.x},${t.y}`);
+        expect(new Set(ts).size, `${fp} at ${h.toFixed(2)}`).toBe(ts.length);
+      }
+    }
+  });
+
+  it("covers() agrees with tilesOf for every tile and heading", () => {
+    for (const fp of ["line2", "line3", "block2"] as const) {
+      for (let i = 0; i < 8; i++) {
+        const h = (i / 8) * Math.PI * 2 - Math.PI;
+        for (const t of tilesOf(fp, 6, 6, h)) {
+          expect(covers(fp, 6, 6, h, t.x, t.y), `${fp} ${t.x},${t.y}`).toBe(true);
+        }
+        expect(covers(fp, 6, 6, h, 99, 99)).toBe(false);
+      }
+    }
+  });
+
+  it("a filament cannot squeeze into a corridor narrower than itself", () => {
+    // A one-tile-wide east-west corridor: a north-south filament cannot fit.
+    const g = new mg.Grid(11, 11, mg.WALL);
+    for (let x = 1; x < 10; x++) g.set(x, 5, mg.FLOOR);
+    const at = { x: 5, y: 5 };
+    for (let i = 0; i < 40; i++) {
+      const s = decideStep("chase", at,
+        { px: 9, py: 5, dist: 4, alliesNear: 0 }, g, makeRng(i), () => false, "line3");
+      if (!s) continue;
+      // whatever it does, its whole body must land on floor
+      const h = Math.atan2(s.y - at.y, s.x - at.x);
+      for (const t of tilesOf("line3", s.x, s.y, h)) {
+        expect(g.isFloor(t.x, t.y), `body in wall at ${t.x},${t.y}`).toBe(true);
+      }
+    }
+  });
+
+  it("large and filament sizes really are multi-tile", () => {
+    expect(SIZES.filament.footprint).toBe("line3");
+    expect(SIZES.large.footprint).toBe("block2");
+    expect(SIZES.medium.footprint).toBe("single");
+  });
+
+  it("a filament is stretched when drawn, a packet is not", () => {
+    expect(stretchOf("line3")).toBeGreaterThan(stretchOf("line2"));
+    expect(stretchOf("block2")).toBe(1);
+    expect(stretchOf("single")).toBe(1);
+  });
+
+  it("the centre of a symmetric footprint is its anchor", () => {
+    expect(centreOf("line3", 5, 5, 0)).toEqual({ x: 5, y: 5 });
+    expect(centreOf("single", 5, 5, null)).toEqual({ x: 5, y: 5 });
+  });
+});
+
+describe("footprints in the microbe turn", () => {
+  const mob = (over: Partial<Mob>): Mob => ({
+    id: "beggiatoa", name: "Beggiatoa", glyph: "B", x: 8, y: 5, ax: 8, ay: 5,
+    hp: 40, maxhp: 40, atk: 5, genes: [], note: "", pigment: "#fff",
+    alive: true, facing: "rotate", heading: 0, behaviour: "sessile",
+    size: "filament", cooldown: 0, status: [], ...over,
+  });
+
+  it("a filament strikes from either end of its body", () => {
+    // anchor at (8,5) heading east covers 7,8,9 -- so it reaches x=5 from x=7
+    const m = mob({ x: 8, y: 5, heading: 0 });
+    const w = {
+      grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
+      player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
+      rng: makeRng(3), armour: 1,
+    };
+    for (let i = 0; i < 4; i++) microbeTurn(w);
+    expect(w.player.hp).toBeLessThan(30);
+  });
+
+  it("bodies never overlap, whatever their footprints", () => {
+    const mobs = [mob({ x: 4, y: 4, behaviour: "chase" }),
+                  mob({ x: 9, y: 9, behaviour: "chase" }),
+                  mob({ x: 4, y: 9, size: "large", behaviour: "chase" })];
+    const w = {
+      grid: new mg.Grid(20, 20, mg.FLOOR), mobs,
+      player: { x: 12, y: 12, hp: 999, status: [] as Status[] },
+      rng: makeRng(5), armour: 1,
+    };
+    for (let step = 0; step < 25; step++) {
+      microbeTurn(w);
+      const seen = new Set<string>();
+      for (const m of mobs.filter((x) => x.alive)) {
+        for (const t of tilesOf(SIZES[m.size].footprint, m.x, m.y, m.heading)) {
+          const k = `${t.x},${t.y}`;
+          expect(seen.has(k), `overlap at ${k} on step ${step}`).toBe(false);
+          seen.add(k);
+        }
+      }
+    }
   });
 });

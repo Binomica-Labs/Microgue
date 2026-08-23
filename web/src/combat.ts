@@ -4,6 +4,7 @@
 // state, which is what makes it testable without a canvas.
 
 import { canStrike, chebyshev, decideStep, senseRange, SIZES } from "./behaviour.js";
+import { covers, tilesOf } from "./footprint.js";
 import type { Mob } from "./dungeon.js";
 import type { Grid } from "./mapgen.js";
 import type { Rng } from "./rng.js";
@@ -42,8 +43,10 @@ const INFLICTS: Readonly<Record<string, StatusId>> = {
   nitzschia: "oxidative",
 };
 
+/** Footprint-aware: a filament blocks three tiles, not one. */
 export function occupiedBy(mobs: readonly Mob[], x: number, y: number): boolean {
-  return mobs.some((m) => m.alive && m.x === x && m.y === y);
+  return mobs.some((m) => m.alive
+    && covers(SIZES[m.size].footprint, m.x, m.y, m.heading, x, y));
 }
 
 /** One microbe turn for the whole level. Returns what happened, so the caller
@@ -65,7 +68,11 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     if (m.cooldown > 0) { m.cooldown -= 1; continue; }
     m.cooldown = Math.round(SIZES[m.size].cooldown / haste(m.status));
 
-    const dist = chebyshev(m.x, m.y, w.player.x, w.player.y);
+    // Distance from the NEAREST tile of the body: a three-tile filament can
+    // reach you from either end.
+    const fp = SIZES[m.size].footprint;
+    const dist = Math.min(...tilesOf(fp, m.x, m.y, m.heading)
+      .map((t) => chebyshev(t.x, t.y, w.player.x, w.player.y)));
     if (dist > senseRange(m.behaviour) && m.behaviour !== "sessile") continue;
 
     if (canStrike(m.behaviour, m.size, dist)) {
@@ -87,9 +94,14 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       m.behaviour, { x: m.x, y: m.y },
       { px: w.player.x, py: w.player.y, dist, alliesNear: allies },
       w.grid, w.rng,
-      (x, y) => occupiedBy(w.mobs, x, y) || (x === w.player.x && y === w.player.y));
+      (x, y) => (x === w.player.x && y === w.player.y)
+        || w.mobs.some((o) => o.alive && o !== m
+             && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y)),
+      fp);
 
-    if (step) { m.x = step.x; m.y = step.y; events.push({ kind: "move", mob: m }); }
+    if (step) {
+      m.heading = Math.atan2(step.y - m.y, step.x - m.x);
+      m.x = step.x; m.y = step.y; events.push({ kind: "move", mob: m }); }
   }
 
   return events;
