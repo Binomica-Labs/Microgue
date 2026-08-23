@@ -20,6 +20,16 @@
 
 import type { Grid } from "./mapgen.js";
 
+/** The subset of the path API this needs. Both CanvasRenderingContext2D and
+ *  Path2D satisfy it structurally, so the caller can trace into either without
+ *  a cast. */
+export interface PathSink {
+  moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
+  arc(cx: number, cy: number, r: number, a0: number, a1: number, ccw?: boolean): void;
+  closePath(): void;
+}
+
 const HALF_PI = Math.PI / 2;
 
 /**
@@ -27,7 +37,7 @@ const HALF_PI = Math.PI / 2;
  * Scale the context by the tile size before filling.
  */
 export function traceWalls(
-  ctx: CanvasRenderingContext2D,
+  ctx: PathSink,
   g: Grid,
   x0: number, y0: number, x1: number, y1: number,
   radius = 0.5,

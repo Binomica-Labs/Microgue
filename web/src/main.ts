@@ -542,8 +542,11 @@ class Game {
     try {
       this.step_(t);
     } catch (err) {
-      this.toasts.push(
-        `frame: ${err instanceof Error ? err.message : String(err)}`, "error", t);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.toasts.push(`frame: ${msg}`, "error", t);
+      // Draw the failure with a path that shares nothing with draw(). If draw()
+      // is what threw, its own toast renderer is unreachable.
+      this.drawEmergency(msg);
     } finally {
       requestAnimationFrame((tt) => { this.frame(tt); });
     }
@@ -607,6 +610,18 @@ class Game {
   draw(): void {
     const { ctx } = this;
     const W = innerWidth, H = innerHeight;
+
+    // Before any world state is touched. This guard used to sit below
+    // `this.level.stratum`, so with no run started draw() threw on its fourth
+    // line -- and because the toast renderer lives at the bottom of this same
+    // function, the error it queued was never drawn either. Black screen, no
+    // diagnostic, which is precisely the failure this was meant to prevent.
+    if (this.showSplash || !this.started) {
+      this.drawSplash(W, H);
+      this.drawToasts(W, H);
+      return;
+    }
+
     const s = this.level.stratum;
     const hc = this.settings.highContrast;
 
@@ -632,8 +647,7 @@ class Game {
     // frame cost 29 us; this halves it and the geometry is identical by
     // construction rather than by hoping the two calls match.
     const wallPath = new Path2D();
-    const tracer = wallPath as unknown as CanvasRenderingContext2D;
-    traceWalls(tracer, this.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
+    traceWalls(wallPath, this.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
 
     ctx.fillStyle = hc ? "#ffffff" : s.wall;
     ctx.save();
@@ -758,11 +772,6 @@ class Game {
     this.drawHud(W, H);
     this.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
-    if (this.showSplash || !this.started) {
-      this.drawSplash(W, H);
-      this.drawToasts(W, H);
-      return;
-    }
     if (this.showMap) {
       this.drawMapScreen(W, H);
     } else if (this.showPlasmid) {
@@ -1225,6 +1234,35 @@ class Game {
     this.spinFrom = null;
     this.spinStart = null;
     this.panFrom = null;
+  }
+
+  /** Minimal renderer for when draw() itself has failed. Touches only the
+   *  context and the message, so it cannot fail for the same reason. */
+  drawEmergency(msg: string): void {
+    try {
+      const { ctx } = this;
+      const W = innerWidth, H = innerHeight;
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      ctx.setTransform(Math.min(devicePixelRatio || 1, 2), 0, 0,
+                       Math.min(devicePixelRatio || 1, 2), 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#140606";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#ff8a7a";
+      ctx.font = `${13 * u}px ui-monospace,monospace`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText("Microgue hit an error and recovered:", 14 * u, 60 * u);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `${11 * u}px ui-monospace,monospace`;
+      let y = 84 * u;
+      for (const line of msg.match(/.{1,46}/g)?.slice(0, 8) ?? []) {
+        ctx.fillText(line, 14 * u, y);
+        y += 15 * u;
+      }
+      ctx.fillStyle = "#9fb8a8";
+      ctx.fillText("reload to restart", 14 * u, y + 12 * u);
+    } catch { /* nothing left to try */ }
   }
 
   /** Toasts, drawn above everything. A silent failure on a phone with no
