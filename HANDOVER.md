@@ -230,6 +230,20 @@ by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
 cap does the work. The clock bounds that remain are deliberately loose and
 only trip on an order-of-magnitude regression.
 
+## The player sprite
+
+A round body with a thick stalk reads as an eyeball with an optic nerve. The
+cell is a BACILLUS -- elongate, capped at both poles, aspect ratio asserted in
+`spec` -- with a thin plasmid ring set posterior and off the midline, because a
+ring dead centre in a round body is a pupil.
+
+The flagellum is NOT in the pixel art. It is stroked in `paint.ts` inside the
+body's own rotated frame, as a travelling sine whose amplitude grows toward the
+free end, with a soft halo pass beneath the filament so it reads against any
+wall. It is drawn that way so it can BEAT: the phase runs off the clock and
+speeds up while swimming, and motion is most of what makes a filament read as
+one. `settings.reduceMotion` freezes it.
+
 ## Two identity bugs worth remembering
 
 `Microbe.uid` exists because `id` is the SPECIES and position changes every

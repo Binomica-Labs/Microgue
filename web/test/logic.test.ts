@@ -3855,23 +3855,37 @@ describe("the player sprite is a cell", () => {
     expect(maxX - minX, "long axis must be horizontal").toBeGreaterThan(maxY - minY);
   });
 
-  it("the flagellum trails behind, not in front", () => {
-    // The body is the dense half. With the cell pointing east, the sparse
-    // half -- the flagellum -- must be to the WEST of it.
+  it("the body is a rod, not a sphere", () => {
+    // A round body with a stalk on it reads as an eyeball with an optic nerve.
     const art = PIXELS["player"] ?? [];
-    const density = (from: number, to: number): number => {
-      let n = 0;
-      for (const row of art) {
-        let x = 0;
-        for (const c of row) {
-          if (x >= from && x < to && c !== ".") n++;
-          x++;
+    let minX = 99, maxX = -1, minY = 99, maxY = -1;
+    art.forEach((row, y) => {
+      let x = 0;
+      for (const c of row) {
+        if (c !== ".") {
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
         }
+        x++;
       }
-      return n;
-    };
-    expect(density(9, 16), "body should be east").toBeGreaterThan(density(0, 7) * 2);
-    expect(density(0, 7), "flagellum should exist at all").toBeGreaterThan(4);
+    });
+    const w = maxX - minX + 1, h = maxY - minY + 1;
+    expect(w / h, "aspect ratio should be bacillus, not coccus").toBeGreaterThan(1.5);
+  });
+
+  it("the flagellum is stroked, not baked into the art", () => {
+    // It lives in paint.ts so it can beat. Art with a tail cannot move.
+    const art = PIXELS["player"] ?? [];
+    const leftmost = art.map((row) => {
+      let x = 0;
+      for (const c of row) { if (c !== ".") return x; x++; }
+      return 99;
+    });
+    // No thin stub hanging off the west end: the art starts as a solid body.
+    const bodyStart = Math.min(...leftmost);
+    const rowsAtStart = leftmost.filter((x) => x <= bodyStart + 1).length;
+    expect(rowsAtStart, "a lone pixel column is a stalk, not a body")
+      .toBeGreaterThan(2);
   });
 
   it("the plasmid is visible inside the cell", () => {

@@ -1115,14 +1115,21 @@ class Game {
     if (me) {
       const v = travel(this.player.ax, this.player.ay, this.player.x, this.player.y);
       const sq = squashFor(v);
+      // The beat runs always, and faster when swimming. A still flagellum is
+      // just a wire; the motion is what makes it read as one.
+      const flag = {
+        phase: this.now / (this.settings.reduceMotion ? 1e9 : 130 - v * 60),
+        colour: "#8fe6ff", len: 0.52, amp: 0.15,
+      };
       const bx = (this.player.ax + lx + 0.5) * px;
       const by = (this.player.ay + ly + 0.5) * px;
       // Wake: a cell moving through fluid leaves one.
       for (const w of wake(this.player.heading, v)) {
         drawBody(ctx, me, bx + w.dx * px, by + w.dy * px, px * 0.92,
-                 "rotate", this.player.heading, sq, w.alpha, "east");
+                 "rotate", this.player.heading, sq, w.alpha, "east", 1, null);
       }
-      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq, 1, "east");
+      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq,
+               1, "east", 1, flag);
     } else {
       ctx.fillStyle = "#0ff";
       ctx.fillRect((this.player.ax + lx) * px + px * 0.18,

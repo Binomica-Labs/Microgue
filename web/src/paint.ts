@@ -296,6 +296,48 @@ export type ArtAxis = "east" | "north";
  * Squash acts along the body's own forward axis after rotation, which is what
  * makes a cell look like it is launching rather than just getting wider.
  */
+export interface Flagellum {
+  /** Beat phase in radians. Drive it from the clock and from speed. */
+  readonly phase: number;
+  readonly colour: string;
+  /** Length and amplitude as fractions of the sprite size. */
+  readonly len: number;
+  readonly amp: number;
+}
+
+/**
+ * A beating flagellum, stroked rather than drawn as pixels.
+ *
+ * As art it was a fat static stalk on a round body, which reads as an optic
+ * nerve on an eyeball. Stroking it means it can be thin, it can taper, and it
+ * can move -- and motion is most of what makes it read as a flagellum.
+ */
+function strokeFlagellum(
+  ctx: CanvasRenderingContext2D, size: number, f: Flagellum,
+): void {
+  const L = size * f.len;
+  const A = size * f.amp;
+  const n = 14;
+  ctx.strokeStyle = f.colour;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  // Two passes: a soft halo, then the filament, so it reads against any wall.
+  for (const [width, alpha] of [[size * 0.10, 0.26], [size * 0.042, 1]] as const) {
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = Math.max(width, 1);
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      // Amplitude grows toward the free end, as a real filament's does.
+      const y = Math.sin(t * Math.PI * 2.2 - f.phase) * A * (0.25 + t * 0.9);
+      const x = -size * 0.32 - t * L;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 export function drawBody(
   ctx: CanvasRenderingContext2D,
   img: CanvasImageSource,
@@ -304,6 +346,7 @@ export function drawBody(
   alpha = 1,
   axis: ArtAxis = "east",
   stretch = 1,
+  flagellum: Flagellum | null = null,
 ): void {
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -324,6 +367,15 @@ export function drawBody(
     ctx.scale(1 + (squash.sx - 1) * 0.35, 1 + (squash.sy - 1) * 0.35);
   }
 
+  // The flagellum is drawn in the body's own rotated frame, so it trails the
+  // heading without any separate bookkeeping. Before the image, so the cell
+  // sits on top of where the filament meets it.
+  if (flagellum) {
+    const a = ctx.globalAlpha;
+    ctx.globalAlpha = alpha;
+    strokeFlagellum(ctx, size, flagellum);
+    ctx.globalAlpha = a;
+  }
   ctx.drawImage(img, -size / 2, -size / 2, size, size);
   ctx.restore();
 }
