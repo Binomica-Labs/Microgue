@@ -52,6 +52,8 @@ const GENERATORS: Partial<Record<GeneId, number>> = {
   psbA: 4.4, pufM: 3.8, fmoA: 3.4, csmA: 1.8,
   // chemolithotrophy and hydrogen
   amoA: 3.0, nxrA: 2.8, soxB: 3.2, sqr: 1.6, hydA: 3.6, aprA: 1.6,
+  // luciferase consumes reducing power and FMNH2 to make photons.
+  luxAB: -0.8,
   // ATP sulfurylase CONSUMES ATP -- sulfate must be activated to APS before
   // anything can reduce it, at a cost of two ATP equivalents. It is why
   // sulfate reduction is energetically marginal and why sulfate reducers grow
@@ -78,6 +80,8 @@ export interface Operon {
 const O2_LABILE: ReadonlySet<GeneId> = new Set(["nifH", "hydA", "mcrA"]);
 const CHLOROSOME: ReadonlySet<GeneId> = new Set(["fmoA", "csmA"]);
 const NEEDS: Partial<Record<GeneId, "light" | Teap>> = {
+  // Luciferase is an oxygenase; without O2 it simply does not turn over.
+  luxAB: "O2",
   psbA: "light", pufM: "light", fmoA: "light", csmA: "light",
   mtrC: "Fe(III)", omcS: "Fe(III)",
   dsrA: "SO4", aprA: "SO4",
@@ -267,7 +271,10 @@ export class Plasmid {
     const frac = this.used() / this.capacityKb();
     if (frac <= BURDEN_KNEE) return 0;
     const over = (frac - BURDEN_KNEE) / (1 - BURDEN_KNEE);
-    return Math.min(over * over, 1);
+    // Capped below 1. An over-stuffed plasmid should be crippling, not a
+    // cliff that silently switches the entire cell off with no warning --
+    // which is what a burden of exactly 1 did.
+    return Math.min(over * over, 0.85);
   }
 
   /** Same-pathway neighbours within one operon co-regulate; that is what
@@ -512,6 +519,25 @@ export class Plasmid {
   aura(depth: number): number {
     return this.complexes(depth)
       .reduce((a, c) => a + (c.effect.kind === "aura" ? c.effect.dmg : 0), 0);
+  }
+
+  /**
+   * How much punishment the cell can take.
+   *
+   * A bigger, better-expressed genome is a more robust organism, so toughness
+   * comes from the plasmid rather than from a level counter. This is the only
+   * progression the player has and it must exist: without it maxhp stayed at
+   * 30 for all 24 floors while microbe damage went from 3 to 25, and the last
+   * stratum could two-shot a fully built cell.
+   */
+  vitality(depth: number): number {
+    let expressed = 0;
+    for (const s of this.slots) {
+      if (s?.kind !== "gene" || s.id === "ori") continue;
+      if (this.rawExpression(s.id, depth) > 0) expressed++;
+    }
+    const complexes = this.complexes(depth).length;
+    return Math.round(Math.min(20 + expressed * 3.5 + complexes * 5, 92));
   }
 
   /** Total output, which is what combat scales from. */

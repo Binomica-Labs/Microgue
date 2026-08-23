@@ -1,10 +1,13 @@
 // Multi-level descent. One cave per stratum, generated from that stratum's
 // parameters, cached so climbing back finds the same level.
 
-import { MAX_DEPTH, microbesAt, stratum, type Stratum } from "./biology.js";
+import { MAX_DEPTH, microbesAt, stratum, type Microbe as Microbe0, type Stratum }
+  from "./biology.js";
 import type { Microbe } from "./entity.js";
-import { SIZES } from "./behaviour.js";
+import { SIZES, type Size } from "./behaviour.js";
 import { covers, tilesOf } from "./footprint.js";
+import { makeSight, type Sight } from "./fov.js";
+import { carveRooms, planFor, ROOM_STYLE, type Room } from "./rooms.js";
 import * as mg from "./mapgen.js";
 import type { Grid, Point } from "./mapgen.js";
 import { makeRng, type Rng } from "./rng.js";
@@ -14,14 +17,45 @@ import { makeRng, type Rng } from "./rng.js";
 export type Mob = Microbe;
 
 export interface Level {
-  depth: number; grid: Grid; stratum: Stratum;
+  depth: number; floor: number; grid: Grid; stratum: Stratum;
+  /** The last floor of a stratum: a boss or a swarm waits here. */
+  boss: boolean;
+  rooms: Room[];
+  /** A boss floor stays sealed until whatever holds it is dead. */
+  cleared: boolean;
+  /** Set once a boss floor is populated, for the arrival message. */
+  bossName?: string;
   up: Point; down: Point | null; mobs: Mob[]; visited: boolean;
+  /** What has been lit, and what is remembered, for this level. */
+  sight: Sight;
 }
+
+/** Floors per stratum. The column is deep; one room per layer made each
+ *  biome a doorway rather than a place. */
+export const FLOORS_PER_STRATUM = 3;
+export const MAX_FLOOR = MAX_DEPTH * FLOORS_PER_STRATUM;
+
+/** Stratum index (1..8) for a floor (1..24). */
+export const strataOf = (floor: number): number =>
+  Math.min(Math.max(Math.ceil(floor / FLOORS_PER_STRATUM), 1), MAX_DEPTH);
+
+/** The last floor of a stratum is where its boss stands. */
+export const isBossFloor = (floor: number): boolean =>
+  floor % FLOORS_PER_STRATUM === 0;
+
+/** Position within the stratum, 1..FLOORS_PER_STRATUM. */
+export const floorWithin = (floor: number): number =>
+  ((floor - 1) % FLOORS_PER_STRATUM) + 1;
 
 export class Dungeon {
   readonly w: number; readonly h: number; readonly seed: number;
   private readonly cache = new Map<number, Level>();
-  depth = 1;
+  /** Floor within the whole column, 1..MAX_FLOOR. */
+  floor = 1;
+
+  /** Stratum index. Everything biological keys off this, so it stays named
+   *  `depth` and keeps working unchanged as floors were added underneath. */
+  get depth(): number { return strataOf(this.floor); }
 
   constructor(w = 110, h = 80, seed = 7) {
     this.w = w; this.h = h; this.seed = seed;
@@ -30,28 +64,44 @@ export class Dungeon {
   /** Below this the level has nowhere to fight. */
   private static readonly MIN_OPEN = 0.25;
 
-  private build(depth: number): Level {
+  private build(floor: number): Level {
+    const depth = strataOf(floor);
     const s = stratum(depth);
-    const rng: Rng = makeRng(this.seed).fork(depth);
+    const rng: Rng = makeRng(this.seed).fork(floor);
 
-    // Cellular automata fragment above roughly 0.48 initial density: the open
-    // space breaks into pockets and keepLargestRegion seals almost all of it.
-    // Densities are tuned below that, but a bad seed can still land short, so
-    // back off and retry rather than hand out a solid level.
-    let grid = mg.generate(this.w, this.h, rng, { density: s.density, passes: s.passes });
-    let region = mg.keepLargestRegion(grid);
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      if (grid.countFloor() / (grid.w * grid.h) >= Dungeon.MIN_OPEN) break;
-      const relaxed = Math.max(s.density - attempt * 0.03, 0.3);
-      grid = mg.generate(this.w, this.h, rng, { density: relaxed, passes: s.passes });
-      region = mg.keepLargestRegion(grid);
+    // Openness is measured on the level that SHIPS -- after masking to the
+    // disc and after the rooms are carved -- not on the raw cave. Checking it
+    // early let a dense stratum pass the guard and then lose most of its floor
+    // to the mask. The rooms and their corridors are what keep a dense cave
+    // connected, so they must exist before the level is judged.
+    const attempt = (density: number): { grid: Grid; rooms: Room[]; seed: Point | null } => {
+      const g = mg.generate(this.w, this.h, rng, { density, passes: s.passes });
+      mg.keepLargestRegion(g);
+      mg.maskToColumn(g);
+      const rs = carveRooms(g, rng, planFor(depth, isBossFloor(floor)));
+      return { grid: g, rooms: rs, seed: mg.keepLargestRegion(g).seed };
+    };
+
+    let built = attempt(s.density);
+    for (let i = 1; i <= 4; i++) {
+      if (built.grid.countFloor() / (built.grid.w * built.grid.h) >= Dungeon.MIN_OPEN) break;
+      built = attempt(Math.max(s.density - i * 0.05, 0.32));
     }
-    const { seed } = region;
+    const grid = built.grid;
+    const rooms = built.rooms;
+    const { seed } = built;
     const up = seed ?? mg.carveSpawn(grid, 4);
-    const down = depth < MAX_DEPTH ? mg.farthestFrom(grid, up) : null;
+    const down = floor < MAX_FLOOR ? mg.farthestFrom(grid, up) : null;
 
-    const lvl: Level = { depth, grid, stratum: s, up, down, mobs: [], visited: false };
+    const lvl: Level = { depth, floor, grid, stratum: s, up, down, mobs: [],
+                         visited: false, boss: isBossFloor(floor),
+                         // Rooms sealed off by the connectivity sweep are gone.
+                         rooms: rooms.filter((r) => grid.isFloor(r.cx, r.cy)),
+                         cleared: !isBossFloor(floor),
+                         sight: makeSight(grid.w, grid.h) };
     this.populate(lvl, rng);
+    this.stockRooms(lvl, rng);
+    if (lvl.boss) this.placeBoss(lvl, rng);
     return lvl;
   }
 
@@ -76,42 +126,136 @@ export class Dungeon {
           .some((a) => tilesOf(fp, x, y, null).some((b2) => a.x === b2.x && a.y === b2.y)))) continue;
 
       // p0 is peeked before placement so the footprint can be validated.
-      const p = p0;
-      lvl.mobs.push({
-        id: p.id, name: p.name, glyph: p.glyph, x, y,
-        hp: Math.round(p.hp * SIZES[p.size].hp),
-        maxhp: Math.round(p.hp * SIZES[p.size].hp), atk: p.atk, genes: p.genes, note: p.note,
-        pigment: p.pigment, alive: true,
-        facing: p.facing, heading: null, ax: x, ay: y,
-        behaviour: p.behaviour, size: p.size,
-        cooldown: 0, status: [],
-        weapon: p.weapon, reload: 0, charging: 0,
-      });
+      lvl.mobs.push(this.spawn(p0, x, y));
     }
   }
 
-  level(depth: number): Level {
-    const d = Math.min(Math.max(depth, 1), MAX_DEPTH);
-    let lvl = this.cache.get(d);
-    if (!lvl) { lvl = this.build(d); this.cache.set(d, lvl); }
+  /** One microbe, built from its prototype. Factored out so boss placement
+   *  cannot drift from ordinary spawning. */
+  private spawn(p: Microbe0, x: number, y: number): Mob {
+    const hp = Math.round(p.hp * SIZES[p.size].hp);
+    return {
+      id: p.id, name: p.name, glyph: p.glyph, x, y,
+      hp, maxhp: hp, atk: p.atk, genes: p.genes, note: p.note,
+      pigment: p.pigment, alive: true,
+      facing: p.facing, heading: null, ax: x, ay: y,
+      behaviour: p.behaviour, size: p.size,
+      cooldown: 0, status: [], elite: false,
+      weapon: p.weapon, reload: 0, charging: 0,
+    };
+  }
+
+  /** Keyed by FLOOR, not stratum. Clamping this to MAX_DEPTH silently
+   *  collapsed floors 9 to 24 onto floor 8. */
+  level(floor: number): Level {
+    const f = Math.min(Math.max(Math.round(floor), 1), MAX_FLOOR);
+    let lvl = this.cache.get(f);
+    if (!lvl) { lvl = this.build(f); this.cache.set(f, lvl); }
     return lvl;
   }
 
-  current(): Level { return this.level(this.depth); }
-  regenerate(): void { this.cache.delete(this.depth); }
+  current(): Level { return this.level(this.floor); }
+  regenerate(): void { this.cache.delete(this.floor); }
 
   descend(): { level: Level; arrive: Point } | { err: string } {
     if (!this.current().down) return { err: "the column has no floor below this" };
-    this.depth++;
+    this.floor++;
     const level = this.current();
     return { level, arrive: level.up };
   }
 
   ascend(): { level: Level; arrive: Point } | { err: string } {
-    if (this.depth <= 1) return { err: "already at the surface" };
-    this.depth--;
+    if (this.floor <= 1) return { err: "already at the surface" };
+    this.floor--;
     const level = this.current();
     return { level, arrive: level.down ?? level.up };
+  }
+
+  /**
+   * The floor that closes a stratum. Half the time a single overgrown
+   * individual -- real filaments do reach millimetres -- and half the time a
+   * bloom of one species, which is what a column actually produces when a
+   * layer's chemistry runs away with it.
+   */
+  /** Extra microbes in the rooms that warrant them. */
+  private stockRooms(lvl: Level, rng: Rng): void {
+    const pool = microbesAt(lvl.depth);
+    if (pool.length === 0) return;
+    for (const room of lvl.rooms) {
+      const style = ROOM_STYLE[room.kind];
+      for (let i = 0; i < style.guard; i++) {
+        const t = room.tiles[rng.int(room.tiles.length)];
+        if (!t) continue;
+        const p = room.kind === "bloom"
+          ? pool[rng.int(pool.length)]        // one species, chosen per room
+          : pool[rng.int(pool.length)];
+        if (!p) continue;
+        const fp = SIZES[p.size].footprint;
+        if (!tilesOf(fp, t.x, t.y, null).every((q) => lvl.grid.isFloor(q.x, q.y))) continue;
+        if (lvl.mobs.some((m) => covers(SIZES[m.size].footprint, m.x, m.y, m.heading, t.x, t.y))) continue;
+        lvl.mobs.push(this.spawn(p, t.x, t.y));
+      }
+      room.stocked = true;
+    }
+  }
+
+  private placeBoss(lvl: Level, rng: Rng): void {
+    const pool = microbesAt(lvl.depth);
+    const proto = pool[rng.int(pool.length)];
+    if (!proto) return;
+    const at = lvl.down ?? lvl.up;
+
+    // The footprint checked must be the one the boss will ACTUALLY have. A
+    // promoted pico validated as a single tile and then occupied a 2x2 block,
+    // half of it inside the glass.
+    const spot = (r: number, size: Size): Point | null => {
+      for (let i = 0; i < 300; i++) {
+        const a = rng.next() * Math.PI * 2;
+        const d2 = rng.next() * r;
+        const x = Math.round(at.x + Math.cos(a) * d2);
+        const y = Math.round(at.y + Math.sin(a) * d2);
+        const fp = SIZES[size].footprint;
+        if (tilesOf(fp, x, y, null).every((t) => lvl.grid.isFloor(t.x, t.y))
+            && !lvl.mobs.some((m) => covers(SIZES[m.size].footprint, m.x, m.y, m.heading, x, y))) {
+          return { x, y };
+        }
+      }
+      return null;
+    };
+
+    if (rng.next() < 0.5) {
+      // An overgrown individual.
+      const grown: Size =
+        proto.size === "pico" || proto.size === "small" ? "large" : "filament";
+      const p = spot(9, grown);
+      if (!p) return;
+      lvl.mobs.push({
+        ...this.spawn(proto, p.x, p.y),
+        name: `${proto.name} (overgrown)`,
+        hp: Math.round(proto.hp * 6), maxhp: Math.round(proto.hp * 6),
+        atk: Math.round(proto.atk * 1.8), elite: true, size: grown,
+      });
+      lvl.bossName = `an overgrown ${proto.name}`;
+    } else {
+      // A bloom.
+      let placed = 0;
+      for (let i = 0; i < 14; i++) {
+        const p = spot(12, proto.size);
+        if (!p) continue;
+        lvl.mobs.push({
+          ...this.spawn(proto, p.x, p.y),
+          hp: Math.round(proto.hp * 1.3), maxhp: Math.round(proto.hp * 1.3),
+          elite: true,
+        });
+        placed++;
+      }
+      if (placed > 0) lvl.bossName = `a bloom of ${proto.name}`;
+    }
+  }
+
+  /** A boss floor is cleared when nothing elite is left standing. */
+  static isCleared(lvl: Level): boolean {
+    return !lvl.boss || !lvl.mobs.some((m) => m.alive && m.elite);
   }
 
   /** Any mob whose FOOTPRINT covers this tile, not merely its anchor. */

@@ -126,7 +126,9 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     if (m.charging > 0 && dist > weapon.range) m.charging = 0;   // lost the shot
 
     if (weapon.kind === "melee" && canStrike(m.behaviour, m.size, dist)) {
-      const dmg = Math.max(Math.round(m.atk * 0.35 * w.armour), 1);
+      // 0.35 made the first stratum survivable for fifty consecutive hits,
+      // which is no threat at all. Tuned against the whole 24-floor curve.
+      const dmg = Math.max(Math.round(m.atk * 0.55 * w.armour), 1);
       w.player.hp = Math.max(w.player.hp - dmg, 0);
       events.push({ kind: "strike", mob: m, dmg });
 

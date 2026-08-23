@@ -108,6 +108,11 @@ web/
     ncbi.ts       real sequences: Entrez queries, caching, throttling
     chrome.ts     shared screen furniture: close button, header, wrap
     screens.ts    splash and notebook, as free functions
+    items.ts      floor loot: gene cassettes and metabolisable substrates
+    flavour.ts    all player-facing combat and pickup text
+    fov.ts        recursive shadowcasting, plus remembered terrain
+    cycle.ts      the diel cycle: daylight, night, chemocline shift
+    rooms.ts      chambers carved into the cave: ports, mats, blooms, vaults
     combat.ts     the microbe turn, extracted and testable without a canvas
     saves.ts      named characters in numbered slots
     toast.ts      transient notices + guard(), the error boundary
@@ -495,6 +500,115 @@ merely getting wider.
 
 `turnToward` takes the short arc. Turning from 170 to -170 degrees is a 20
 degree turn, not 340; the suite checks every pair of 64 x 64 angles.
+
+## The loop
+
+Descend the column, take what the layer gives you, arrange it so it expresses,
+and use it to survive the layer below. Concretely:
+
+1. Every stratum needs a respiration that works there. Without one, ATP runs
+   out and hp bleeds until you find the gene.
+2. Genes come off the floor -- from kills, from room caches, and at 25% by
+   natural transformation from a lysing neighbour.
+3. Having a gene is not carrying it. It has to sit downstream of a promoter,
+   in the right operon, inside the plasmid's capacity.
+4. Toughness IS the plasmid, so building it well is the only progression.
+5. Every third floor is sealed until its elites are dead. That is the gate.
+6. Floor 24 is the bottom. Clearing it ends the run.
+
+Rooms exist so a level is a place rather than a corridor. A **port** is a
+sampling port cut through the glass -- Winogradsky columns are built with them
+-- and is stocked accordingly. A **mat** is a Beggiatoa/Thiothrix community at
+the redox interface, so it only appears in D3-D7. An **enrichment** is a pocket
+that has been growing undisturbed: sealed but for one way in, well guarded,
+and worth crossing the level for.
+
+Rooms are carved AFTER the disc mask and BEFORE the connectivity sweep, and
+they are chained to each other and then to the cave. Linking each room to its
+nearest floor tile instead attached some of them to pockets that the sweep then
+pruned, taking the rooms with them.
+
+Cave density was raised to 0.50-0.63 once rooms existed: the rooms and their
+corridors are what keep a dense cave connected, and without them the disc was
+an almost empty circle.
+
+## The column has 24 floors and is round
+
+`FLOORS_PER_STRATUM = 3`, so eight strata become twenty-four floors and each
+biome is a place rather than a doorway. `Dungeon.floor` is the index;
+`Dungeon.depth` is a GETTER returning the stratum, so every biological call
+site kept working untouched. `level()` is keyed by floor -- it used to clamp to
+MAX_DEPTH, which silently collapsed floors 9-24 onto floor 8.
+
+Levels are masked to a disc, because a Winogradsky column is a graduated
+cylinder and a rectangular cave never looked like the thing the game is set
+inside. The grid is square (96x96) so the disc is large.
+
+The last floor of every stratum is a boss floor: half the time one overgrown
+individual, half the time a bloom of a single species -- which is what a column
+actually produces when a layer's chemistry runs away with it.
+
+## Day and night, and why bioluminescence is a surface trait
+
+A column sits on a windowsill. At night oxygenic photosynthesis stops while
+respiration does not, so the oxic zone thins and the chemocline rises -- real,
+and measured. Light-dependent genes stop paying and the upper floors go dark,
+which means you see least exactly where you were seeing most. Below the photic
+zone nothing changes, because the deep column has no day.
+
+`luxAB` is gated on O2 because luciferase IS an oxygenase. It grants +2 sight
+and costs ATP to run, so it is a genuine trait in the top two strata and dead
+weight everywhere below. That is the lesson, not a balance decision.
+
+## Balance is asserted, not assumed
+
+`spec` builds a capacity-respecting kit per depth and checks the curve: the
+surface must survive twelve-plus hits, the floor fewer than eight, and no floor
+may present something that takes more than thirty turns to kill. Toughness
+comes from `Plasmid.vitality` -- expressed genes and complexes -- so building
+the plasmid IS the character progression. It had none before: maxhp sat at 30
+for all 24 floors while microbe damage went from 3 to 25.
+
+Burden is capped below 1. At exactly 1 an over-capacity plasmid expressed
+literally nothing, which is a silent cliff rather than a cost.
+
+## Sight
+
+The whole level used to be visible, which removed exploration, ambush and any
+reason for the map to unfold. `fov.ts` is recursive shadowcasting with two
+layers per level:
+
+- **visible** -- lit now, recomputed on every step
+- **seen** -- remembered. Terrain stays drawn once found; creatures and loot do
+  NOT, because memory of a room is not knowledge of what is standing in it.
+
+Sight radius follows the column's own light gradient, so the photic zone is
+open and the methanogenic floor is claustrophobic. Vision is symmetric enough
+to be fair -- there is a test asserting that if you can see a tile, something
+there could see you.
+
+Travel interrupts when something new comes into view, which is the single
+thing that stops auto-travel walking you into a fight. The spotted set is
+cleared as things leave sight, so re-entering a room alerts again.
+
+## Loot, and why it is not automatic
+
+Kills drop remains on the floor rather than teleporting a gene into the bin.
+A single item is taken by stepping on it; more than one opens as a lysate
+container. Substrates follow the chemistry of their layer -- nitrate in the
+nitrogenous zone, ferric iron at D4, hydrogen and CO2 on the floor -- and
+several are GATED: sulfide is worth nothing without `sqr`, hydrogen nothing
+without `hydA`. Picking up a substrate you cannot use tells you which enzyme
+you are missing, which is the game teaching itself.
+
+Direct uptake still happens, at 25%: free DNA released by a lysing neighbour
+is the classic substrate for natural transformation, so occasional
+transformation on the spot is correct. The rest of the genome hits the floor.
+
+`flavour.ts` owns every player-facing line. A log that says "Geobacter
+destroyed." teaches nothing; "The Geobacter ruptures. Cytoplasm spills into the
+pore water." says what a lysis is. Lines vary by damage, by weapon and by
+outcome, and there is a test asserting they are not all identical.
 
 ## Found in the adversarial audit
 

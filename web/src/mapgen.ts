@@ -86,6 +86,31 @@ export class Grid {
 
 /** Cellular-automata cavern (the classic 4-5 rule). Organic chambers rather
  *  than rectangular rooms -- reads as biofilm. */
+/**
+ * Mask everything outside a disc to wall.
+ *
+ * The column is a graduated cylinder, so a level is a cross-section of one:
+ * round, with the rim solid glass. A rectangular cave never looked like the
+ * thing the game is set inside.
+ */
+export function maskToColumn(g: Grid, inset = 2): Grid {
+  const cx = (g.w - 1) / 2, cy = (g.h - 1) / 2;
+  const r = Math.min(cx, cy) - inset;
+  const r2 = r * r;
+  for (let y = 0; y < g.h; y++) {
+    for (let x = 0; x < g.w; x++) {
+      const dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy > r2) g.set(x, y, WALL);
+    }
+  }
+  return g;
+}
+
+/** Radius of the usable disc, for placing things against the glass. */
+export function columnRadius(g: Grid, inset = 2): number {
+  return Math.min((g.w - 1) / 2, (g.h - 1) / 2) - inset;
+}
+
 export function generate(
   w: number,
   h: number,

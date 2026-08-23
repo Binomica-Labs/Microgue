@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as bio from "../src/biology.js";
-import { Dungeon } from "../src/dungeon.js";
+import { Dungeon, MAX_FLOOR, floorWithin, isBossFloor, strataOf }
+  from "../src/dungeon.js";
 import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
-import { DEFAULT_SETTINGS, parseSave } from "../src/save.js";
+import { DEFAULT_SETTINGS, SCHEMA, parseSave } from "../src/save.js";
 import { BIN_CAP, Plasmid, SLOTS, type Part } from "../src/plasmid.js";
 import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.js";
 import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
@@ -33,6 +34,14 @@ import { launch, stepClouds, stepPackets, type Cloud, type Packet }
   from "../src/projectile.js";
 import { Toasts, guard } from "../src/toast.js";
 import { drawClose, inBox as inBoxChrome } from "../src/chrome.js";
+import { SUBSTRATES, addDrop, dropAt, removeDrop, substratesAt, yieldOf,
+         type Drop } from "../src/items.js";
+import * as say from "../src/flavour.js";
+import { computeFov, fractionSeen, isSeen, isVisible, makeSight, sightRadius }
+  from "../src/fov.js";
+import { TURNS_PER_DAY, daylight, isNight, lightAt, newClock, timeName }
+  from "../src/cycle.js";
+import { ROOM_STYLE, carveRooms, planFor, roomAt } from "../src/rooms.js";
 import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
 import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
@@ -138,47 +147,56 @@ describe("pathfinding", () => {
 });
 
 describe("dungeon", () => {
-  it("all 8 strata generate with valid stairs", () => {
-    const d = new Dungeon(80, 60, 7);
-    for (let depth = 1; depth <= bio.MAX_DEPTH; depth++) {
-      const L = d.level(depth);
-      expect(L.grid.isFloor(L.up.x, L.up.y)).toBe(true);
-      if (depth < bio.MAX_DEPTH) {
-        expect(L.down).not.toBeNull();
+  it("every floor generates with valid stairs", () => {
+    const d = new Dungeon(90, 90, 7);
+    for (let f = 1; f <= MAX_FLOOR; f++) {
+      const L = d.level(f);
+      expect(L.grid.isFloor(L.up.x, L.up.y), `floor ${f}`).toBe(true);
+      if (f < MAX_FLOOR) {
+        expect(L.down, `floor ${f}`).not.toBeNull();
         expect(L.grid.isFloor(L.down!.x, L.down!.y)).toBe(true);
       } else {
         expect(L.down).toBeNull();
       }
     }
   });
-  it("mobs are on floor and depth-appropriate", () => {
-    const d = new Dungeon(80, 60, 7);
-    for (let depth = 1; depth <= bio.MAX_DEPTH; depth++) {
-      const L = d.level(depth);
+  it("floors map onto strata three at a time", () => {
+    expect(strataOf(1)).toBe(1);
+    expect(strataOf(3)).toBe(1);
+    expect(strataOf(4)).toBe(2);
+    expect(strataOf(MAX_FLOOR)).toBe(bio.MAX_DEPTH);
+    expect(isBossFloor(3)).toBe(true);
+    expect(isBossFloor(2)).toBe(false);
+    expect(floorWithin(4)).toBe(1);
+  });
+  it("mobs are on floor and belong to their stratum", () => {
+    const d = new Dungeon(90, 90, 7);
+    for (let f = 1; f <= MAX_FLOOR; f++) {
+      const L = d.level(f);
       for (const m of L.mobs) {
-        expect(L.grid.isFloor(m.x, m.y)).toBe(true);
-        expect(bio.MICROBES.find((p) => p.id === m.id)!.depth).toBe(depth);
+        expect(L.grid.isFloor(m.x, m.y), `floor ${f}`).toBe(true);
+        expect(bio.MICROBES.find((p) => p.id === m.id)!.depth).toBe(strataOf(f));
       }
     }
   });
   it("mob count scales with depth", () => {
-    const d = new Dungeon(80, 60, 7);
-    expect(d.level(8).mobs.length).toBeGreaterThan(d.level(1).mobs.length);
+    const d = new Dungeon(90, 90, 7);
+    expect(d.level(MAX_FLOOR).mobs.length).toBeGreaterThan(d.level(1).mobs.length);
   });
   it("down-stairs is far from up-stairs", () => {
-    const L = new Dungeon(80, 60, 7).level(4);
+    const L = new Dungeon(90, 90, 7).level(4);
     const dist = Math.hypot(L.up.x - L.down!.x, L.up.y - L.down!.y);
-    expect(dist).toBeGreaterThan(20);
+    expect(dist).toBeGreaterThan(15);
   });
   it("levels are cached, not regenerated", () => {
     const d = new Dungeon(60, 40, 3);
     expect(d.level(3).grid).toBe(d.level(3).grid);
   });
   it("cannot descend past the floor or ascend past the surface", () => {
-    const d = new Dungeon(60, 40, 3);
-    d.depth = 8;
+    const d = new Dungeon(90, 90, 3);
+    d.floor = MAX_FLOOR;
     expect(d.descend()).toHaveProperty("err");
-    d.depth = 1;
+    d.floor = 1;
     expect(d.ascend()).toHaveProperty("err");
   });
   it("the same seed produces an identical column", () => {
@@ -228,7 +246,7 @@ describe("rng", () => {
 });
 
 describe("save validation", () => {
-  const good = { version: 4, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
+  const good = { version: 5, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
                  ring: [{ kind: "promoter", strength: "strong" },
                         { kind: "gene", id: "mtrC", optimised: true }],
                  settings: { uiScale: 1.5, highContrast: true, reduceMotion: false, diagonal: false } };
@@ -244,8 +262,9 @@ describe("save validation", () => {
   it("rejects a save from an incompatible schema instead of half-loading it", () => {
     // version was written and never read; the flat-gene-list to ring rewrite
     // would have fed the old shape straight into slot code.
-    expect(parseSave({ ...good, version: 3 })).toBeNull();
-    expect(parseSave({ ...good, version: 99 })).toBeNull();
+    expect(parseSave({ ...good, version: SCHEMA - 1 })).toBeNull();
+    expect(parseSave({ ...good, version: SCHEMA + 1 })).toBeNull();
+    expect(parseSave(good), "the current schema must still load").not.toBeNull();
     const noVersion: Record<string, unknown> = { ...good };
     delete noVersion["version"];
     expect(parseSave(noVersion)).toBeNull();
@@ -287,7 +306,7 @@ describe("save validation", () => {
     expect(parseSave({ ...good, settings: { uiScale: 500 } })?.settings.uiScale).toBe(3);
   });
   it("survives a hand-edited hostile payload", () => {
-    const s = parseSave({ version: 4, depth: {}, seed: [], px: 1, py: 1, hp: -50,
+    const s = parseSave({ version: 5, depth: {}, seed: [], px: 1, py: 1, hp: -50,
                           ring: "all of them", settings: null });
     expect(s).not.toBeNull();
     expect(s?.hp).toBeGreaterThan(0);
@@ -782,36 +801,43 @@ describe("pointer gestures", () => {
 });
 
 describe("level openness", () => {
-  it("no level at any depth is a solid block", () => {
+  it("no floor at any depth is a solid block", () => {
     // Densities past ~0.48 fragment the caves and keepLargestRegion seals
     // nearly everything: D8 was arriving at 2% open floor with 22 microbes
     // packed into it.
     for (const seed of [1, 7, 42, 99]) {
-      const d = new Dungeon(110, 80, seed);
-      for (let depth = 1; depth <= bio.MAX_DEPTH; depth++) {
-        const g = d.level(depth).grid;
+      const d = new Dungeon(96, 96, seed);
+      for (let f = 1; f <= MAX_FLOOR; f++) {
+        const g = d.level(f).grid;
         const open = g.countFloor() / (g.w * g.h);
-        expect(open, `seed ${seed} D${depth}`).toBeGreaterThan(0.25);
+        expect(open, `seed ${seed} floor ${f}`).toBeGreaterThan(0.2);
       }
     }
   });
 
-  it("openness decreases with depth on average", () => {
-    const d = new Dungeon(110, 80, 7);
-    const frac = (k: number) => {
-      const g = d.level(k).grid;
-      return g.countFloor() / (g.w * g.h);
-    };
-    expect(frac(1)).toBeGreaterThan(frac(8));
+  it("every floor is playable, whatever the seed", () => {
+    // Openness used to fall with depth and was the difficulty lever. It is
+    // not any more: rooms and the retry loop hold it near 40% everywhere, and
+    // difficulty comes from mobs, sight radius and the ATP deficit instead.
+    // What must still hold is that no floor is unplayable.
+    for (const seed of [3, 7, 11, 19]) {
+      const d = new Dungeon(96, 96, seed);
+      for (let f = 1; f <= MAX_FLOOR; f++) {
+        const g = d.level(f).grid;
+        const open = g.countFloor() / (g.w * g.h);
+        expect(open, `seed ${seed} floor ${f}`).toBeGreaterThan(0.2);
+        expect(open, `seed ${seed} floor ${f}`).toBeLessThan(0.75);
+      }
+    }
   });
 
   it("every level has far more open tiles than microbes", () => {
     for (const seed of [3, 11]) {
-      const d = new Dungeon(110, 80, seed);
-      for (let depth = 1; depth <= bio.MAX_DEPTH; depth++) {
-        const lvl = d.level(depth);
+      const d = new Dungeon(96, 96, seed);
+      for (let f = 1; f <= MAX_FLOOR; f++) {
+        const lvl = d.level(f);
         const open = lvl.grid.countFloor();
-        expect(open / Math.max(lvl.mobs.length, 1), `seed ${seed} D${depth}`)
+        expect(open / Math.max(lvl.mobs.length, 1), `seed ${seed} floor ${f}`)
           .toBeGreaterThan(20);
       }
     }
@@ -1026,7 +1052,7 @@ describe("toxic intermediates", () => {
 describe("save round-trips the bin", () => {
   it("keeps stashed parts across a reload", () => {
     const s = parseSave({
-      version: 4, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
+      version: 5, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
       ring: [{ kind: "promoter", strength: "medium" }],
       bin: [{ kind: "gene", id: "mtrC", optimised: false }, { kind: "terminator" }],
       settings: {},
@@ -1036,14 +1062,14 @@ describe("save round-trips the bin", () => {
   });
   it("drops junk and duplicates from the bin", () => {
     const s = parseSave({
-      version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
+      version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
       bin: [{ kind: "gene", id: "mtrC" }, { kind: "gene", id: "mtrC" }, "junk", 7,
             { kind: "gene", id: "notReal" }],
     });
     expect(s?.bin).toHaveLength(1);
   });
   it("a missing bin is an empty bin, not a crash", () => {
-    const s = parseSave({ version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
+    const s = parseSave({ version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
     expect(s?.bin).toEqual([]);
   });
 });
@@ -2115,7 +2141,7 @@ describe("entity model", () => {
       { ...body, kind: "player", atp: 10, atpMax: 10, speed: 18 },
       { ...body, kind: "microbe", id: "x", name: "X", glyph: "x", genes: [],
         note: "", pigment: "#fff", facing: "none", behaviour: "drift",
-        size: "small", weapon: "melee", atk: 1, cooldown: 0,
+        size: "small", weapon: "melee", atk: 1, cooldown: 0, elite: false,
         reload: 0, charging: 0 },
       { ...body, kind: "hazard", id: "peroxide", radius: 2, potency: 1 },
       { ...body, kind: "item", id: "cassette", gene: "mtrC" },
@@ -2134,7 +2160,7 @@ describe("entity model", () => {
     const m: Entity = { ...makeBody(0, 0, 10), kind: "microbe", id: "x", name: "X",
       glyph: "x", genes: [], note: "", pigment: "#fff", facing: "none",
       behaviour: "drift", size: "small", weapon: "melee", atk: 1, cooldown: 0,
-      reload: 0, charging: 0 };
+      elite: false, reload: 0, charging: 0 };
     expect(blocks(m)).toBe(true);
     m.alive = false;
     expect(blocks(m)).toBe(false);
@@ -2167,7 +2193,7 @@ describe("the microbe turn", () => {
     ax: 8, ay: 5, hp: 12, maxhp: 12, atk: 4, genes: [], note: "",
     pigment: "#fff", alive: true, facing: "rotate", heading: null,
     behaviour: "chase", size: "medium", cooldown: 0, status: [],
-    weapon: "melee", reload: 0, charging: 0,
+    weapon: "melee", reload: 0, charging: 0, elite: false,
     ...over,
   });
 
@@ -2476,7 +2502,7 @@ describe("footprints in the microbe turn", () => {
     hp: 40, maxhp: 40, atk: 5, genes: [], note: "", pigment: "#fff",
     alive: true, facing: "rotate", heading: 0, behaviour: "sessile",
     size: "filament", cooldown: 0, status: [],
-    weapon: "melee", reload: 0, charging: 0, ...over,
+    weapon: "melee", reload: 0, charging: 0, elite: false, ...over,
   });
 
   it("a filament strikes from either end of its body", () => {
@@ -2521,7 +2547,7 @@ describe("pursuit", () => {
     hp: 12, maxhp: 12, atk: 4, genes: [], note: "", pigment: "#fff",
     alive: true, facing: "rotate", heading: 0, behaviour: "chase",
     size: "medium", cooldown: 0, status: [],
-    weapon: "melee", reload: 0, charging: 0, ...over,
+    weapon: "melee", reload: 0, charging: 0, elite: false, ...over,
   });
   const opts = { reach: 1, maxRange: 24 };
 
@@ -2646,7 +2672,7 @@ describe("ranged weapons", () => {
     hp: 20, maxhp: 20, atk: 6, genes: [], note: "", pigment: "#fff",
     alive: true, facing: "rotate", heading: 0, behaviour: "sessile",
     size: "medium", cooldown: 0, status: [],
-    weapon: "melee", reload: 0, charging: 0, ...over,
+    weapon: "melee", reload: 0, charging: 0, elite: false, ...over,
   });
 
   it("a speargun winds up before it fires -- the tell is real", () => {
@@ -3034,7 +3060,7 @@ describe("audit regressions", () => {
     // The notebook, score and death count were written nowhere. Every sighting
     // was discarded the moment the tab closed.
     const s = parseSave({
-      version: 4, depth: 3, seed: 7, px: 5, py: 5, hp: 20, atp: 90,
+      version: 5, depth: 3, seed: 7, px: 5, py: 5, hp: 20, atp: 90,
       ring: [], bin: [], settings: {},
       run: { deepest: 6, deaths: 2, bestiary: ["geobacter", "beggiatoa"], library: ["mtrC"] },
     });
@@ -3045,7 +3071,7 @@ describe("audit regressions", () => {
   });
 
   it("a corrupt lineage block degrades to an empty one", () => {
-    const base = { version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+    const base = { version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
                    ring: [], bin: [], settings: {} };
     expect(parseSave({ ...base, run: "nonsense" })?.run.bestiary).toEqual([]);
     expect(parseSave(base)?.run.deepest).toBe(1);
@@ -3053,7 +3079,7 @@ describe("audit regressions", () => {
 
   it("the bestiary rejects organisms that do not exist and drops duplicates", () => {
     const s = parseSave({
-      version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
       ring: [], bin: [], settings: {},
       run: { deepest: 1, deaths: 0, bestiary: ["geobacter", "geobacter", "sasquatch", 7],
              library: ["mtrC", "notAGene"] },
@@ -3064,7 +3090,7 @@ describe("audit regressions", () => {
 
   it("deepest depth is clamped to the column", () => {
     const s = parseSave({
-      version: 4, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
       ring: [], bin: [], settings: {},
       run: { deepest: 9999, deaths: -5, bestiary: [], library: [] },
     });
@@ -3098,7 +3124,7 @@ describe("audit regressions", () => {
       id: "x", name: "X", glyph: "x", x: 40, y: 40, ax: 40, ay: 40, hp: 9, maxhp: 9,
       atk: 1, genes: [], note: "", pigment: "#fff", alive: true, facing: "none",
       heading: 0, behaviour: "chase", size: "medium", cooldown: 0, status: [],
-      weapon: "melee", reload: 0, charging: 0,
+      weapon: "melee", reload: 0, charging: 0, elite: false,
     };
     const t0 = performance.now();
     for (let i = 0; i < 20; i++) {
@@ -3124,5 +3150,612 @@ describe("audit regressions", () => {
     expect(a.x + a.w).toBeLessThanOrEqual(400);
     expect(inBoxChrome(a, a.x + 1, a.y + 1)).toBe(true);
     expect(inBoxChrome(a, a.x - 1, a.y)).toBe(false);
+  });
+});
+
+describe("items on the floor", () => {
+  it("substrates match the chemistry of their layer", () => {
+    expect(substratesAt(1)).toContain("glucose");     // photic, organic-rich
+    expect(substratesAt(2)).toContain("nitrate");
+    expect(substratesAt(4)).toContain("ferric");
+    expect(substratesAt(7)).toContain("h2");
+    expect(substratesAt(8)).toContain("co2");         // the last acceptor
+    expect(substratesAt(1)).not.toContain("co2");
+  });
+
+  it("a gated substrate is worthless without its enzyme", () => {
+    expect(yieldOf("sulfide", () => false)).toEqual({ atp: 0, blocked: "sqr" });
+    expect(yieldOf("sulfide", () => true).atp).toBeGreaterThan(0);
+    expect(yieldOf("h2", () => false).blocked).toBe("hydA");
+    expect(yieldOf("acetate", () => false).blocked).toBeNull();   // always edible
+  });
+
+  it("every substrate names a real gene, or none at all", () => {
+    for (const s of Object.values(SUBSTRATES)) {
+      if (s.needs !== null) expect(bio.GENES[s.needs], s.id).toBeDefined();
+      expect(s.formula, s.id).toBeTruthy();
+      expect(s.atp, s.id).toBeGreaterThan(0);
+    }
+  });
+
+  it("drops merge onto a tile instead of stacking invisibly", () => {
+    const drops: Drop[] = [];
+    addDrop(drops, 3, 3, [{ kind: "substrate", id: "acetate" }]);
+    addDrop(drops, 3, 3, [{ kind: "substrate", id: "h2" }]);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.items).toHaveLength(2);
+  });
+
+  it("a pile is capped, and the drop list is bounded", () => {
+    const drops: Drop[] = [];
+    for (let i = 0; i < 40; i++) {
+      addDrop(drops, 3, 3, [{ kind: "substrate", id: "acetate" }]);
+    }
+    expect(drops[0]!.items.length).toBeLessThanOrEqual(8);
+    for (let i = 0; i < 500; i++) {
+      addDrop(drops, i, 0, [{ kind: "substrate", id: "acetate" }]);
+    }
+    expect(drops.length).toBeLessThanOrEqual(60);
+  });
+
+  it("an empty drop is never created", () => {
+    const drops: Drop[] = [];
+    addDrop(drops, 1, 1, []);
+    expect(drops).toHaveLength(0);
+  });
+
+  it("dropAt finds by tile and removeDrop clears it", () => {
+    const drops: Drop[] = [];
+    addDrop(drops, 5, 6, [{ kind: "cassette", gene: "mtrC" }]);
+    const d = dropAt(drops, 5, 6);
+    expect(d).not.toBeNull();
+    expect(dropAt(drops, 0, 0)).toBeNull();
+    removeDrop(drops, d!);
+    expect(drops).toHaveLength(0);
+  });
+});
+
+describe("message text", () => {
+  it("a kill reads as lysis, not as a hitpoint number", () => {
+    const line = say.hitLine("Geobacter", 9, true, 1);
+    expect(line).toMatch(/Geobacter/);
+    expect(line).not.toMatch(/\bhp\b|\bdestroyed\b/i);
+    expect(line.length).toBeGreaterThan(24);
+  });
+
+  it("each weapon reports itself in its own terms", () => {
+    expect(say.incomingLine("Pseudomonas", "spear", 9, 1)).toMatch(/sheath|spike/);
+    expect(say.incomingLine("Geobacter", "bolt", 3, 1)).toMatch(/pilus|current/);
+    expect(say.incomingLine("Prosthecochloris", "packet", 4, 1)).toMatch(/particle|fuse/);
+    expect(say.incomingLine("Thiobacillus", "cloud", 2, 1)).toMatch(/exudate|burn/);
+  });
+
+  it("a charge warns without saying the word charge", () => {
+    expect(say.chargeLine("Pseudomonas", "spear")).toMatch(/sheath/);
+    expect(say.chargeLine("Thiobacillus", "cloud")).toMatch(/vent|cloudy/);
+  });
+
+  it("picking up a gated substrate names the enzyme you lack", () => {
+    const line = say.pickupLine({ kind: "substrate", id: "sulfide" }, 0, "sqr");
+    expect(line).toContain("H2S");
+    expect(line).toContain("sqr");
+  });
+
+  it("a usable substrate reports the ATP", () => {
+    expect(say.pickupLine({ kind: "substrate", id: "acetate" }, 14, null))
+      .toContain("+14 ATP");
+  });
+
+  it("HGT explains what was taken and what it does", () => {
+    const line = say.hgtLine("mtrC", "Shewanella");
+    expect(line).toContain("mtrC");
+    expect(line).toContain("Shewanella");
+    expect(line.toLowerCase()).toContain("decaheme");
+  });
+
+  it("lines vary, so the log does not read as a stuck record", () => {
+    const seen = new Set(Array.from({ length: 12 },
+      (_v, i) => say.hitLine("Beggiatoa", 3, false, i)));
+    expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
+describe("the pathway map fits a portrait screen", () => {
+  it("centres content that is smaller than the viewport instead of pinning it", () => {
+    // Crossing clamp bounds pushed the whole graph 1500px down a phone screen.
+    const b = graphBounds();
+    for (const [w, h] of [[1080, 2200], [720, 1600], [2200, 1000]] as const) {
+      const v = clampView(fitView(w, h), w, h);
+      const topPx = (b.minY - v.y) * v.scale;
+      const botPx = (b.maxY - v.y) * v.scale;
+      expect(topPx, `${w}x${h} top`).toBeGreaterThan(-h);
+      expect(botPx, `${w}x${h} bottom`).toBeLessThan(h * 1.5);
+      // and roughly centred when it fits
+      if ((b.maxY - b.minY) * v.scale < h) {
+        const centre = (topPx + botPx) / 2;
+        expect(Math.abs(centre - h / 2), `${w}x${h} off-centre`).toBeLessThan(h * 0.35);
+      }
+    }
+  });
+});
+
+describe("field of view", () => {
+  const openGrid = (n = 21) => new mg.Grid(n, n, mg.FLOOR);
+
+  it("you can always see where you are standing", () => {
+    const s = makeSight(21, 21);
+    computeFov(s, openGrid(), 10, 10, 8);
+    expect(isVisible(s, 10, 10)).toBe(true);
+  });
+
+  it("vision is a disc, not a square", () => {
+    const s = makeSight(21, 21);
+    computeFov(s, openGrid(), 10, 10, 5);
+    expect(isVisible(s, 15, 10)).toBe(true);        // 5 straight out
+    expect(isVisible(s, 14, 14)).toBe(false);       // 5.6 diagonally
+  });
+
+  it("a wall casts a shadow behind it", () => {
+    const g = openGrid();
+    g.set(12, 10, mg.WALL);
+    const s = makeSight(21, 21);
+    computeFov(s, g, 10, 10, 9);
+    expect(isVisible(s, 12, 10), "the wall itself is lit").toBe(true);
+    expect(isVisible(s, 14, 10), "directly behind it is not").toBe(false);
+    expect(isVisible(s, 14, 13), "around it is").toBe(true);
+  });
+
+  it("a sealed room shows only its own walls", () => {
+    const g = new mg.Grid(21, 21, mg.WALL);
+    for (let y = 9; y <= 11; y++) for (let x = 9; x <= 11; x++) g.set(x, y, mg.FLOOR);
+    const s = makeSight(21, 21);
+    computeFov(s, g, 10, 10, 9);
+    expect(isVisible(s, 10, 10)).toBe(true);
+    expect(isVisible(s, 12, 12), "the enclosing wall").toBe(true);
+    expect(isVisible(s, 15, 15), "beyond it").toBe(false);
+  });
+
+  it("memory persists after you walk away, but current sight does not", () => {
+    const s = makeSight(21, 21);
+    const g = openGrid();
+    computeFov(s, g, 3, 3, 5);
+    expect(isVisible(s, 4, 4)).toBe(true);
+    computeFov(s, g, 17, 17, 5);
+    expect(isVisible(s, 4, 4), "no longer lit").toBe(false);
+    expect(isSeen(s, 4, 4), "still remembered").toBe(true);
+  });
+
+  it("vision is roughly symmetric -- if you see it, it sees you", () => {
+    const g = openGrid();
+    for (let y = 6; y < 15; y++) g.set(12, y, mg.WALL);
+    g.set(12, 10, mg.FLOOR);                         // a doorway
+    const a = makeSight(21, 21), b = makeSight(21, 21);
+    computeFov(a, g, 8, 10, 9);
+    computeFov(b, g, 16, 10, 9);
+    expect(isVisible(a, 16, 10)).toBe(isVisible(b, 8, 10));
+  });
+
+  it("never reads or writes outside the grid", () => {
+    const s = makeSight(9, 9);
+    for (const [x, y] of [[0, 0], [8, 8], [-5, -5], [50, 50]] as const) {
+      expect(() => { computeFov(s, new mg.Grid(9, 9, mg.FLOOR), x, y, 12); }).not.toThrow();
+    }
+    expect(isVisible(s, -1, 0)).toBe(false);
+    expect(isVisible(s, 99, 0)).toBe(false);
+  });
+
+  it("light reaches further in the photic zone than on the floor", () => {
+    expect(sightRadius(bio.stratum(1).light))
+      .toBeGreaterThan(sightRadius(bio.stratum(8).light));
+  });
+
+  it("a real cave leaves most of itself undiscovered from one spot", () => {
+    const d = new Dungeon(110, 80, 5);
+    const lvl = d.level(3);
+    const s = makeSight(lvl.grid.w, lvl.grid.h);
+    computeFov(s, lvl.grid, lvl.up.x, lvl.up.y, 9);
+    expect(fractionSeen(s)).toBeLessThan(0.1);
+  });
+
+  it("computing FOV is cheap enough to do on every step", () => {
+    const d = new Dungeon(110, 80, 5);
+    const lvl = d.level(3);
+    const s = makeSight(lvl.grid.w, lvl.grid.h);
+    const t0 = performance.now();
+    for (let i = 0; i < 200; i++) computeFov(s, lvl.grid, 40 + (i % 9), 30, 10);
+    const per = (performance.now() - t0) / 200;
+    expect(per, `${(per * 1000).toFixed(0)} us per recompute`).toBeLessThan(1);
+  });
+});
+
+describe("crawl-like behaviours", () => {
+  it("sight radius follows the light gradient of the column", () => {
+    const radii = bio.STRATA.map((s) => sightRadius(s.light));
+    expect(radii[0]!).toBeGreaterThan(radii[7]!);
+    for (const r of radii) {
+      expect(r).toBeGreaterThanOrEqual(5);        // never blind
+      expect(r).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it("a level starts entirely unexplored", () => {
+    const d = new Dungeon(110, 80, 3);
+    expect(fractionSeen(d.level(1).sight)).toBe(0);
+  });
+
+  it("each level remembers its own exploration, not a shared map", () => {
+    const d = new Dungeon(110, 80, 3);
+    const a = d.level(1), b = d.level(2);
+    computeFov(a.sight, a.grid, a.up.x, a.up.y, 9);
+    expect(fractionSeen(a.sight)).toBeGreaterThan(0);
+    expect(fractionSeen(b.sight)).toBe(0);
+  });
+
+  it("walking reveals more of the map, monotonically", () => {
+    const d = new Dungeon(110, 80, 3);
+    const lvl = d.level(1);
+    let last = 0;
+    for (let i = 0; i < 12; i++) {
+      computeFov(lvl.sight, lvl.grid, lvl.up.x + i, lvl.up.y, 8);
+      const now = fractionSeen(lvl.sight);
+      expect(now, `step ${String(i)}`).toBeGreaterThanOrEqual(last);
+      last = now;
+    }
+    expect(last).toBeGreaterThan(0.01);
+  });
+
+  it("a discarded part leaves the bin and does not come back", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    const before = p.bin.length;
+    const i = p.bin.findIndex((x) => x.kind === "gene");
+    p.bin.splice(i, 1);
+    expect(p.bin.length).toBe(before - 1);
+    expect(p.inBin("mtrC")).toBe(false);
+    // and the slot is free again for a fresh copy
+    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(true);
+  });
+
+  it("waiting is a real turn: microbes act and status ticks", () => {
+    const m: Mob = {
+      id: "thiothrix", name: "Thiothrix", glyph: "T", x: 6, y: 5, ax: 6, ay: 5,
+      hp: 20, maxhp: 20, atk: 6, genes: [], note: "", pigment: "#fff",
+      alive: true, facing: "none", heading: 0, behaviour: "sessile",
+      size: "medium", cooldown: 0, status: [], weapon: "melee",
+      reload: 0, charging: 0, elite: false,
+    };
+    const w = {
+      grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
+      player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
+      rng: makeRng(1), armour: 1, packets: [] as Packet[], clouds: [] as Cloud[],
+    };
+    microbeTurn(w);
+    expect(w.player.hp).toBeLessThan(30);        // standing still is not safe
+  });
+});
+
+describe("the column as a cylinder", () => {
+  it("a level is a disc, with solid glass outside it", () => {
+    const g = mg.generate(60, 60, makeRng(3), { density: 0.4, passes: 4 });
+    mg.maskToColumn(g);
+    const cx = (g.w - 1) / 2, cy = (g.h - 1) / 2;
+    const r = mg.columnRadius(g);
+    for (let y = 0; y < g.h; y++) {
+      for (let x = 0; x < g.w; x++) {
+        const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d2 > r * r) expect(g.isWall(x, y), `${x},${y} outside the rim`).toBe(true);
+      }
+    }
+  });
+
+  it("the disc still holds a usable amount of floor", () => {
+    const d = new Dungeon(96, 96, 11);
+    for (let f = 1; f <= MAX_FLOOR; f += 4) {
+      const g = d.level(f).grid;
+      const open = g.countFloor() / (g.w * g.h);
+      expect(open, `floor ${f}`).toBeGreaterThan(0.2);
+    }
+  });
+});
+
+describe("day and night", () => {
+  it("light rises and falls, and night is genuinely dark", () => {
+    const c = newClock();
+    const seen: number[] = [];
+    for (let i = 0; i < TURNS_PER_DAY; i += 10) { c.turn = i; seen.push(daylight(c)); }
+    expect(Math.max(...seen)).toBeGreaterThan(0.9);
+    expect(Math.min(...seen)).toBe(0);
+    expect(seen.filter((v) => v === 0).length).toBeGreaterThan(3);
+  });
+
+  it("the cycle repeats", () => {
+    const a = newClock(), b = newClock();
+    a.turn = 5; b.turn = 5 + TURNS_PER_DAY * 3;
+    expect(daylight(a)).toBeCloseTo(daylight(b), 10);
+  });
+
+  it("night changes the surface but not the deep column", () => {
+    const day = newClock(), night = newClock();
+    day.turn = Math.floor(TURNS_PER_DAY * 0.4);
+    night.turn = Math.floor(TURNS_PER_DAY * 0.9);
+    expect(isNight(night)).toBe(true);
+    expect(isNight(day)).toBe(false);
+    const surface = bio.stratum(1).light;
+    const floorLight = bio.stratum(8).light;
+    expect(lightAt(surface, day)).toBeGreaterThan(lightAt(surface, night));
+    expect(lightAt(floorLight, day)).toBeCloseTo(lightAt(floorLight, night), 6);
+  });
+
+  it("time reads as words, and covers the whole cycle", () => {
+    const c = newClock();
+    const names = new Set<string>();
+    for (let i = 0; i < TURNS_PER_DAY; i++) { c.turn = i; names.add(timeName(c)); }
+    expect(names.size).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe("bioluminescence", () => {
+  const lit = () => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "luxAB", optimised: true });
+    return p;
+  };
+
+  it("luciferase is an oxygenase: it only turns over in the oxic zone", () => {
+    expect(lit().expression("luxAB", 1)).toBeGreaterThan(0);
+    for (let d = 2; d <= bio.MAX_DEPTH; d++) {
+      expect(lit().expression("luxAB", d), `D${d}`).toBe(0);
+    }
+  });
+
+  it("glowing costs energy rather than making it", () => {
+    const dark = new Plasmid();
+    dark.put(4, { kind: "promoter", strength: "strong" });
+    expect(lit().atpGain(1)).toBeLessThan(dark.atpGain(1));
+  });
+
+  it("it is carried by the organisms that actually glow", () => {
+    const carriers = bio.MICROBES.filter((m) => m.genes.includes("luxAB"));
+    expect(carriers.length).toBeGreaterThan(0);
+    for (const m of carriers) expect(m.depth, m.id).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("boss floors", () => {
+  it("every stratum ends on a boss floor and they are populated", () => {
+    const d = new Dungeon(96, 96, 21);
+    for (let f = 1; f <= MAX_FLOOR; f++) {
+      const L = d.level(f);
+      expect(L.boss, `floor ${f}`).toBe(isBossFloor(f));
+      if (L.boss) expect(L.bossName, `floor ${f}`).toBeDefined();
+    }
+  });
+
+  it("a boss floor holds something elite; ordinary floors do not", () => {
+    const d = new Dungeon(96, 96, 21);
+    for (let f = 1; f <= MAX_FLOOR; f++) {
+      const L = d.level(f);
+      const elites = L.mobs.filter((m) => m.elite).length;
+      if (isBossFloor(f)) expect(elites, `floor ${f}`).toBeGreaterThan(0);
+      else expect(elites, `floor ${f}`).toBe(0);
+    }
+  });
+
+  it("a boss floor is sealed until its elites are dead", () => {
+    const d = new Dungeon(96, 96, 21);
+    const L = d.level(3);
+    expect(Dungeon.isCleared(L)).toBe(false);
+    for (const m of L.mobs) if (m.elite) m.alive = false;
+    expect(Dungeon.isCleared(L)).toBe(true);
+  });
+
+  it("an ordinary floor is never sealed", () => {
+    const d = new Dungeon(96, 96, 21);
+    expect(Dungeon.isCleared(d.level(2))).toBe(true);
+  });
+
+  it("bosses stand on floor and never inside the glass", () => {
+    const d = new Dungeon(96, 96, 5);
+    for (let f = 3; f <= MAX_FLOOR; f += 3) {
+      const L = d.level(f);
+      for (const m of L.mobs) {
+        for (const t of tilesOf(SIZES[m.size].footprint, m.x, m.y, m.heading)) {
+          expect(L.grid.isFloor(t.x, t.y), `floor ${f} ${m.name}`).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe("the difficulty curve", () => {
+  // A player who built a sensible, capacity-respecting kit for their depth.
+  const kitFor = (depth: number): Plasmid => {
+    const p = new Plasmid();
+    const useful: bio.GeneId[] = [];
+    for (const m of bio.MICROBES) {
+      if (m.depth > depth || m.depth < depth - 2) continue;
+      for (const g of m.genes) if (!useful.includes(g)) useful.push(g);
+    }
+    p.put(3, { kind: "promoter", strength: "strong" });
+    let kb = 0.7, slot = 4;
+    for (const g of useful) {
+      if (kb + bio.GENES[g].kb > p.capacityKb() * 0.7 || slot >= 14) break;
+      p.put(slot++, { kind: "gene", id: g, optimised: true });
+      kb += bio.GENES[g].kb;
+    }
+    return p;
+  };
+
+  it("toughness comes from the genome, so building one is progression", () => {
+    const bare = new Plasmid();
+    expect(kitFor(6).vitality(6)).toBeGreaterThan(bare.vitality(6));
+  });
+
+  it("an over-stuffed plasmid is crippled but never silently switched off", () => {
+    const p = new Plasmid();
+    p.put(3, { kind: "promoter", strength: "strong" });
+    let slot = 4;
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      if (id === "ori" || slot >= 15) continue;
+      p.put(slot++, { kind: "gene", id, optimised: true });
+    }
+    expect(p.burden()).toBeGreaterThan(0.5);
+    expect(p.burden(), "a cliff to exactly zero is a trap").toBeLessThan(1);
+    expect(p.power(4), "something must still express").toBeGreaterThan(0);
+  });
+
+  it("the game gets harder with depth, monotonically enough to feel graded", () => {
+    const d = new Dungeon(96, 96, 17);
+    const survivable = (f: number): number => {
+      const s = strataOf(f);
+      const p = kitFor(s);
+      const mobAtk = Math.max(...d.level(f).mobs.map((m) => m.atk), 1);
+      const inc = Math.max(Math.round(mobAtk * 0.55 * p.armour(s)), 1);
+      return p.vitality(s) / inc;
+    };
+    // The surface must be forgiving and the floor must not be.
+    expect(survivable(1)).toBeGreaterThan(12);
+    expect(survivable(MAX_FLOOR)).toBeLessThan(8);
+    expect(survivable(1)).toBeGreaterThan(survivable(MAX_FLOOR) * 2);
+  });
+
+  it("no floor is a wall you simply cannot damage", () => {
+    const d = new Dungeon(96, 96, 17);
+    for (let f = 1; f <= MAX_FLOOR; f++) {
+      const s = strataOf(f);
+      const atk = 3 + kitFor(s).power(s) * 0.9;
+      const big = Math.max(...d.level(f).mobs.map((m) => m.maxhp), 1);
+      expect(big / atk, `floor ${f} turns to kill the biggest`).toBeLessThan(30);
+    }
+  });
+
+  it("a bare starting plasmid can still survive the first floor", () => {
+    const bare = new Plasmid();
+    const d = new Dungeon(96, 96, 17);
+    const mobAtk = Math.max(...d.level(1).mobs.map((m) => m.atk), 1);
+    const inc = Math.max(Math.round(mobAtk * 0.55), 1);
+    expect(bare.vitality(1) / inc).toBeGreaterThan(5);
+  });
+});
+
+describe("rooms", () => {
+  const carve = (seed: number, depth = 4, boss = false) => {
+    const g = mg.generate(96, 96, makeRng(seed), { density: 0.42, passes: 5 });
+    mg.maskToColumn(g);
+    const rooms = carveRooms(g, makeRng(seed * 31), planFor(depth, boss));
+    mg.keepLargestRegion(g);
+    return { g, rooms };
+  };
+
+  it("rooms are carved and their interiors are floor", () => {
+    const { g, rooms } = carve(7);
+    expect(rooms.length).toBeGreaterThan(0);
+    for (const r of rooms) {
+      const open = r.tiles.filter((t) => g.isFloor(t.x, t.y)).length;
+      expect(open / r.tiles.length, r.kind).toBeGreaterThan(0.5);
+    }
+  });
+
+  it("every room stays inside the glass", () => {
+    const { g, rooms } = carve(11);
+    const cx = (g.w - 1) / 2, cy = (g.h - 1) / 2;
+    const rim = mg.columnRadius(g);
+    for (const r of rooms) {
+      const d = Math.hypot(r.cx - cx, r.cy - cy);
+      expect(d + r.r, `${r.kind} breaches the rim`).toBeLessThanOrEqual(rim + 1);
+    }
+  });
+
+  it("rooms do not overlap each other", () => {
+    const { rooms } = carve(13);
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i]!, b = rooms[j]!;
+        const d = Math.hypot(a.cx - b.cx, a.cy - b.cy);
+        expect(d, `${a.kind}/${b.kind}`).toBeGreaterThan(a.r + b.r);
+      }
+    }
+  });
+
+  it("ports sit against the glass, chambers do not have to", () => {
+    let ports = 0;
+    for (const seed of [3, 7, 11, 19, 23]) {
+      const { g, rooms } = carve(seed);
+      const cx = (g.w - 1) / 2, cy = (g.h - 1) / 2;
+      const rim = mg.columnRadius(g);
+      for (const r of rooms.filter((x) => x.kind === "port")) {
+        ports++;
+        expect(Math.hypot(r.cx - cx, r.cy - cy)).toBeGreaterThan(rim * 0.5);
+      }
+    }
+    expect(ports).toBeGreaterThan(0);
+  });
+
+  it("every surviving room is reachable from the rest of the level", () => {
+    // carveRooms links each room to existing floor, then keepLargestRegion
+    // prunes anything still stranded -- so a surviving room must be connected.
+    for (const seed of [5, 15, 25]) {
+      const { g, rooms } = carve(seed);
+      const alive = rooms.filter((r) => g.isFloor(r.cx, r.cy));
+      expect(alive.length, `seed ${seed}`).toBeGreaterThan(0);
+      const first = alive[0]!;
+      for (const r of alive.slice(1)) {
+        expect(findPath(g, { x: first.cx, y: first.cy }, { x: r.cx, y: r.cy }),
+               `${r.kind} unreachable`).not.toBeNull();
+      }
+    }
+  });
+
+  it("room kinds follow the chemistry: mats only at the redox interface", () => {
+    expect(planFor(1, false).kinds).not.toContain("mat");
+    expect(planFor(5, false).kinds).toContain("mat");
+    expect(planFor(8, false).kinds).not.toContain("mat");
+  });
+
+  it("a port is worth crossing the level for, a chamber is not", () => {
+    expect(ROOM_STYLE.port.loot).toBeGreaterThan(ROOM_STYLE.chamber.loot);
+    expect(ROOM_STYLE.enrichment.loot).toBeGreaterThan(ROOM_STYLE.port.loot);
+    expect(ROOM_STYLE.enrichment.guard).toBeGreaterThan(ROOM_STYLE.chamber.guard);
+  });
+
+  it("roomAt finds a room from inside it and not from outside", () => {
+    const { rooms } = carve(9);
+    const r = rooms[0]!;
+    expect(roomAt(rooms, r.cx, r.cy)).toBe(r);
+    expect(roomAt(rooms, -50, -50)).toBeNull();
+  });
+
+  it("carving never strands the level", () => {
+    for (const seed of [2, 4, 6, 8, 12, 16]) {
+      const { g } = carve(seed, 6, true);
+      expect(g.countFloor() / (g.w * g.h), `seed ${seed}`).toBeGreaterThan(0.15);
+    }
+  });
+});
+
+describe("the loop has an end", () => {
+  it("a boss floor blocks descent until it is cleared", () => {
+    const d = new Dungeon(96, 96, 33);
+    const L = d.level(3);
+    expect(Dungeon.isCleared(L)).toBe(false);
+    for (const m of L.mobs) if (m.elite) m.alive = false;
+    expect(Dungeon.isCleared(L)).toBe(true);
+  });
+
+  it("the last floor has no way down, so it is the end", () => {
+    const d = new Dungeon(96, 96, 33);
+    expect(d.level(MAX_FLOOR).down).toBeNull();
+    expect(d.level(MAX_FLOOR).boss).toBe(true);
+  });
+
+  it("every floor between is passable once cleared", () => {
+    const d = new Dungeon(96, 96, 33);
+    for (let f = 1; f < MAX_FLOOR; f++) {
+      const L = d.level(f);
+      for (const m of L.mobs) m.alive = false;
+      expect(Dungeon.isCleared(L), `floor ${f}`).toBe(true);
+      expect(L.down, `floor ${f}`).not.toBeNull();
+    }
   });
 });

@@ -29,6 +29,13 @@ import { cloudAlpha, cloudTiles, stepClouds, stepPackets,
 import { WEAPONS } from "./weapons.js";
 import { drawClose, inBox as inBoxOf, type Box } from "./chrome.js";
 import { drawNotes, drawSplash } from "./screens.js";
+import { SUBSTRATES, addDrop, dropAt, itemColour, itemName, itemNote, removeDrop,
+         substratesAt, yieldOf, type Drop, type Item } from "./items.js";
+import * as say from "./flavour.js";
+import { computeFov, isSeen, isVisible, sightRadius } from "./fov.js";
+import { isNight, lightAt, newClock, timeName, type Clock } from "./cycle.js";
+import { MAX_FLOOR } from "./dungeon.js";
+import { ROOM_STYLE, roomAt, type Room } from "./rooms.js";
 import { exportAnnotation, newRun, recordLocus, recordSighting,
          resynthesise, type RunState } from "./run.js";
 import { SOURCES, cached, fetchAll } from "./ncbi.js";
@@ -47,7 +54,7 @@ const SAVE_KEY = "microgue:v1";
 class Game {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
-  dungeon = new Dungeon(110, 80, 7);
+  dungeon = new Dungeon(96, 96, 7);
   genome = new Plasmid();
   level!: Level;
   player = { x: 0, y: 0, ax: 0, ay: 0, hp: 30, maxhp: 30, speed: 18,
@@ -95,6 +102,13 @@ class Game {
   run: RunState = newRun();
   showNotes = false;
   private exporting = false;
+  drops: Drop[] = [];
+  private spotted = new Set<string>();
+  private inRoom: Room | null = null;
+  won = false;
+  clock: Clock = newClock();
+  openDrop: Drop | null = null;
+  dropBoxes: Box[] = [];
   packets: Packet[] = [];
   clouds: Cloud[] = [];
   started = false;
@@ -139,17 +153,65 @@ class Game {
     this.cursor = { x: p.x, y: p.y };
     this.path = null; this.walk = null;
     this.zoom = this.tileZoom();
+    this.spotted.clear();
+    this.look();
     const s = level.stratum;
-    if (!level.visited) { level.visited = true; this.note(s.blurb); }
+    if (!level.visited) {
+      level.visited = true;
+      this.note(s.blurb);
+      if (level.boss && level.bossName !== undefined) {
+        this.note(`Something has taken over this level: ${level.bossName}.`);
+        this.toasts.push(`Boss floor: ${level.bossName}`, "warn", this.now);
+      }
+      // Rooms get real caches; the rest of the floor gets scatter.
+      const lootRng = makeRng(this.dungeon.seed ^ (level.floor * 6607));
+      for (const room of level.rooms) {
+        const style = ROOM_STYLE[room.kind];
+        const pool = substratesAt(s.depth);
+        for (let i = 0; i < style.loot; i++) {
+          const t = room.tiles[lootRng.int(room.tiles.length)];
+          if (!t) continue;
+          const items: Item[] = [];
+          const id = pool[lootRng.int(pool.length)];
+          if (id) items.push({ kind: "substrate", id });
+          // A port or an enrichment is worth crossing the level for.
+          if (style.loot >= 3 && lootRng.next() < 0.55) {
+            const genes = bio.microbesAt(s.depth).flatMap((p) => [...p.genes]);
+            const g = genes[lootRng.int(Math.max(genes.length, 1))];
+            if (g !== undefined && !this.genome.has(g) && !this.genome.inBin(g)) {
+              items.push({ kind: "cassette", gene: g });
+            }
+          }
+          addDrop(this.drops, t.x, t.y, items);
+        }
+      }
+
+      // Litter the floor with what this layer actually holds.
+      const pool = substratesAt(s.depth);
+      const rng = makeRng(this.dungeon.seed ^ (s.depth * 7919));
+      for (let i = 0; i < 14; i++) {
+        const x = rng.int(level.grid.w), y = rng.int(level.grid.h);
+        if (!level.grid.isFloor(x, y)) continue;
+        const id = pool[rng.int(pool.length)];
+        if (id) addDrop(this.drops, x, y, [{ kind: "substrate", id }]);
+      }
+    }
     // Descending should feel like passing through something.
     this.fx.clear();
     this.packets.length = 0;
     this.clouds.length = 0;
+    this.drops.length = 0;
+    this.openDrop = null;
     this.fx.add({ kind: "wipe", t0: this.now, dur: 460, colour: s.wall, down: true });
     this.save();
   }
 
   descend(): void {
+    if (!Dungeon.isCleared(this.level)) {
+      this.note("The way down is choked. Something here has to die first.");
+      this.toasts.push("Clear the floor before descending.", "warn", this.now);
+      return;
+    }
     const r = this.dungeon.descend();
     if ("err" in r) { this.note(r.err); return; }
     this.enter(r.level, r.arrive);
@@ -167,6 +229,16 @@ class Game {
    *  sulfide aura burns anything adjacent. */
   private upkeep(): void {
     const d = this.dungeon.depth;
+
+    // Toughness tracks the genome, so building a good plasmid is the whole of
+    // character progression. Growth heals; shrinking does not kill.
+    const vit = this.genome.vitality(d);
+    if (vit !== this.player.maxhp) {
+      const gain = vit - this.player.maxhp;
+      this.player.maxhp = vit;
+      if (gain > 0) this.player.hp = Math.min(this.player.hp + gain, vit);
+      this.player.hp = Math.max(Math.min(this.player.hp, vit), 1);
+    }
 
     // Energy first: everything below depends on what the pool can supply.
     const gain = this.genome.atpGain(d);
@@ -193,7 +265,7 @@ class Game {
                       y: this.player.y, text: `-${bleed}`, colour: "#7fc4e8" });
         if (Math.random() < 0.2) {
           const s = bio.stratum(d);
-          this.note(`ATP pumps failing. ${s.donor} is the donor here — find a gene that uses ${s.teap}.`);
+          this.note(say.starveLine(s.donor, s.teap));
         }
       }
     }
@@ -247,46 +319,68 @@ class Game {
     this.fx.hitstop(28, now);
 
     m.hp = Math.max(m.hp - dmg, 0);
+    if (m.hp > 0) this.note(say.hitLine(m.name, dmg, false, this.turnSeed + dmg));
     if (m.hp <= 0) {
       m.alive = false;
-      if (recordSighting(this.run, m.id)) {
-        this.note(`Recorded ${m.name} in the notebook.`);
+      if (m.elite && Dungeon.isCleared(this.level)) {
+        this.note("The floor goes quiet. The way down is clear.");
+        this.toasts.push("Floor cleared.", "info", this.now);
+        if (this.dungeon.floor >= MAX_FLOOR) this.win();
       }
+      if (recordSighting(this.run, m.id)) {
+        this.note(`You record the ${m.name} in your notebook.`);
+      }
+
+      // Remains fall where the cell died. Nothing is picked up for free.
+      const loot: Item[] = [];
+      const rng = makeRng(this.turnSeed + m.x * 31 + m.y);
+      const pool = m.genes.filter(
+        (g) => !this.genome.has(g) && !this.genome.inBin(g));
+      const gene = pool[rng.int(Math.max(pool.length, 1))];
+      if (gene !== undefined && rng.next() < 0.8) loot.push({ kind: "cassette", gene });
+      const subs = substratesAt(this.dungeon.depth);
+      const n = 1 + rng.int(2);
+      for (let i = 0; i < n; i++) {
+        const id = subs[rng.int(subs.length)];
+        if (id) loot.push({ kind: "substrate", id });
+      }
+      addDrop(this.drops, m.x, m.y, loot);
+      if (loot.length > 1) this.note(say.lysateLine(loot.length, m.name));
       // Lysis: the cell bursts. Bigger shake, longer stop, scattered debris.
       this.fx.add({ kind: "burst", t0: this.now + 40, dur: 520, x: m.x, y: m.y,
                     colour: m.pigment, n: 14, seed: this.now + m.x * 31 + m.y });
       this.fx.shake(7, 260, this.now);
       this.fx.hitstop(70, this.now);
-      this.note(`${m.name} destroyed.`);
-      const pool = m.genes.filter((g) => !this.genome.has(g));
-      if (!pool.length) { this.note(`Nothing new to take.`); }
-      else {
-        const pick = pool[Math.floor(Math.random() * pool.length)];
-        if (pick === undefined) return;
-        const r = this.genome.stash({ kind: "gene", id: pick, optimised: false });
-        if (r.ok) {
-          // The loop's whole point deserves a moment: the locus travels.
-          this.fx.add({ kind: "bolt", t0: this.now + 120, dur: 380, colour: "#a0ffd0",
-                        seed: this.now, from: { x: m.x, y: m.y },
-                        to: { x: this.player.x, y: this.player.y } });
-          this.fx.add({ kind: "text", t0: this.now + 220, dur: 900, x: this.player.x,
-                        y: this.player.y - 0.5, text: bio.GENES[pick].name,
-                        colour: "#a0ffd0" });
-        }
-        recordLocus(this.run, pick);
-        this.note(r.ok ? `HGT: ${bio.GENES[pick].name} from ${m.name} \u2192 parts bin.`
-                       : `${bio.GENES[pick].name} — ${r.err}`);
+      this.note(say.hitLine(m.name, 0, true, this.turnSeed + m.x));
+
+      // Natural transformation: free DNA released by a lysing neighbour is the
+      // classic substrate for it, so an occasional direct uptake is right --
+      // but most of the genome ends up on the floor to be collected.
+      const free = m.genes.filter((g) => !this.genome.has(g) && !this.genome.inBin(g));
+      const direct = free[rng.int(Math.max(free.length, 1))];
+      if (direct !== undefined && rng.next() < 0.25
+          && this.genome.stash({ kind: "gene", id: direct, optimised: false }).ok) {
+        recordLocus(this.run, direct);
+        this.note(say.hgtLine(direct, m.name));
+        this.fx.add({ kind: "bolt", t0: this.now + 120, dur: 380, colour: "#a0ffd0",
+                      seed: this.now, from: { x: m.x, y: m.y },
+                      to: { x: this.player.x, y: this.player.y } });
       }
-    } else {
-      const inc = Math.round(m.atk * 0.5 * this.genome.armour(this.dungeon.depth));
-      this.player.hp = Math.max(this.player.hp - inc, 0);
-      this.note(`${m.name}: ${Math.max(m.hp, 0)} hp left.`);
     }
     this.mobTurn();
     this.save();
   }
 
   mobTurn(): void {
+    const wasNight = isNight(this.clock);
+    this.clock.turn++;
+    if (isNight(this.clock) !== wasNight) {
+      // Oxygenic photosynthesis stops but respiration does not, so the oxic
+      // zone thins overnight and the chemocline rises. Real, and measured.
+      this.note(isNight(this.clock)
+        ? "The light fails. Photosynthesis stops; the oxic zone begins to thin."
+        : "Light returns to the column. The phototrophs stir.");
+    }
     this.upkeep();
 
     const events = microbeTurn({
@@ -327,11 +421,13 @@ class Game {
         this.fx.add({ kind: "text", t0: this.now + 70, dur: 560, x: this.player.x,
                       y: this.player.y, text: `-${e.dmg ?? 0}`, colour: "#ff8a7a" });
         this.fx.shake(2.5, 180, this.now);
+        this.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
+                                   this.turnSeed + e.mob.y));
       } else if (e.kind === "charge") {
         // The wind-up is the warning. Ring the microbe that is about to fire.
         this.fx.add({ kind: "ring", t0: this.now, dur: 400, x: e.mob.x, y: e.mob.y,
                       colour: "#ffd166", r: 1.1 });
-        this.note(`${e.mob.name} is charging ${e.weapon ?? ""}.`);
+        this.note(say.chargeLine(e.mob.name, e.mob.weapon));
       } else if (e.kind === "fire") {
         const w = WEAPONS[e.mob.weapon];
         if (w.kind === "bolt" || w.kind === "spear") {
@@ -341,7 +437,8 @@ class Game {
                         to: e.at ?? { x: this.player.x, y: this.player.y } });
           this.fx.shake(w.kind === "spear" ? 5 : 3, 200, this.now);
         }
-        this.note(`${e.mob.name} fires ${e.weapon ?? ""}.`);
+        this.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
+                                  this.turnSeed + e.mob.x));
       } else if (e.kind === "status" && e.status) {
         this.note(`${e.mob.name}: ${STATUS[e.status].name}.`);
         this.fx.add({ kind: "ring", t0: this.now, dur: 420, x: this.player.x,
@@ -366,8 +463,106 @@ class Game {
     if (m) { this.attack(m); return false; }
     if (!this.level.grid.isFloor(x, y)) return false;
     this.player.x = x; this.player.y = y;
+    this.look();
+    this.onTile(x, y);
     this.mobTurn();
     return true;
+  }
+
+  /** Take one item. Substrates are metabolised on the spot; cassettes go to
+   *  the bin. Returns false if the bin had no room. */
+  private take(it: Item): boolean {
+    if (it.kind === "cassette") {
+      const r = this.genome.stash({ kind: "gene", id: it.gene, optimised: false });
+      if (!r.ok) { this.toasts.push(r.err, "warn", this.now); return false; }
+      recordLocus(this.run, it.gene);
+      this.note(say.pickupLine(it, 0, null));
+      return true;
+    }
+    const { atp, blocked } = yieldOf(it.id, (g) => this.genome.has(g));
+    this.player.atp = Math.min(this.player.atp + atp, this.player.atpMax);
+    this.note(say.pickupLine(it, atp, blocked));
+    if (atp > 0) {
+      this.fx.add({ kind: "text", t0: this.now, dur: 700, x: this.player.x,
+                    y: this.player.y, text: `+${String(atp)}`, colour: "#7fc4e8" });
+    }
+    return true;
+  }
+
+  /** What is on a tile, in words. */
+  private describeTile(x: number, y: number): void {
+    const s = this.level.sight;
+    if (!isSeen(s, x, y)) { this.note("You have not been there."); return; }
+    if (!isVisible(s, x, y)) { this.note("You remember the ground there."); return; }
+
+    const parts: string[] = [];
+    const mob = this.dungeon.mobAt(x, y);
+    if (mob) parts.push(`A ${mob.name}. ${mob.note}`);
+    const d = dropAt(this.drops, x, y);
+    if (d) {
+      parts.push(d.items.length === 1 && d.items[0]
+        ? `${itemName(d.items[0])} lies here.`
+        : `A lysate of ${String(d.items.length)} things lies here.`);
+    }
+    if (this.level.down?.x === x && this.level.down.y === y) {
+      parts.push("A way down into the next layer.");
+    }
+    if (x === this.level.up.x && y === this.level.up.y) parts.push("A way back up.");
+    if (parts.length > 0) this.note(parts.join(" "));
+  }
+
+  /** Light the level from where the player stands, and interrupt travel if
+   *  something new has come into view. DCSS does this and it is the single
+   *  thing that stops auto-travel walking you into a fight. */
+  private look(): void {
+    const s = this.level.sight;
+    // Bioluminescence is its own light source, and luciferase needs O2 -- so
+    // the glow only helps in the oxic zone, which is where you least need it.
+    const glow = this.genome.expression("luxAB", this.dungeon.depth) > 0 ? 2 : 0;
+    const lit = lightAt(this.level.stratum.light, this.clock);
+    computeFov(s, this.level.grid, this.player.x, this.player.y,
+               sightRadius(lit) + glow);
+
+    const nowVisible = new Set<string>();
+    for (const mob of this.level.mobs) {
+      if (!mob.alive) continue;
+      if (isVisible(s, mob.x, mob.y)) nowVisible.add(mob.id + String(mob.x) + String(mob.y));
+    }
+    for (const mob of this.level.mobs) {
+      if (!mob.alive || !isVisible(s, mob.x, mob.y)) continue;
+      const key = mob.id + String(mob.x) + String(mob.y);
+      if (this.spotted.has(key)) continue;
+      this.spotted.add(key);
+      if (this.walk) {
+        this.walk = null;
+        this.path = null;
+        this.note(`You stop. A ${mob.name} comes into view.`);
+        this.toasts.push(`${mob.name} in view.`, "warn", this.now);
+      }
+    }
+    // Forget anything no longer in sight, so re-entering a room re-alerts.
+    for (const k of [...this.spotted]) if (!nowVisible.has(k)) this.spotted.delete(k);
+  }
+
+  /** Called after the player lands on a tile. */
+  private onTile(x: number, y: number): void {
+    const room = roomAt(this.level.rooms, x, y);
+    if (room && room !== this.inRoom) {
+      this.inRoom = room;
+      this.note(`${ROOM_STYLE[room.kind].name}. ${ROOM_STYLE[room.kind].note}`);
+    } else if (!room) {
+      this.inRoom = null;
+    }
+    const d = dropAt(this.drops, x, y);
+    if (!d) return;
+    if (d.items.length === 1) {
+      const it = d.items[0];
+      if (it && this.take(it)) removeDrop(this.drops, d);
+      return;
+    }
+    // More than one: open it rather than swallowing it blind.
+    this.openDrop = d;
+    this.walk = null;
   }
 
   /** One turn of chasing. Returns true if anything happened. */
@@ -392,6 +587,16 @@ class Game {
     }
   }
 
+  /** The bottom of the column, with the last thing on it dead. */
+  win(): void {
+    if (this.won) return;
+    this.won = true;
+    this.run.deepest = MAX_FLOOR;
+    this.toasts.push("You have reached the bottom of the column.", "info", this.now);
+    this.note("Nothing below but carbonate and the glass. The column is yours.");
+    this.save();
+  }
+
   /** The run ends. The lineage keeps the loci it has had longest and starts
    *  again at the surface -- "resynthesized with some of the genes you
    *  acquired in the previous run". */
@@ -405,7 +610,7 @@ class Game {
       `Lysed at D${this.dungeon.depth}. ${kept.length}/${carried.length - 1} loci ` +
       `survived resynthesis.`, "warn", this.now);
 
-    this.dungeon = new Dungeon(110, 80, (Date.now() & 0xffff) ^ this.run.deaths);
+    this.dungeon = new Dungeon(96, 96, (Date.now() & 0xffff) ^ this.run.deaths);
     this.genome = new Plasmid();
     for (const g of kept) this.genome.stash({ kind: "gene", id: g, optimised: false });
     this.player.hp = this.player.maxhp;
@@ -415,6 +620,7 @@ class Game {
     this.autoAttack = false;
     this.packets.length = 0;
     this.clouds.length = 0;
+    this.drops.length = 0;
     this.enter(this.dungeon.current(), this.dungeon.current().up);
     this.note(`Resynthesised. Deepest so far: D${this.run.deepest}.`);
     this.save();
@@ -445,6 +651,8 @@ class Game {
       if (this.takeTurn()) return;
       return;
     }
+    // Examine before travelling: say what is there, the way a roguelike does.
+    this.describeTile(tx, ty);
     this.target = null;
     this.cursor = { x: tx, y: ty };
     this.repath();
@@ -548,6 +756,7 @@ class Game {
     const data = {
       version: SCHEMA,
       depth: this.dungeon.depth,
+      floor: this.dungeon.floor,
       seed: this.dungeon.seed,
       px: this.player.x,
       py: this.player.y,
@@ -565,8 +774,8 @@ class Game {
 
   /** Load a parsed save into live state. Shared by slot loading and boot. */
   applySave(s: SaveData): void {
-    this.dungeon = new Dungeon(110, 80, s.seed);
-    this.dungeon.depth = s.depth;
+    this.dungeon = new Dungeon(96, 96, s.seed);
+    this.dungeon.floor = s.floor;
     this.genome = new Plasmid();
     s.ring.forEach((p, i) => { this.genome.put(i, p); });
     this.genome.bin.length = 0;
@@ -790,6 +999,7 @@ class Game {
     // construction rather than by hoping the two calls match.
     const wallPath = new Path2D();
     traceWalls(wallPath, this.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
+    const sight = this.level.sight;
 
     ctx.fillStyle = hc ? "#ffffff" : s.wall;
     ctx.save();
@@ -848,6 +1058,8 @@ class Game {
 
     for (const m of this.level.mobs) {
       if (!m.alive) continue;
+      // A remembered room is not knowledge of what is standing in it now.
+      if (!isVisible(sight, m.x, m.y)) continue;
       const f = Math.max(m.hp / m.maxhp, 0);
       const ml = lunges.get(m.id);
       const mx = ml?.x ?? 0, my = ml?.y ?? 0;
@@ -914,13 +1126,29 @@ class Game {
 
     // The highlight covers the whole body. Boxing one tile of a three-tile
     // filament reads as though you are aiming at a fragment of it.
+    const t = this.target;
+    if (t?.alive === true) {
+      const tb = boundsOf(SIZES[t.size].footprint, t.x, t.y, t.heading);
+      ctx.strokeStyle = "#ff3b30";
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(tb.minX * px, tb.minY * px,
+                     (tb.maxX - tb.minX + 1) * px, (tb.maxY - tb.minY + 1) * px);
+    }
     const under = this.dungeon.mobAt(this.cursor.x, this.cursor.y);
-    ctx.strokeStyle = hc ? "#ff0" : under ? "#ff9a7a" : this.path ? "#ffffff" : "#777777";
-    ctx.lineWidth = under !== undefined && under === this.target ? 3 : 2;
+    // Red means "this is what I am going to kill". Orange is merely hovered.
+    const isTarget = under !== undefined && under === this.target;
+    ctx.strokeStyle = hc ? "#ff0"
+      : isTarget ? "#ff3b30" : under ? "#ff9a7a" : this.path ? "#ffffff" : "#777777";
+    ctx.lineWidth = isTarget ? 3.5 : 2;
     if (under) {
       const b = boundsOf(SIZES[under.size].footprint, under.x, under.y, under.heading);
       ctx.strokeRect(b.minX * px, b.minY * px,
                      (b.maxX - b.minX + 1) * px, (b.maxY - b.minY + 1) * px);
+      if (isTarget) {
+        ctx.fillStyle = "rgba(255,59,48,0.14)";
+        ctx.fillRect(b.minX * px, b.minY * px,
+                     (b.maxX - b.minX + 1) * px, (b.maxY - b.minY + 1) * px);
+      }
     } else {
       ctx.strokeRect(this.cursor.x * px, this.cursor.y * px, px, px);
     }
@@ -945,11 +1173,56 @@ class Game {
       ctx.fill();
       ctx.globalAlpha = 1;
     }
+    // Rooms get a faint floor wash so a chamber reads as a place, but only
+    // where you have actually been.
+    for (const room of this.level.rooms) {
+      ctx.fillStyle = room.kind === "port" ? "rgba(120,200,255,0.07)"
+        : room.kind === "enrichment" ? "rgba(255,200,120,0.08)"
+        : room.kind === "mat" ? "rgba(220,190,90,0.07)"
+        : "rgba(255,255,255,0.035)";
+      for (const t of room.tiles) {
+        if (!isSeen(sight, t.x, t.y)) continue;
+        ctx.fillRect(t.x * px, t.y * px, px + 1, px + 1);
+      }
+    }
+
+    // Loot on the floor: a lozenge per tile, marked when it is a pile.
+    for (const d of this.drops) {
+      const it = d.items[0];
+      if (!it) continue;
+      if (!isVisible(sight, d.x, d.y)) continue;      // loot is not remembered
+      const cx = (d.x + 0.5) * px, cy = (d.y + 0.5) * px;
+      ctx.fillStyle = itemColour(it);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, px * 0.2, px * 0.14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.lineWidth = Math.max(px * 0.02, 1);
+      ctx.stroke();
+      if (d.items.length > 1) {
+        ctx.fillStyle = "#0f1512";
+        ctx.font = `bold ${px * 0.22}px ui-monospace,monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(d.items.length), cx, cy);
+      }
+    }
+    // The fog. Unseen is black, remembered is dimmed, lit is untouched.
+    if (!hc) {
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          if (isVisible(sight, x, y)) continue;
+          ctx.fillStyle = isSeen(sight, x, y) ? "rgba(2,4,4,0.62)" : "#020404";
+          ctx.fillRect(x * px, y * px, px + 1, px + 1);
+        }
+      }
+    }
     this.drawFx(px);
     ctx.restore();
 
     this.drawScreenFx(W, H);
     this.drawHud(W, H);
+    if (this.openDrop) this.drawContainer(W, H);
     this.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
     if (this.showNotes) {
@@ -1078,6 +1351,8 @@ class Game {
     // The column gauge: eight bands in their stratum colours, your depth
     // marked. The game's structure, drawn literally.
     const gaugeW = drawColumn(ctx, L, this.dungeon.depth);
+    // A sealed floor must say so, or the blocked stair reads as a bug.
+    const sealed = !Dungeon.isCleared(this.level);
     const upBtn = this.buttons.find((b) => b.id === "up");
     const downBtn = this.buttons.find((b) => b.id === "down");
     if (upBtn) upBtn.enabled = this.dungeon.depth > 1;
@@ -1100,7 +1375,7 @@ class Game {
     ctx.fillStyle = s.accent;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText(`${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV`,
+    ctx.fillText(`F${this.dungeon.floor}/${MAX_FLOOR}${sealed ? " \u26D4" : ""} ${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV  ${timeName(this.clock)}`,
                  barX, barTop + lh * 0.9);
 
     // One row: hp gauge, then plain readouts. A miniature plasmid ring used to
@@ -1182,7 +1457,8 @@ class Game {
     };
 
     drawRing(ctx, this.ring, this.genome, {
-      depth: this.dungeon.depth, dragFrom: this.dragFrom,
+      depth: this.dungeon.depth,
+      dragFrom: this.dragFrom,
       dragXY: this.dragXY, selected: this.selected, u,
     });
 
@@ -1268,6 +1544,21 @@ class Game {
   }
 
   pointerDown(x: number, y: number): void {
+    if (this.openDrop) {
+      const i = this.dropBoxes.findIndex((b) => inBoxOf(b, x, y));
+      if (i >= 0) {
+        const d = this.openDrop;
+        const it = d.items[i];
+        if (it && this.take(it)) {
+          d.items.splice(i, 1);
+          if (d.items.length === 0) { removeDrop(this.drops, d); this.openDrop = null; }
+        }
+      } else {
+        this.openDrop = null;
+      }
+      this.gesture = "none";
+      return;
+    }
     if (this.showSplash || !this.started) {
       const i = this.slotBoxes.findIndex(
         (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
@@ -1374,6 +1665,16 @@ class Game {
           if (target !== null) {                       // bin -> ring
             const r = this.genome.install(this.dragBin, target);
             if (r.ok) { this.selected = target; this.save(); } else this.note(r.err);
+          } else if (y > this.bin.y + this.bin.cell * 2.4) {
+            // Dragged below the bin: thrown away. The bin is finite, and a
+            // cassette you will never express is just burden.
+            const part = this.genome.bin[this.dragBin];
+            if (part) {
+              this.genome.bin.splice(this.dragBin, 1);
+              const what = part.kind === "gene" ? bio.GENES[part.id].name : part.kind;
+              this.toasts.push(`Discarded ${what}.`, "info", this.now);
+              this.save();
+            }
           }
         } else if (this.dragFrom !== null) {
           if (binAt(this.bin, this.genome.bin.length + 1, x, y) !== null) {
@@ -1495,7 +1796,7 @@ class Game {
       this.applySave(existing);
       this.note(`Resumed ${this.runName}.`);
     } else {
-      this.dungeon = new Dungeon(110, 80, (Date.now() & 0xffff) + slot);
+      this.dungeon = new Dungeon(96, 96, (Date.now() & 0xffff) + slot);
       this.genome = new Plasmid();
       this.run = newRun();          // a new culture has seen nothing
       this.player.hp = this.player.maxhp;
@@ -1571,6 +1872,76 @@ class Game {
     }
   }
 
+  /** A lysate opened: its contents as slots, like any RPG container. */
+  drawContainer(W: number, H: number): void {
+    const { ctx } = this;
+    const d = this.openDrop;
+    if (!d) return;
+    const ins = this.insets();
+    const u = Math.max(Math.min(W, H) / 420, 1);
+
+    ctx.fillStyle = "rgba(4,7,6,0.86)";
+    ctx.fillRect(0, 0, W, H);
+
+    const cols = 4;
+    const cell = Math.max(Math.min((W - ins.left - ins.right - 60 * u) / cols, 74 * u), 52);
+    const gap = 10 * u;
+    const rows = Math.ceil(d.items.length / cols);
+    const panelW = cols * cell + (cols - 1) * gap + 28 * u;
+    const panelH = rows * (cell + gap) + 96 * u;
+    const px0 = (W - panelW) / 2;
+    const py0 = (H - panelH) / 2;
+
+    ctx.fillStyle = "rgba(14,22,18,0.97)";
+    ctx.strokeStyle = "#5ec98a";
+    ctx.lineWidth = Math.max(1.6 * u, 1.5);
+    ctx.beginPath();
+    ctx.roundRect(px0, py0, panelW, panelH, 10 * u);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${13 * u}px ui-monospace,monospace`;
+    ctx.fillText("LYSATE", px0 + 14 * u, py0 + 26 * u);
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.fillText("tap to take · tap outside to leave it", px0 + 14 * u, py0 + 42 * u);
+
+    this.dropBoxes = [];
+    d.items.forEach((it, i) => {
+      const c = i % cols, r = Math.floor(i / cols);
+      const bx = px0 + 14 * u + c * (cell + gap);
+      const by = py0 + 58 * u + r * (cell + gap);
+      this.dropBoxes.push({ x: bx, y: by, w: cell, h: cell });
+
+      ctx.fillStyle = itemColour(it);
+      ctx.beginPath();
+      ctx.roundRect(bx, by, cell, cell, cell * 0.2);
+      ctx.fill();
+      ctx.fillStyle = "#0f1512";
+      ctx.font = `${Math.max(cell * 0.19, 9)}px ui-monospace,monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(itemName(it), bx + cell / 2, by + cell / 2 - cell * 0.06);
+      ctx.font = `${Math.max(cell * 0.14, 7)}px ui-monospace,monospace`;
+      ctx.fillText(it.kind === "cassette" ? "cassette" : SUBSTRATES[it.id].formula,
+                   bx + cell / 2, by + cell / 2 + cell * 0.16);
+    });
+
+    const first = d.items[0];
+    if (first) {
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = "#8fa89a";
+      ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+      const y = py0 + panelH - 22 * u;
+      this.wrap(itemNote(first), panelW - 28 * u).slice(0, 2)
+        .forEach((l, i) => { ctx.fillText(l, px0 + 14 * u, y + i * 12 * u); });
+    }
+  }
+
   drawMapScreen(W: number, H: number): void {
     const { ctx } = this;
     const ins = this.insets();
@@ -1639,6 +2010,13 @@ class Game {
       case "map":
         this.showMap = !this.showMap;
         if (this.showMap) { this.openPlasmid(false); this.showNotes = false; }
+        break;
+      case "wait":
+        // Passing a turn is a real move in a turn-based game: regeneration,
+        // ATP and every microbe all advance.
+        this.note("You hold position.");
+        this.mobTurn();
+        this.look();
         break;
       case "notes":
         this.showNotes = !this.showNotes;

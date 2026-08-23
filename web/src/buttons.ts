@@ -17,6 +17,7 @@ export function makeButtons(): Button[] {
     b("plasmid", "\u25CE", "plasmid"),
     b("map", "\u229E", "pathway map"),
     b("auto", "\u2694", "auto-attack"),
+    b("wait", "\u23F8", "wait a turn"),
     b("notes", "\u270E", "field notebook"),
     b("down", "\u25BC", "descend"),
     b("up", "\u25B2", "ascend"),

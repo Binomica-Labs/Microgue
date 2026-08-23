@@ -39,11 +39,26 @@ export function fitView(w: number, h: number, pad = 60): View {
 export function clampView(v: View, w: number, h: number): View {
   const b = graphBounds();
   const scale = Math.min(Math.max(v.scale, 0.35), 2.5);
-  const margin = 260;
+  const margin = 220;
+
+  // When the viewport is larger than the content on an axis, the two clamp
+  // bounds CROSS and min/max forces the view to an extreme. On a portrait
+  // phone that dropped the whole graph 1500px down the screen. Centre it
+  // instead: there is nothing to pan to on an axis that already fits.
+  const axis = (
+    val: number, lo: number, hi: number, span: number, viewport: number,
+  ): number => {
+    const visible = viewport / scale;
+    if (visible >= span) return lo + span / 2 - visible / 2;   // centred
+    return Math.min(Math.max(val, lo), hi - visible);
+  };
+
   return {
     scale,
-    x: Math.min(Math.max(v.x, b.minX - margin), b.maxX + margin - w / scale),
-    y: Math.min(Math.max(v.y, b.minY - margin), b.maxY + margin - h / scale),
+    x: axis(v.x, b.minX - margin, b.maxX + margin,
+            b.maxX - b.minX + margin * 2, w),
+    y: axis(v.y, b.minY - margin, b.maxY + margin,
+            b.maxY - b.minY + margin * 2, h),
   };
 }
 

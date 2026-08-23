@@ -18,11 +18,13 @@ export interface Settings {
 /** Bump when the shape changes incompatibly. A save from an older schema is
  *  discarded rather than half-loaded: `version` was being written and never
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
-export const SCHEMA = 4;
+export const SCHEMA = 5;
 
 export interface SaveData {
   readonly version: number;
   readonly depth: number;
+  /** Floor within the column, 1..MAX_FLOOR. */
+  readonly floor: number;
   readonly seed: number;
   readonly px: number;
   readonly py: number;
@@ -144,6 +146,7 @@ export function parseSave(raw: unknown): SaveData | null {
   return {
     version: SCHEMA,
     depth: Math.min(Math.max(depth, 1), MAX_DEPTH),
+    floor: Math.min(Math.max(num(raw["floor"], 1), 1), MAX_DEPTH * 3),
     seed: Math.round(num(raw["seed"], 7)),
     px: Math.round(px),
     py: Math.round(py),

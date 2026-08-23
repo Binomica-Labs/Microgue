@@ -48,6 +48,7 @@ export const SOURCES: Partial<Record<GeneId, Source>> = {
   aprA: { query: 'aprA[Gene] AND "Desulfovibrio vulgaris"[Organism]', organism: "Desulfovibrio vulgaris Hildenborough" },
   dsrA: { query: 'dsrA[Gene] AND "Desulfovibrio vulgaris"[Organism]', organism: "Desulfovibrio vulgaris Hildenborough" },
   hydA: { query: 'hydA[Gene] AND "Desulfovibrio vulgaris"[Organism]', organism: "Desulfovibrio vulgaris Hildenborough" },
+  luxAB: { query: 'luxA[Gene] AND "Aliivibrio fischeri"[Organism]', organism: "Aliivibrio fischeri" },
   mcrA: { query: 'mcrA[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   hdrB: { query: 'hdrB[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   // oriV is a design element, not a locus. It has no NCBI record and must not

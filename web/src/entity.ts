@@ -43,6 +43,9 @@ export interface Microbe extends Body {
   readonly size: Size;
   readonly weapon: WeaponKind;
   atk: number;
+  /** Part of what holds a boss floor. The way down stays sealed while any
+   *  elite is alive, which is what makes a boss a gate rather than scenery. */
+  elite: boolean;
   /** Turns until it may fire again, and how long it has been winding up. */
   reload: number;
   charging: number;

@@ -25,7 +25,7 @@ export type GeneId =
   | "psbA" | "cbbL" | "katG" | "amoA" | "narG" | "nosZ" | "nifH"
   | "soxB" | "sqr"  | "mtrC" | "omcS" | "pufM" | "fmoA" | "csmA"
   | "aclB" | "dsrA" | "aprA" | "hydA" | "mcrA" | "hdrB" | "ori"
-  | "nirS" | "norB" | "sat" | "nxrA";
+  | "nirS" | "norB" | "sat" | "nxrA" | "luxAB";
 
 export type Teap = "O2" | "NO3-" | "Mn(IV)" | "Fe(III)" | "S0" | "H2S" | "SO4" | "CO2";
 
@@ -66,6 +66,7 @@ export const GENES: Readonly<Record<GeneId, Gene>> = {
   norB: { id:"norB", name:"norB", kb:1.4, product:"nitric oxide reductase B",        tier:2, desc:"NO to N2O. Clears a radical that would otherwise kill you.", pathway:"nitrogen" },
   sat:  { id:"sat",  name:"sat",  kb:1.2, product:"ATP sulfurylase",                 tier:3, desc:"Activates sulfate to APS. Nothing downstream runs without it.", pathway:"sulfur" },
   nxrA: { id:"nxrA", name:"nxrA", kb:3.4, product:"nitrite oxidoreductase alpha",   tier:2, desc:"NO2- to NO3-. A nitrate reductase running the other way.", pathway:"nitrogen" },
+  luxAB: { id:"luxAB", name:"luxAB", kb:2.1, product:"bacterial luciferase", tier:2, desc:"Emits blue-green light. Luciferase is an oxygenase: no O2, no glow.", pathway:"defense" },
   ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates.", pathway:"core" },
 };
 
@@ -90,8 +91,8 @@ export interface Microbe {
 }
 
 export const MICROBES: readonly Microbe[] = [
-  { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" , weapon:"melee" },
-  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
+  { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL","luxAB"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" , weapon:"melee" },
+  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG","luxAB"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" , facing:"rotate" , behaviour:"glide", size:"medium" , weapon:"melee" },
   { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["nxrA"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
@@ -129,14 +130,14 @@ export interface Stratum {
 }
 
 export const STRATA: readonly Stratum[] = [
-  { depth:1, name:"Oxic water column",  teap:"O2",      e0: 820, light:1.00, wall:"#6ec78d", floor:"#050d0a", accent:"#d8ffe8", hatch:0, density:0.38, passes:4, blurb:"Sunlit, oxygen-saturated. Everything here burns you slowly.", donor:"H2O", donorFrom:"photolysis" },
-  { depth:2, name:"Sediment interface", teap:"NO3-",    e0: 430, light:0.70, wall:"#8cb86b", floor:"#0a0c06", accent:"#e6ffc9", hatch:1, density:0.4, passes:4, blurb:"Oxygen is running out. Nitrate takes over as acceptor.", donor:"organic C", donorFrom:"sinking biomass from D1" },
-  { depth:3, name:"Suboxic Mn/S front", teap:"Mn(IV)",  e0: 400, light:0.42, wall:"#c7bd6e", floor:"#0d0b06", accent:"#fff4c2", hatch:1, density:0.41, passes:5, blurb:"The O2/H2S interface. Beggiatoa mats hold the boundary.", donor:"H2S", donorFrom:"sulfide rising from D7" },
-  { depth:4, name:"Ferruginous zone",   teap:"Fe(III)", e0:   0, light:0.22, wall:"#c26b41", floor:"#0f0703", accent:"#ffcaa8", hatch:2, density:0.42, passes:5, blurb:"Rust. Fe(III) minerals respired by contact and by wire.", donor:"organic C", donorFrom:"sinking biomass" },
-  { depth:5, name:"Purple sulfur band", teap:"S0",      e0:-120, light:0.12, wall:"#a4529c", floor:"#0c050c", accent:"#f0c2ec", hatch:2, density:0.43, passes:5, blurb:"Anoxygenic photosynthesis. Sulfide is the donor now.", donor:"H2S", donorFrom:"sulfide rising from D7" },
-  { depth:6, name:"Green sulfur band",  teap:"H2S",     e0:-180, light:0.05, wall:"#4da767", floor:"#050b07", accent:"#c4f0d2", hatch:3, density:0.44, passes:6, blurb:"Almost no light reaches here. Chlorosomes catch what does.", donor:"H2S", donorFrom:"sulfide rising from D7" },
-  { depth:7, name:"Sulfidogenic black", teap:"SO4",     e0:-220, light:0.01, wall:"#6b6875", floor:"#060608", accent:"#ccc8d8", hatch:3, density:0.45, passes:6, blurb:"FeS precipitate. Sulfide everywhere. The column's black floor.", donor:"H2 / acetate", donorFrom:"fermentation above" },
-  { depth:8, name:"Methanogenic floor", teap:"CO2",     e0:-240, light:0.00, wall:"#8a7a52", floor:"#080602", accent:"#ffe9b0", hatch:3, density:0.47, passes:6, blurb:"The last acceptor. Nothing below is left to reduce.", donor:"H2", donorFrom:"fermentation above" },
+  { depth:1, name:"Oxic water column",  teap:"O2",      e0: 820, light:1.00, wall:"#6ec78d", floor:"#050d0a", accent:"#d8ffe8", hatch:0, density:0.5, passes:4, blurb:"Sunlit, oxygen-saturated. Everything here burns you slowly.", donor:"H2O", donorFrom:"photolysis" },
+  { depth:2, name:"Sediment interface", teap:"NO3-",    e0: 430, light:0.70, wall:"#8cb86b", floor:"#0a0c06", accent:"#e6ffc9", hatch:1, density:0.53, passes:4, blurb:"Oxygen is running out. Nitrate takes over as acceptor.", donor:"organic C", donorFrom:"sinking biomass from D1" },
+  { depth:3, name:"Suboxic Mn/S front", teap:"Mn(IV)",  e0: 400, light:0.42, wall:"#c7bd6e", floor:"#0d0b06", accent:"#fff4c2", hatch:1, density:0.55, passes:5, blurb:"The O2/H2S interface. Beggiatoa mats hold the boundary.", donor:"H2S", donorFrom:"sulfide rising from D7" },
+  { depth:4, name:"Ferruginous zone",   teap:"Fe(III)", e0:   0, light:0.22, wall:"#c26b41", floor:"#0f0703", accent:"#ffcaa8", hatch:2, density:0.57, passes:5, blurb:"Rust. Fe(III) minerals respired by contact and by wire.", donor:"organic C", donorFrom:"sinking biomass" },
+  { depth:5, name:"Purple sulfur band", teap:"S0",      e0:-120, light:0.12, wall:"#a4529c", floor:"#0c050c", accent:"#f0c2ec", hatch:2, density:0.58, passes:5, blurb:"Anoxygenic photosynthesis. Sulfide is the donor now.", donor:"H2S", donorFrom:"sulfide rising from D7" },
+  { depth:6, name:"Green sulfur band",  teap:"H2S",     e0:-180, light:0.05, wall:"#4da767", floor:"#050b07", accent:"#c4f0d2", hatch:3, density:0.6, passes:6, blurb:"Almost no light reaches here. Chlorosomes catch what does.", donor:"H2S", donorFrom:"sulfide rising from D7" },
+  { depth:7, name:"Sulfidogenic black", teap:"SO4",     e0:-220, light:0.01, wall:"#6b6875", floor:"#060608", accent:"#ccc8d8", hatch:3, density:0.61, passes:6, blurb:"FeS precipitate. Sulfide everywhere. The column's black floor.", donor:"H2 / acetate", donorFrom:"fermentation above" },
+  { depth:8, name:"Methanogenic floor", teap:"CO2",     e0:-240, light:0.00, wall:"#8a7a52", floor:"#080602", accent:"#ffe9b0", hatch:3, density:0.63, passes:6, blurb:"The last acceptor. Nothing below is left to reduce.", donor:"H2", donorFrom:"fermentation above" },
 ];
 
 export const MAX_DEPTH = STRATA.length;
