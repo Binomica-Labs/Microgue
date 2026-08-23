@@ -4,6 +4,7 @@
 
 import { MORPHOLOGY, type Role, type Shape } from "./shapes.js";
 import { PIXELS, PX_SIZE } from "./pixels.js";
+import type { Facing, Squash } from "./motion.js";
 
 export interface Palette { body: string; dark: string; accent: string; hi: string; }
 
@@ -268,5 +269,41 @@ export function paintWallMotif(
     }
     default: break;
   }
+  ctx.restore();
+}
+
+
+/**
+ * Draw a body with facing and squash applied.
+ *
+ * The sprite is authored pointing NORTH, so a heading of 0 (east) needs a
+ * quarter turn. Squash acts along the body's own forward axis after rotation,
+ * which is what makes a cell look like it is launching rather than just
+ * getting wider.
+ */
+export function drawBody(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  cx: number, cy: number, size: number,
+  facing: Facing, heading: number | null, squash: Squash,
+  alpha = 1,
+): void {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(cx, cy);
+
+  if (facing === "rotate" && heading !== null) {
+    ctx.rotate(heading + Math.PI / 2);
+    ctx.scale(squash.sy, squash.sx);          // stretch along local forward
+  } else if (facing === "flip") {
+    if (heading !== null && Math.cos(heading) < 0) ctx.scale(-1, 1);
+    ctx.scale(squash.sx, squash.sy);
+  } else {
+    // No long axis, or anchored. A gentle bob only.
+    ctx.scale(1 + (squash.sx - 1) * 0.35, 1 + (squash.sy - 1) * 0.35);
+  }
+
+  ctx.drawImage(img, -size / 2, -size / 2, size, size);
   ctx.restore();
 }

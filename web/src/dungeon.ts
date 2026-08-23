@@ -2,6 +2,9 @@
 // parameters, cached so climbing back finds the same level.
 
 import { MAX_DEPTH, microbesAt, stratum, type GeneId, type Stratum } from "./biology.js";
+import type { Facing } from "./motion.js";
+import { SIZES, type Behaviour, type Size } from "./behaviour.js";
+import type { Status } from "./status.js";
 import * as mg from "./mapgen.js";
 import type { Grid, Point } from "./mapgen.js";
 import { makeRng, type Rng } from "./rng.js";
@@ -10,6 +13,11 @@ export interface Mob {
   id: string; name: string; glyph: string;
   x: number; y: number; hp: number; maxhp: number; atk: number;
   genes: readonly GeneId[]; note: string; pigment: string; alive: boolean;
+  facing: Facing; heading: number | null;
+  ax: number; ay: number;          // drawn position, eased toward x,y
+  behaviour: Behaviour; size: Size;
+  cooldown: number;                // turns until it may act again
+  status: Status[];
 }
 
 export interface Level {
@@ -72,8 +80,12 @@ export class Dungeon {
       const p = rng.pick(pool);
       lvl.mobs.push({
         id: p.id, name: p.name, glyph: p.glyph, x, y,
-        hp: p.hp, maxhp: p.hp, atk: p.atk, genes: p.genes, note: p.note,
+        hp: Math.round(p.hp * SIZES[p.size].hp),
+        maxhp: Math.round(p.hp * SIZES[p.size].hp), atk: p.atk, genes: p.genes, note: p.note,
         pigment: p.pigment, alive: true,
+        facing: p.facing, heading: null, ax: x, ay: y,
+        behaviour: p.behaviour, size: p.size,
+        cooldown: 0, status: [],
       });
     }
   }

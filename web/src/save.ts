@@ -18,7 +18,7 @@ export interface Settings {
 /** Bump when the shape changes incompatibly. A save from an older schema is
  *  discarded rather than half-loaded: `version` was being written and never
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
-export const SCHEMA = 2;
+export const SCHEMA = 3;
 
 export interface SaveData {
   readonly version: number;
@@ -27,6 +27,7 @@ export interface SaveData {
   readonly px: number;
   readonly py: number;
   readonly hp: number;
+  readonly atp: number;
   readonly ring: readonly (Part | null)[];
   readonly bin: readonly Part[];
   readonly settings: Settings;
@@ -126,6 +127,7 @@ export function parseSave(raw: unknown): SaveData | null {
     px: Math.round(px),
     py: Math.round(py),
     hp: Math.max(num(raw["hp"], 30), 1),
+    atp: Math.min(Math.max(num(raw["atp"], 100), 0), 100),
     ring: parseRing(raw["ring"]),
     bin: parseBin(raw["bin"]),
     settings: parseSettings(raw["settings"]),

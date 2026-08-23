@@ -3,7 +3,7 @@
 
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
-import { Plasmid } from "./plasmid.js";
+import { ATP_MAX, BIN_CAP, Plasmid } from "./plasmid.js";
 import { binAt, drawBin, drawRing, describe as describeSlot, slotAt,
          type BinGeom, type RingGeom } from "./plasmid_ui.js";
 import { buttonAt, drawButtons, layoutButtons, makeButtons, type Button } from "./buttons.js";
@@ -14,11 +14,20 @@ import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { findPath } from "./path.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
-import { paintWallMotif, paletteForPigment, playerSprite, sprite } from "./paint.js";
+import { drawBody, paintWallMotif, paletteForPigment, playerSprite, sprite }
+  from "./paint.js";
 import { traceWalls } from "./walls.js";
 import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad,
          jitter, lungeOffset } from "./fx.js";
-import { DEFAULT_SETTINGS, SCHEMA, readSave, writeSave, type Settings } from "./save.js";
+import { headingOf, squashFor, travel, turnToward, wake } from "./motion.js";
+import { microbeTurn } from "./combat.js";
+import { SIZES } from "./behaviour.js";
+import { STATUS, tick as tickStatus, type Status } from "./status.js";
+import { NAME_POOL, SLOTS as SAVE_SLOTS, listSlots, loadSlot, migrateLegacy,
+         saveSlot } from "./saves.js";
+import { makeRng } from "./rng.js";
+import { DEFAULT_SETTINGS, SCHEMA, readSave, writeSave,
+         type SaveData, type Settings } from "./save.js";
 
 const TILE = 32;
 const SAVE_KEY = "microgue:v1";
@@ -29,7 +38,10 @@ class Game {
   dungeon = new Dungeon(110, 80, 7);
   genome = new Plasmid();
   level!: Level;
-  player = { x: 0, y: 0, ax: 0, ay: 0, hp: 30, maxhp: 30, speed: 18 };
+  player = { x: 0, y: 0, ax: 0, ay: 0, hp: 30, maxhp: 30, speed: 18,
+             heading: -Math.PI / 2 as number | null,
+             atp: ATP_MAX, atpMax: ATP_MAX,
+             status: [] as Status[] };
   cursor: Point = { x: 0, y: 0 };
   path: Point[] | null = null;
   walk: { nodes: Point[]; i: number } | null = null;
@@ -48,6 +60,8 @@ class Game {
   dragBin: number | null = null;
   bin: BinGeom = { x: 0, y: 0, cell: 0, gap: 0, cols: 6 };
   showMap = false;
+  showSplash = true;
+  slotBoxes: { x: number; y: number; w: number; h: number }[] = [];
   view: View | null = null;
   boxes: ModuleBox[] = moduleBoxes();
   panFrom: { x: number; y: number } | null = null;
@@ -61,6 +75,9 @@ class Game {
   settings: Settings = DEFAULT_SETTINGS;
   private last = 0;
   fx = new Effects();
+  turnSeed = 1;
+  slot = 0;
+  runName = "SP162";
   now = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -68,7 +85,8 @@ class Game {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("2D canvas context unavailable");
     this.ctx = ctx;
-    if (!this.load()) this.enter(this.dungeon.current(), this.dungeon.current().up);
+    // The splash decides what to load, so boot does not.
+    migrateLegacy();
     this.resize();
     addEventListener("resize", () => { this.resize(); });
     this.bindInput();
@@ -119,6 +137,22 @@ class Game {
    *  sulfide aura burns anything adjacent. */
   private upkeep(): void {
     const d = this.dungeon.depth;
+
+    // Energy first: everything below depends on what the pool can supply.
+    const gain = this.genome.atpGain(d);
+    const cost = this.genome.atpCost(d);
+    this.player.atp = Math.min(this.player.atp + gain, this.player.atpMax);
+    if (cost <= this.player.atp) {
+      this.player.atp -= cost;
+      this.genome.supply = 1;
+    } else {
+      // Brownout: you cannot power the proteome you are carrying.
+      this.genome.supply = this.player.atp / Math.max(cost, 0.001);
+      this.player.atp = 0;
+      if (Math.random() < 0.15) {
+        this.note(`ATP exhausted — expression at ${(this.genome.supply * 100) | 0}%.`);
+      }
+    }
     const tox = this.genome.toxicity(d);
     if (tox > 0) {
       this.player.hp = Math.max(this.player.hp - tox, 0);
@@ -206,34 +240,49 @@ class Game {
 
   mobTurn(): void {
     this.upkeep();
-    for (const m of this.level.mobs) {
-      if (!m.alive) continue;
-      const dx = this.player.x - m.x, dy = this.player.y - m.y;
-      if (dx * dx + dy * dy > 64) continue;
-      if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
-        const inc = Math.max(
-          Math.round(m.atk * 0.35 * this.genome.armour(this.dungeon.depth)), 1);
-        this.player.hp = Math.max(this.player.hp - inc, 0);
-        this.fx.add({ kind: "lunge", t0: this.now, dur: 210, who: m.id,
-                      from: { x: m.x, y: m.y }, to: { x: this.player.x, y: this.player.y } });
+
+    const events = microbeTurn({
+      grid: this.level.grid,
+      mobs: this.level.mobs,
+      player: this.player,
+      rng: makeRng(this.turnSeed++),
+      armour: this.genome.armour(this.dungeon.depth),
+    });
+
+    for (const e of events) {
+      if (e.kind === "strike") {
+        this.fx.add({ kind: "lunge", t0: this.now, dur: 210, who: e.mob.id,
+                      from: { x: e.mob.x, y: e.mob.y },
+                      to: { x: this.player.x, y: this.player.y } });
         this.fx.add({ kind: "flash", t0: this.now + 70, dur: 140,
                       x: this.player.x, y: this.player.y, colour: "#ff6a5a" });
         this.fx.add({ kind: "text", t0: this.now + 70, dur: 560, x: this.player.x,
-                      y: this.player.y, text: `-${inc}`, colour: "#ff8a7a" });
+                      y: this.player.y, text: `-${e.dmg ?? 0}`, colour: "#ff8a7a" });
         this.fx.shake(2.5, 180, this.now);
-        continue;
-      }
-      const sx = Math.sign(dx), sy = Math.sign(dy);
-      if (this.level.grid.isFloor(m.x + sx, m.y + sy) && !this.dungeon.mobAt(m.x + sx, m.y + sy)) {
-        m.x += sx; m.y += sy;
+      } else if (e.kind === "status" && e.status) {
+        this.note(`${e.mob.name}: ${STATUS[e.status].name}.`);
+        this.fx.add({ kind: "ring", t0: this.now, dur: 420, x: this.player.x,
+                      y: this.player.y, colour: "#c8a0ff", r: 1.2 });
       }
     }
+
+    // The player's own afflictions resolve here too.
+    const selfDmg = tickStatus(this.player.status);
+    if (selfDmg > 0) {
+      this.player.hp = Math.max(this.player.hp - selfDmg, 0);
+      this.fx.add({ kind: "text", t0: this.now, dur: 700, x: this.player.x,
+                    y: this.player.y, text: `-${selfDmg}`, colour: "#c8a0ff" });
+    }
+
     if (this.player.hp <= 0) {
       this.player.hp = this.player.maxhp;
+      this.player.status.length = 0;
       this.note("Lysed. Reassembled at the last stair.");
-      this.player.x = this.level.up.x; this.player.y = this.level.up.y;
-      this.player.ax = this.player.x; this.player.ay = this.player.y;
+      const u = this.level.up;
+      this.player.x = u.x; this.player.y = u.y;
+      this.player.ax = u.x; this.player.ay = u.y;
     }
+    this.save();
   }
 
   step(x: number, y: number): boolean {
@@ -354,22 +403,25 @@ class Game {
 
   // ------------------------------------------------------------ persist
   save(): void {
-    writeSave(SAVE_KEY, {
+    if (this.showSplash) return;
+    const data = {
       version: SCHEMA,
       depth: this.dungeon.depth,
       seed: this.dungeon.seed,
       px: this.player.x,
       py: this.player.y,
       hp: this.player.hp,
+      atp: this.player.atp,
       ring: this.genome.slots.map((p) => (p === null ? null : { ...p })),
       bin: this.genome.bin.map((p) => ({ ...p })),
       settings: this.settings,
-    });
+    };
+    writeSave(SAVE_KEY, data);
+    saveSlot(this.slot, this.runName, data, this.genome.carried().size);
   }
 
-  load(): boolean {
-    const s = readSave(SAVE_KEY);
-    if (s === null) return false;
+  /** Load a parsed save into live state. Shared by slot loading and boot. */
+  applySave(s: SaveData): void {
     this.dungeon = new Dungeon(110, 80, s.seed);
     this.dungeon.depth = s.depth;
     this.genome = new Plasmid();
@@ -379,6 +431,14 @@ class Game {
     this.settings = s.settings;
     this.enter(this.dungeon.current(), { x: s.px, y: s.py });
     this.player.hp = s.hp;
+    this.player.atp = s.atp;
+  }
+
+  load(): boolean {
+    migrateLegacy();
+    const s = readSave(SAVE_KEY);
+    if (s === null) return false;
+    this.applySave(s);
     return true;
   }
 
@@ -468,6 +528,26 @@ class Game {
     const k = this.settings.reduceMotion ? 1 : Math.min(this.player.speed * dt, 1);
     this.player.ax += (this.player.x - this.player.ax) * k;
     this.player.ay += (this.player.y - this.player.ay) * k;
+    // Face the way you are actually travelling, easing round the short way.
+    const TURN = 14;                              // radians per second
+    const ph = headingOf(this.player.x - this.player.ax, this.player.y - this.player.ay);
+    if (ph !== null) {
+      this.player.heading = this.player.heading === null
+        ? ph : turnToward(this.player.heading, ph, TURN * dt);
+    }
+    for (const m of this.level.mobs) {
+      if (!m.alive) continue;
+      const mk = Math.min(11 * dt, 1);        // microbes glide a touch slower
+      m.ax += (m.x - m.ax) * mk;
+      m.ay += (m.y - m.ay) * mk;
+      if (Math.abs(m.x - m.ax) < 0.02) m.ax = m.x;
+      if (Math.abs(m.y - m.ay) < 0.02) m.ay = m.y;
+      const mh = headingOf(m.x - m.ax, m.y - m.ay);
+      if (mh !== null) {
+        m.heading = m.heading === null ? mh : turnToward(m.heading, mh, TURN * dt);
+      }
+    }
+
     const at = Math.abs(this.player.x - this.player.ax) < 0.02
             && Math.abs(this.player.y - this.player.ay) < 0.02;
     if (at) { this.player.ax = this.player.x; this.player.ay = this.player.y; }
@@ -570,9 +650,18 @@ class Game {
           mx += o.x; my += o.y;
         }
       }
-      const img = hc ? null : sprite(m.id, px * 0.92, paletteForPigment(m.pigment));
+      // Size is real: Synechococcus is about 1 um, a Beggiatoa filament 200.
+      const scale = SIZES[m.size].scale;
+      const img = hc ? null : sprite(m.id, px * scale, paletteForPigment(m.pigment));
       if (img) {
-        ctx.drawImage(img, (m.x + mx) * px + px * 0.04, (m.y + my) * px + px * 0.04);
+        const v = travel(m.ax, m.ay, m.x, m.y);
+        const sq = squashFor(v, 0.16);
+        const bx = (m.ax + mx + 0.5) * px, by = (m.ay + my + 0.5) * px;
+        for (const w of wake(m.heading, v, 2)) {
+          drawBody(ctx, img, bx + w.dx * px, by + w.dy * px, px * scale,
+                   m.facing, m.heading, sq, w.alpha * 0.7);
+        }
+        drawBody(ctx, img, bx, by, px * scale, m.facing, m.heading, sq);
       } else {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(m.x * px + px * 0.15, m.y * px + px * 0.15, px * 0.7, px * 0.7);
@@ -583,8 +672,8 @@ class Game {
       }
       // Only once damaged, so a fresh level is not wallpapered in gauges.
       if (f < 1) {
-        const bx = m.x * px + px * 0.2;
-        const by = m.y * px + px * 0.87;
+        const bx = m.ax * px + px * 0.2;
+        const by = m.ay * px + px * 0.87;
         const bw = px * 0.6;
         const bh = Math.max(px * 0.08, 3);
         ctx.fillStyle = "rgba(0,0,0,0.8)";
@@ -603,8 +692,16 @@ class Game {
     }
     const me = hc ? null : playerSprite(px * 0.92);
     if (me) {
-      ctx.drawImage(me, (this.player.ax + lx) * px + px * 0.04,
-                        (this.player.ay + ly) * px + px * 0.04);
+      const v = travel(this.player.ax, this.player.ay, this.player.x, this.player.y);
+      const sq = squashFor(v);
+      const bx = (this.player.ax + lx + 0.5) * px;
+      const by = (this.player.ay + ly + 0.5) * px;
+      // Wake: a cell moving through fluid leaves one.
+      for (const w of wake(this.player.heading, v)) {
+        drawBody(ctx, me, bx + w.dx * px, by + w.dy * px, px * 0.92,
+                 "rotate", this.player.heading, sq, w.alpha);
+      }
+      drawBody(ctx, me, bx, by, px * 0.92, "rotate", this.player.heading, sq);
     } else {
       ctx.fillStyle = "#0ff";
       ctx.fillRect((this.player.ax + lx) * px + px * 0.18,
@@ -620,6 +717,10 @@ class Game {
     this.drawScreenFx(W, H);
     this.drawHud(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * this.settings.uiScale;
+    if (this.showSplash) {
+      this.drawSplash(W, H);
+      return;
+    }
     if (this.showMap) {
       this.drawMapScreen(W, H);
     } else if (this.showPlasmid) {
@@ -774,14 +875,20 @@ class Game {
             `hp ${Math.max(this.player.hp, 0)}/${this.player.maxhp}`,
             `${size * 0.86}px ui-monospace,monospace`);
 
+    const bal = this.genome.atpBalance(this.dungeon.depth);
+    drawBar(ctx, barX + hpW + 8 * u, barTop + lh * 1.15, hpW, gaugeH,
+            this.player.atp / this.player.atpMax,
+            bal >= 0 ? "#4a9fd8" : "#c86a3a",
+            `atp ${Math.round(this.player.atp)}  ${bal >= 0 ? "+" : ""}${bal.toFixed(1)}`,
+            `${size * 0.86}px ui-monospace,monospace`);
+
     const ops = this.genome.operons().filter((op) => op.genes.length > 0).length;
     ctx.font = `${size * 0.86}px ui-monospace,monospace`;
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle";
     ctx.fillText(
-      `${this.genome.used().toFixed(1)}kb  ${ops} operon${ops === 1 ? "" : "s"}` +
-      `   ${this.dungeon.aliveCount()} hostile`,
-      barX + hpW + 10 * u, barTop + lh * 1.15 + gaugeH / 2);
+      `${ops} operon${ops === 1 ? "" : "s"}   ${this.dungeon.aliveCount()} hostile`,
+      barX + hpW * 2 + 18 * u, barTop + lh * 1.15 + gaugeH / 2);
     ctx.textBaseline = "alphabetic";
 
     const LIFE = 9000;
@@ -843,13 +950,20 @@ class Game {
     ctx.font = `${15 * u}px ui-monospace,monospace`;
     ctx.fillText(`${this.genome.used().toFixed(1)}/${this.genome.capacityKb()} kb`,
                  this.ring.cx, this.ring.cy - 9 * u);
+    const d = this.dungeon.depth;
+    const bal = this.genome.atpBalance(d);
     ctx.font = `${11 * u}px ui-monospace,monospace`;
-    ctx.fillStyle = this.genome.burden() > 0 ? "#ffb45a" : "#8fa89a";
-    ctx.fillText(`burden ${(this.genome.burden() * 100) | 0}%`,
-                 this.ring.cx, this.ring.cy + 9 * u);
+    ctx.fillStyle = bal >= 0 ? "#7fc4e8" : "#e08a5a";
+    ctx.fillText(
+      `ATP ${Math.round(this.player.atp)}/${this.player.atpMax}   ` +
+      `${bal >= 0 ? "+" : ""}${bal.toFixed(1)}/action`,
+      this.ring.cx, this.ring.cy + 10 * u);
     ctx.fillStyle = "#8fa89a";
-    ctx.fillText(`power ${this.genome.power(this.dungeon.depth).toFixed(1)}`,
-                 this.ring.cx, this.ring.cy + 26 * u);
+    ctx.fillText(
+      `power ${this.genome.power(d).toFixed(1)}` +
+      (this.genome.burden() > 0 ? `   burden ${(this.genome.burden() * 100) | 0}%` : "") +
+      (this.genome.supply < 0.99 ? `   brownout ${(this.genome.supply * 100) | 0}%` : ""),
+      this.ring.cx, this.ring.cy + 27 * u);
 
     // Parts bin: everything you hold but have not installed.
     const cell = Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
@@ -862,7 +976,8 @@ class Game {
     ctx.font = `${11 * u}px ui-monospace,monospace`;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText(`PARTS BIN  ${this.genome.bin.length}/12`, this.bin.x, this.bin.y - 6 * u);
+    ctx.fillText(`PARTS BIN  ${this.genome.bin.length}/${BIN_CAP}`,
+                 this.bin.x, this.bin.y - 6 * u);
     drawBin(ctx, this.bin, this.genome.bin, u, this.dragBin);
     const binRows = Math.floor(this.genome.bin.length / 6) + 1;
 
@@ -883,18 +998,21 @@ class Game {
     // Detail panel for the tapped slot.
     const py = cy + 8 * u;
     const lines = this.selected === null
-      ? ["drag a part from the bin onto a slot to install it",
-         "drag a slot back onto the bin to remove it",
-         "drag a part between slots to rearrange — a gene transcribes only if",
-         "it sits downstream of a promoter with no gap or terminator between",
-         "drag outside the ring to spin it"]
+      ? ["promoter → gene → terminator switches an operon on",
+         "drag bin → slot to install, slot → bin to remove",
+         "drag outside the ring to spin it",
+         "expression costs ATP; respiration pays less the deeper you go"]
       : describeSlot(this.genome, this.selected, this.dungeon.depth);
     ctx.textAlign = "left";
     ctx.font = `${11.5 * u}px ui-monospace,monospace`;
+    // A running row counter, not the entry index: wrapping produces several
+    // lines per entry and they were all being drawn at the same y.
+    let row = 0;
     lines.forEach((line, i) => {
       ctx.fillStyle = i === 0 ? "#ffffff" : "#9fb8a8";
       for (const w of this.wrap(line, W - (ins.left + ins.right + 32 * u))) {
-        ctx.fillText(w, ins.left + gap, py + i * 17 * u);
+        ctx.fillText(w, ins.left + gap, py + row * 17 * u);
+        row++;
       }
     });
 
@@ -922,6 +1040,13 @@ class Game {
   }
 
   pointerDown(x: number, y: number): void {
+    if (this.showSplash) {
+      const i = this.slotBoxes.findIndex(
+        (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+      if (i >= 0) this.startRun(i);
+      this.gesture = "none";
+      return;
+    }
     if (this.showMap) {
       if (this.inClose(x, y)) { this.gesture = "dismiss"; return; }
       this.gesture = "spin";                 // reused as "pan" here
@@ -1056,6 +1181,103 @@ class Game {
     this.spinFrom = null;
     this.spinStart = null;
     this.panFrom = null;
+  }
+
+  drawSplash(W: number, H: number): void {
+    const { ctx } = this;
+    const ins = this.insets();
+    const u = Math.max(Math.min(W, H) / 420, 1);
+    ctx.fillStyle = "#050d0a";
+    ctx.fillRect(0, 0, W, H);
+
+    // The column itself as the backdrop: eight bands, top to bottom.
+    const bandH = H / bio.MAX_DEPTH;
+    for (let i = 0; i < bio.MAX_DEPTH; i++) {
+      const st = bio.STRATA[i];
+      if (!st) continue;
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = st.wall;
+      ctx.fillRect(0, i * bandH, W, bandH);
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${34 * u}px ui-monospace,monospace`;
+    ctx.fillText("MICROGUE", W / 2, ins.top + 72 * u);
+    ctx.fillStyle = "#9fd8b4";
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.fillText("descend the Winogradsky column", W / 2, ins.top + 94 * u);
+    ctx.fillStyle = "#6f8f7c";
+    ctx.fillText("O2 · NO3- · Mn(IV) · Fe(III) · S0 · H2S · SO4 · CO2",
+                 W / 2, ins.top + 112 * u);
+
+    const slots = listSlots();
+    const cardH = 62 * u;
+    const gap = 10 * u;
+    const top = ins.top + 148 * u;
+    this.slotBoxes = [];
+    for (let i = 0; i < SAVE_SLOTS; i++) {
+      const y = top + i * (cardH + gap);
+      const x = ins.left + 20 * u;
+      const w = W - ins.left - ins.right - 40 * u;
+      this.slotBoxes.push({ x, y, w, h: cardH });
+      const info = slots[i];
+
+      ctx.fillStyle = info ? "rgba(20,34,26,0.9)" : "rgba(0,0,0,0.5)";
+      ctx.strokeStyle = info ? "#5ec98a" : "rgba(255,255,255,0.18)";
+      ctx.lineWidth = Math.max(1.5 * u, 1.5);
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, cardH, 8 * u);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.textAlign = "left";
+      if (info) {
+        const st = bio.stratum(info.depth);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `${15 * u}px ui-monospace,monospace`;
+        ctx.fillText(info.name, x + 14 * u, y + 26 * u);
+        ctx.fillStyle = st.accent;
+        ctx.font = `${10.5 * u}px ui-monospace,monospace`;
+        ctx.fillText(`D${info.depth} ${st.name}  ·  ${info.genes} loci`,
+                     x + 14 * u, y + 45 * u);
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.font = `${13 * u}px ui-monospace,monospace`;
+        ctx.fillText(`new culture  ${NAME_POOL[i % NAME_POOL.length] ?? ""}`,
+                     x + 14 * u, y + 36 * u);
+      }
+    }
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#6f8f7c";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.fillText("tap a culture to begin  ·  long-press to discard",
+                 W / 2, H - ins.bottom - 20 * u);
+  }
+
+  startRun(slot: number): void {
+    this.slot = slot;
+    const existing = loadSlot(slot);
+    const info = listSlots()[slot];
+    this.runName = info?.name ?? NAME_POOL[slot % NAME_POOL.length] ?? "unnamed";
+
+    if (existing) {
+      this.applySave(existing);
+      this.note(`Resumed ${this.runName}.`);
+    } else {
+      this.dungeon = new Dungeon(110, 80, (Date.now() & 0xffff) + slot);
+      this.genome = new Plasmid();
+      this.player.hp = this.player.maxhp;
+      this.player.atp = this.player.atpMax;
+      this.player.status.length = 0;
+      this.enter(this.dungeon.current(), this.dungeon.current().up);
+      this.note(`Culture ${this.runName} inoculated.`);
+    }
+    this.showSplash = false;
+    this.save();
   }
 
   drawMapScreen(W: number, H: number): void {

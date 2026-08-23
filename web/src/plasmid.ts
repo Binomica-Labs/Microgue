@@ -30,6 +30,40 @@ const POLARITY = 0.82;
 const SYNERGY = 0.18;
 const BURDEN_KNEE = 0.7;
 
+// ---------------------------------------------------------------------- ATP
+//
+// Expression is not free. Transcription and translation are a large slice of a
+// cell's energy budget, which is exactly why carrying a big, highly-expressed
+// plasmid is a real burden rather than a pure upgrade.
+//
+// Supply comes from respiration, and respiration pays less as you descend --
+// the same redox tower that gates which genes work at all. Terminal reductases
+// and light-harvesting genes are what actually generate; everything else only
+// consumes.
+
+export const ATP_MAX = 100;
+
+/** Per-action ATP produced by a gene, when it is expressing. */
+const GENERATORS: Partial<Record<GeneId, number>> = {
+  // terminal reductases -- these ARE the respiration, so they must out-earn
+  // their own expression cost or the game punishes the correct build
+  narG: 4.6, dsrA: 12.0, mcrA: 6.6, nosZ: 2.6, norB: 2.0, nirS: 2.4,
+  // light harvesting
+  psbA: 4.4, pufM: 3.8, fmoA: 3.4, csmA: 1.8,
+  // chemolithotrophy and hydrogen
+  amoA: 3.0, nxrA: 2.8, soxB: 3.2, sqr: 1.6, hydA: 3.6, aprA: 1.6,
+  // ATP sulfurylase CONSUMES ATP -- sulfate must be activated to APS before
+  // anything can reduce it, at a cost of two ATP equivalents. It is why
+  // sulfate reduction is energetically marginal and why sulfate reducers grow
+  // slowly. A negative generator is the honest way to model it.
+  sat: -1.6,
+  // extracellular electron transfer: respiring a mineral still pays
+  mtrC: 4.2, omcS: 2.0,
+};
+
+/** Cost scales with size and how hard the gene is being driven. */
+const COST_PER_KB = 0.7;
+
 export type Part =
   | { kind: "gene"; id: GeneId; optimised: boolean }
   | { kind: "promoter"; strength: Strength }
@@ -230,7 +264,14 @@ export class Plasmid {
     return 1 + same * SYNERGY;
   }
 
-  expression(id: GeneId, depth: number): number {
+  /** Fraction of demand the ATP pool can actually meet, 0..1. Set each turn.
+   *  Under-supply browns expression out rather than switching it off, which is
+   *  what a cell does under energy limitation. */
+  supply = 1;
+
+  /** Expression before the ATP brownout. Cost is computed from this, so the
+   *  two do not chase each other. */
+  rawExpression(id: GeneId, depth: number): number {
     const slot = this.slots.find((p) => p?.kind === "gene" && p.id === id);
     if (slot?.kind !== "gene") return 0;
     if (!this.has("ori")) return 0;
@@ -244,14 +285,55 @@ export class Plasmid {
     if (need === "light" && s.light <= 0.02 && !CHLOROSOME.has(id)) return 0;
     if (need && need !== "light" && need !== s.teap) return 0;
 
-    let e = energyYield(depth);
-    if (need === "light") e = Math.max(s.light, e);
+    // Expression is set by regulation -- promoter strength, position in the
+    // transcript, co-regulation -- NOT by the terminal acceptor's midpoint
+    // potential. Folding energyYield in here made every gene express at 4% on
+    // the methanogenic floor, including mcrA, which is what that floor is for.
+    // Depth belongs on the ATP income instead, where it is a real constraint
+    // rather than an invisible tax.
+    let e = need === "light" ? Math.max(s.light, 0.25) : 1;
 
     e *= PROMOTER_POWER[ctx.operon.strength];
     e *= POLARITY ** ctx.rank;                              // polarity
     e *= this.synergy(ctx.operon, id);
     if (!slot.optimised) e *= 0.6;
     return Math.max(e * (1 - this.burden()), 0);
+  }
+
+  expression(id: GeneId, depth: number): number {
+    return this.rawExpression(id, depth) * this.supply;
+  }
+
+  /** ATP drawn per action to maintain the expressed proteome. */
+  atpCost(depth: number): number {
+    let c = 0;
+    for (const p of this.slots) {
+      if (p?.kind !== "gene") continue;
+      c += this.rawExpression(p.id, depth) * GENES[p.id].kb * COST_PER_KB;
+    }
+    return c;
+  }
+
+  /** ATP produced per action. Scaled by the stratum's energy yield, so the
+   *  same kit generates far less on the methanogenic floor than at the surface. */
+  atpGain(depth: number): number {
+    let g = 1.2;                                    // baseline fermentation
+    for (const p of this.slots) {
+      if (p?.kind !== "gene") continue;
+      const rate = GENERATORS[p.id];
+      if (rate !== undefined) g += rate * this.rawExpression(p.id, depth);
+    }
+    // The whole depth gradient lives here: the same proteome earns far less
+    // when CO2 is the only acceptor left than when O2 is.
+    // Floor and slope found by sweeping against a fixture of intended builds:
+    // every canonical respiration must pay for itself at its own depth, and
+    // every generator-free hoard must drain -- and drain harder the deeper it
+    // is carried.
+    return Math.max(g, 0) * (0.4 + 0.6 * energyYield(depth));
+  }
+
+  atpBalance(depth: number): number {
+    return this.atpGain(depth) - this.atpCost(depth);
   }
 
   optimise(id: GeneId): Result {

@@ -97,7 +97,13 @@ web/
     kegg_ui.ts    pannable node graph, caption relaxation, screen/world transforms
     buttons.ts    on-screen controls
     gesture.ts    pointer gesture classification, pure and tested
+    entity.ts     the tagged union -- add a kind and switches stop compiling
+    status.ts     status effects: one list per entity, one loop
+    behaviour.ts  motility patterns and size classes
+    combat.ts     the microbe turn, extracted and testable without a canvas
+    saves.ts      named characters in numbered slots
     fx.ts         effects: easing, lunge, shake decay, hitstop -- all pure
+    motion.ts     facing, short-arc turning, squash, wake -- all pure
     hud.ts        Winogradsky column gauge, bars, plasmid ring
     save.ts       localStorage with a real runtime validator
     main.ts       canvas, input, game loop  <- the only DOM-aware file
@@ -178,6 +184,64 @@ depending on mineral phase. The +770 mV textbook figure is the pH 2 aqueous
 couple and does not apply here.
 
 ---
+
+## Why a tagged union and not an ECS
+
+Two entity kinds today, four declared, at most 22 on screen. ECS earns its keep
+at many kinds with combinatorial capabilities or thousands of entities; neither
+applies, and the frame budget was measured at 0.13% for the whole plasmid read
+path.
+
+The decisive argument is the opposite of performance. The recurring bug in this
+codebase has been forgetting a parallel path -- the keyboard guard missed after
+the pointer fix, the stale test file, the sprite palette left on the old
+function. A discriminated union makes that a build failure: add a kind and
+`describeEntity` and `blocks` stop compiling until it is handled. Component
+bags are dynamically typed at the query boundary, so a system that should have
+handled a new component silently does not.
+
+Revisit if kinds pass roughly six AND behaviours genuinely cross-cut.
+
+`status.ts` is the useful tenth of an ECS: one list on the entity, one loop
+applying it, effects as data. Adding antibiotic exposure or phage infection is
+a table entry rather than a branch in three places.
+
+## Motility is diagnostic
+
+`Behaviour` is not a difficulty knob. Pseudomonas chases because it has a polar
+flagellum and chemotaxis. Beggiatoa and Nitzschia glide, and gliding needs a
+surface -- they cannot cross open water. Thiothrix is `sessile` because a
+holdfast anchors it. Geobacter is `wire`: it never closes distance and strikes
+down a conductive pilus instead. Sizes span pico to filament because the real
+range does, from a 1 um Synechococcus to a 200 um Beggiatoa; large bodies hit
+harder, carry more hp and act less often.
+
+## The ATP economy
+
+Expression costs ATP; respiration supplies it. Both are real, and together they
+are what makes depth a constraint rather than a label.
+
+**`energyYield` must NOT multiply expression.** It used to, which meant every
+gene expressed at 4% on the methanogenic floor -- including `mcrA`, the gene
+that floor exists for. Expression is set by regulation (promoter strength,
+position in the transcript, co-regulation); the terminal acceptor's midpoint
+potential belongs on the ATP income. The whole depth gradient lives in
+`atpGain`, where the same proteome earns 0.4x on the floor of what it earns at
+the surface.
+
+Under-supply browns expression out proportionally rather than switching it off,
+which is what a cell does under energy limitation. `atpCost` is computed from
+`rawExpression` so cost and brownout cannot chase each other.
+
+`sat` (ATP sulfurylase) has a NEGATIVE generator rate. Sulfate must be
+activated to APS at a cost of two ATP equivalents before anything can reduce
+it, which is why sulfate reduction is energetically marginal and sulfate
+reducers grow slowly.
+
+Generator rates and `COST_PER_KB` were found by sweeping against a fixture:
+every canonical respiration must pay for itself at its own depth, and every
+generator-free hoard must drain -- harder the deeper it is carried. Those are
+assertions in `spec`, so retuning that breaks the shape fails the build.
 
 ## The plasmid, biologically
 
@@ -281,6 +345,22 @@ camera shake scaled to damage and capped, and 28ms of hitstop. A kill adds a
 14-particle burst in the organism's own pigment, a bigger shake and 70ms of
 stop. A ranged strike draws a jagged nanowire bolt instead of a lunge, and HGT
 sends a green bolt from the corpse to you with the locus name floating up.
+
+## Facing follows morphology
+
+`Microbe.facing` is `rotate | flip | none`, and it is not a style choice.
+Elongate cells -- rods, filaments, vibrios, spirilla -- align their long axis
+with motion. Cocci and sarcinae have no long axis, so rotating them is
+invisible. `thiothrix` is `none` because it is anchored by a holdfast: an
+organism that cannot move should not turn. There are tests naming each case.
+
+Sprites are authored pointing NORTH, so `drawBody` rotates by
+`heading + PI/2`. Squash is applied AFTER rotation, along the body's own
+forward axis, which is what makes a cell look like it is launching rather than
+merely getting wider.
+
+`turnToward` takes the short arc. Turning from 170 to -170 degrees is a 20
+degree turn, not 340; the suite checks every pair of 64 x 64 angles.
 
 ## Failure modes seen repeatedly
 

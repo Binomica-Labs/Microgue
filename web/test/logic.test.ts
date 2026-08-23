@@ -13,6 +13,16 @@ import { PIXELS, PX_SIZE, validate as validatePixels } from "../src/pixels.js";
 import { classifyDown, classifyKey, inBox, type Gesture } from "../src/gesture.js";
 import { Effects, easeInQuad, easeOutCubic, easeOutQuad, jitter, linear,
          lungeOffset, pulse } from "../src/fx.js";
+import { TAU, angleDelta, headingOf, normalise, snap8, squashFor, travel,
+         turnToward, wake } from "../src/motion.js";
+import { SIZES, canStrike, chebyshev, decideStep, senseRange, touchesWall }
+  from "../src/behaviour.js";
+import { STATUS, apply, apply as applyStatus, clear as clearStatus,
+         has as hasStatus, haste, tick, type Status } from "../src/status.js";
+import { blocks, describeEntity, makeBody, type Entity } from "../src/entity.js";
+import { microbeTurn } from "../src/combat.js";
+import { NAME_POOL, loadSlot } from "../src/saves.js";
+import type { Mob } from "../src/dungeon.js";
 import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
          orphanMetabolites } from "../src/kegg.js";
 import { NODE_W, NODE_H, clampView, fitView, moduleBoxes, toScreen, toWorld,
@@ -206,7 +216,7 @@ describe("rng", () => {
 });
 
 describe("save validation", () => {
-  const good = { version: 2, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
+  const good = { version: 3, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
                  ring: [{ kind: "promoter", strength: "strong" },
                         { kind: "gene", id: "mtrC", optimised: true }],
                  settings: { uiScale: 1.5, highContrast: true, reduceMotion: false, diagonal: false } };
@@ -222,7 +232,7 @@ describe("save validation", () => {
   it("rejects a save from an incompatible schema instead of half-loading it", () => {
     // version was written and never read; the flat-gene-list to ring rewrite
     // would have fed the old shape straight into slot code.
-    expect(parseSave({ ...good, version: 1 })).toBeNull();
+    expect(parseSave({ ...good, version: 2 })).toBeNull();
     expect(parseSave({ ...good, version: 99 })).toBeNull();
     const noVersion: Record<string, unknown> = { ...good };
     delete noVersion["version"];
@@ -265,7 +275,7 @@ describe("save validation", () => {
     expect(parseSave({ ...good, settings: { uiScale: 500 } })?.settings.uiScale).toBe(3);
   });
   it("survives a hand-edited hostile payload", () => {
-    const s = parseSave({ version: 2, depth: {}, seed: [], px: 1, py: 1, hp: -50,
+    const s = parseSave({ version: 3, depth: {}, seed: [], px: 1, py: 1, hp: -50,
                           ring: "all of them", settings: null });
     expect(s).not.toBeNull();
     expect(s?.hp).toBeGreaterThan(0);
@@ -1004,7 +1014,7 @@ describe("toxic intermediates", () => {
 describe("save round-trips the bin", () => {
   it("keeps stashed parts across a reload", () => {
     const s = parseSave({
-      version: 2, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
+      version: 3, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
       ring: [{ kind: "promoter", strength: "medium" }],
       bin: [{ kind: "gene", id: "mtrC", optimised: false }, { kind: "terminator" }],
       settings: {},
@@ -1014,14 +1024,14 @@ describe("save round-trips the bin", () => {
   });
   it("drops junk and duplicates from the bin", () => {
     const s = parseSave({
-      version: 2, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
+      version: 3, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
       bin: [{ kind: "gene", id: "mtrC" }, { kind: "gene", id: "mtrC" }, "junk", 7,
             { kind: "gene", id: "notReal" }],
     });
     expect(s?.bin).toHaveLength(1);
   });
   it("a missing bin is an empty bin, not a crash", () => {
-    const s = parseSave({ version: 2, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
+    const s = parseSave({ version: 3, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
     expect(s?.bin).toEqual([]);
   });
 });
@@ -1668,5 +1678,559 @@ describe("juice cannot break the game", () => {
     }
     fx.clear();
     expect(fx.count()).toBe(0);
+  });
+});
+
+describe("facing and movement", () => {
+  it("heading is null when there is no movement", () => {
+    expect(headingOf(0, 0)).toBeNull();
+  });
+
+  it("headings point where you would expect on screen", () => {
+    expect(headingOf(1, 0)).toBeCloseTo(0, 6);              // east
+    expect(headingOf(0, 1)).toBeCloseTo(Math.PI / 2, 6);    // south (y grows down)
+    expect(headingOf(-1, 0)).toBeCloseTo(Math.PI, 6);       // west
+    expect(headingOf(0, -1)).toBeCloseTo(-Math.PI / 2, 6);  // north
+  });
+
+  it("turning takes the SHORT way across the wrap", () => {
+    // The classic bug: 170deg to -170deg is a 20deg turn, not 340.
+    const a = (170 * Math.PI) / 180;
+    const b = (-170 * Math.PI) / 180;
+    expect(Math.abs(angleDelta(a, b))).toBeCloseTo((20 * Math.PI) / 180, 6);
+    const stepped = turnToward(a, b, (5 * Math.PI) / 180);
+    // must move toward b the short way, i.e. past +180
+    expect(Math.abs(angleDelta(stepped, b))).toBeLessThan(Math.abs(angleDelta(a, b)));
+  });
+
+  it("turning converges and then stops exactly on target", () => {
+    let h = -3.0;
+    const target = 2.9;                                     // across the wrap
+    for (let i = 0; i < 200; i++) h = turnToward(h, target, 0.1);
+    expect(Math.abs(angleDelta(h, target))).toBeCloseTo(0, 6);
+  });
+
+  it("turning never spins the long way for any pair of angles", () => {
+    for (let i = 0; i < 64; i++) {
+      for (let j = 0; j < 64; j++) {
+        const a = (i / 64) * TAU - Math.PI;
+        const b = (j / 64) * TAU - Math.PI;
+        expect(Math.abs(angleDelta(a, b))).toBeLessThanOrEqual(Math.PI + 1e-9);
+      }
+    }
+  });
+
+  it("normalise keeps every angle in (-PI, PI]", () => {
+    for (const a of [0, 7, -7, 100, -100, TAU, -TAU, 3 * Math.PI]) {
+      const n = normalise(a);
+      expect(n).toBeGreaterThan(-Math.PI - 1e-9);
+      expect(n).toBeLessThanOrEqual(Math.PI + 1e-9);
+    }
+  });
+
+  it("snap8 lands on one of eight compass points", () => {
+    const step = TAU / 8;
+    for (let i = 0; i < 100; i++) {
+      const a = (i / 100) * TAU - Math.PI;
+      const s = snap8(a);
+      expect(Math.abs(Math.round(s / step) * step - s)).toBeLessThan(1e-9);
+    }
+  });
+
+  it("squash preserves rough volume and returns to round at rest", () => {
+    const rest = squashFor(0);
+    expect(rest.sx).toBeCloseTo(1, 6);
+    expect(rest.sy).toBeCloseTo(1, 6);
+    const moving = squashFor(1);
+    expect(moving.sx).toBeGreaterThan(1);
+    expect(moving.sy).toBeLessThan(1);
+    expect(moving.sx * moving.sy).toBeGreaterThan(0.9);   // not a pancake
+    expect(moving.sx * moving.sy).toBeLessThan(1.1);
+  });
+
+  it("squash clamps for nonsense speeds", () => {
+    for (const v of [-5, 99, Number.NaN]) {
+      const s = squashFor(v);
+      expect(Number.isFinite(s.sx) && Number.isFinite(s.sy)).toBe(true);
+    }
+  });
+
+  it("travel is 0 at rest and capped at 1", () => {
+    expect(travel(3, 3, 3, 3)).toBe(0);
+    expect(travel(0, 0, 100, 100)).toBe(1);
+    expect(travel(3, 3, 3.5, 3)).toBeCloseTo(0.5, 6);
+  });
+
+  it("a wake only exists while moving, and trails BEHIND", () => {
+    expect(wake(0, 0)).toEqual([]);
+    expect(wake(null, 1)).toEqual([]);
+    const w = wake(0, 1);                                   // heading east
+    expect(w.length).toBeGreaterThan(0);
+    for (const g of w) {
+      expect(g.dx, "ghost must be west of the body").toBeLessThan(0);
+      expect(g.alpha).toBeGreaterThan(0);
+      expect(g.alpha).toBeLessThan(1);
+    }
+  });
+
+  it("wake ghosts fade with distance", () => {
+    const w = wake(Math.PI / 2, 1, 3);
+    for (let i = 1; i < w.length; i++) {
+      expect(w[i]!.alpha).toBeLessThan(w[i - 1]!.alpha);
+    }
+  });
+
+  it("facing follows morphology: anchored and symmetric cells do not turn", () => {
+    const by = (id: string) => bio.MICROBES.find((m) => m.id === id)!;
+    expect(by("thiothrix").facing, "holdfast-anchored").toBe("none");
+    expect(by("prosthecochloris").facing, "radially symmetric").toBe("none");
+    expect(by("methanosarcina").facing, "cuboidal packet").toBe("none");
+    expect(by("chlorella").facing, "coccoid").toBe("none");
+    expect(by("rhodospirillum").facing, "spiral").toBe("rotate");
+    expect(by("desulfovibrio").facing, "vibrio").toBe("rotate");
+  });
+
+  it("every microbe declares a facing", () => {
+    for (const m of bio.MICROBES) {
+      expect(["rotate", "flip", "none"], m.id).toContain(m.facing);
+    }
+  });
+});
+
+describe("ATP economy", () => {
+  const withOperon = (...genes: bio.GeneId[]) => {
+    const p = new Plasmid();
+    p.put(4, { kind: "promoter", strength: "strong" });
+    genes.forEach((g, i) => { p.put(5 + i, { kind: "gene", id: g, optimised: true }); });
+    return p;
+  };
+
+  it("an untranscribed gene costs nothing -- carrying is not expressing", () => {
+    // A fresh plasmid already transcribes its origin, and maintaining a
+    // replicon genuinely costs energy, so compare against that baseline.
+    const base = new Plasmid().atpCost(2);
+    const p = new Plasmid();
+    p.put(9, { kind: "gene", id: "narG", optimised: true });   // no promoter
+    expect(p.atpCost(2)).toBeCloseTo(base, 6);
+  });
+
+  it("maintaining the origin itself costs ATP", () => {
+    expect(new Plasmid().atpCost(1)).toBeGreaterThan(0);
+  });
+
+  it("switching an operon on creates a cost", () => {
+    const off = new Plasmid();
+    off.put(9, { kind: "gene", id: "cbbL", optimised: true });
+    const on = withOperon("cbbL");
+    expect(on.atpCost(1)).toBeGreaterThan(off.atpCost(1));
+  });
+
+  it("bigger genes cost more to express", () => {
+    // narG is 3.7 kb, nosZ is 1.9
+    const big = withOperon("narG");
+    const small = withOperon("nosZ");
+    expect(big.atpCost(2)).toBeGreaterThan(small.atpCost(2));
+  });
+
+  it("terminal reductases and light genes generate; structural ones do not", () => {
+    const gen = withOperon("psbA");
+    const bare = new Plasmid();
+    expect(gen.atpGain(1)).toBeGreaterThan(bare.atpGain(1));
+    const inert = withOperon("katG");            // defensive, not a generator
+    expect(inert.atpGain(1)).toBeCloseTo(bare.atpGain(1), 6);
+  });
+
+  it("the same kit generates less the deeper you go", () => {
+    const q = withOperon("hydA");
+    expect(q.atpGain(5)).toBeGreaterThan(q.atpGain(8));
+  });
+
+  it("a bare plasmid is net positive -- you are never dead on arrival", () => {
+    const p = new Plasmid();
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      expect(p.atpBalance(d), `D${d}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("a generator-free hoard runs at a loss, and worse the deeper it goes", () => {
+    const p = withOperon("katG", "cbbL", "aclB", "nosZ");
+    expect(p.atpBalance(1)).toBeLessThan(0);
+    expect(p.atpBalance(5)).toBeLessThan(p.atpBalance(1));
+  });
+
+  it("every canonical respiration pays for itself at its own depth", () => {
+    const cases: [bio.GeneId[], number][] = [
+      [["narG", "nirS", "norB", "nosZ"], 2],
+      [["sat", "aprA", "dsrA"], 7],
+      [["mcrA", "hdrB"], 8],
+      [["fmoA", "csmA"], 6],
+      [["mtrC", "omcS"], 4],
+      [["psbA", "cbbL"], 1],
+    ];
+    for (const [genes, d] of cases) {
+      expect(withOperon(...genes).atpBalance(d), `${genes.join("+")} at D${d}`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("ATP sulfurylase is a net consumer -- sulfate activation costs two ATP", () => {
+    // sat alone should be worse than nothing; only dsrA downstream redeems it.
+    const bare = new Plasmid().atpBalance(7);
+    expect(withOperon("sat").atpBalance(7)).toBeLessThan(bare);
+  });
+
+  it("brownout scales expression down without switching it off", () => {
+    const p = withOperon("cbbL");
+    const full = p.expression("cbbL", 1);
+    p.supply = 0.4;
+    const dim = p.expression("cbbL", 1);
+    expect(dim).toBeCloseTo(full * 0.4, 6);
+    expect(dim).toBeGreaterThan(0);
+  });
+
+  it("cost is computed from raw expression, so it cannot chase the brownout", () => {
+    const p = withOperon("cbbL");
+    const cost = p.atpCost(1);
+    p.supply = 0.2;
+    expect(p.atpCost(1)).toBeCloseTo(cost, 6);
+  });
+
+  it("power falls under brownout, so the energy cost is felt in combat", () => {
+    const p = withOperon("cbbL", "psbA");
+    const full = p.power(1);
+    p.supply = 0.5;
+    expect(p.power(1)).toBeLessThan(full);
+  });
+
+  it("balance and gain are finite at every depth for every arrangement", () => {
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      const p = withOperon("narG", "nirS", "norB", "nosZ");
+      expect(Number.isFinite(p.atpGain(d))).toBe(true);
+      expect(Number.isFinite(p.atpCost(d))).toBe(true);
+      expect(Number.isFinite(p.atpBalance(d))).toBe(true);
+      expect(p.atpGain(d)).toBeGreaterThan(0);
+    }
+  });
+
+  it("a complete denitrification operon pays for itself", () => {
+    // Four reductases generating, against their own expression cost.
+    const p = withOperon("narG", "nirS", "norB", "nosZ");
+    expect(p.atpBalance(2)).toBeGreaterThan(0);
+  });
+});
+
+describe("motility behaviours", () => {
+  const open = (w = 11, h = 11) => new mg.Grid(w, h, mg.FLOOR);
+  const walled = () => {
+    const g = new mg.Grid(11, 11, mg.FLOOR);
+    for (let i = 0; i < 11; i++) g.set(i, 0, mg.WALL);
+    return g;
+  };
+  const noOne = () => false;
+  const sensed = (px: number, py: number, at: { x: number; y: number }, allies = 0) =>
+    ({ px, py, dist: chebyshev(at.x, at.y, px, py), alliesNear: allies });
+
+  it("anchored organisms never move", () => {
+    for (const b of ["sessile", "wire"] as const) {
+      const at = { x: 5, y: 5 };
+      for (let i = 0; i < 50; i++) {
+        expect(decideStep(b, at, sensed(6, 5, at), open(), makeRng(i), noOne), b).toBeNull();
+      }
+    }
+  });
+
+  it("a chaser closes distance", () => {
+    const at = { x: 2, y: 2 };
+    const step = decideStep("chase", at, sensed(8, 8, at), open(), makeRng(1), noOne);
+    expect(step).not.toBeNull();
+    expect(chebyshev(step!.x, step!.y, 8, 8)).toBeLessThan(chebyshev(2, 2, 8, 8));
+  });
+
+  it("a chaser out of sensing range holds still", () => {
+    const g = new mg.Grid(40, 40, mg.FLOOR);
+    const at = { x: 1, y: 1 };
+    expect(decideStep("chase", at, sensed(35, 35, at), g, makeRng(1), noOne)).toBeNull();
+  });
+
+  it("a glider only steps to tiles touching a surface", () => {
+    const g = walled();
+    const at = { x: 5, y: 1 };                     // hugging the wall at y=0
+    for (let i = 0; i < 40; i++) {
+      const s = decideStep("glide", at, sensed(9, 1, at), g, makeRng(i), noOne);
+      if (s) expect(touchesWall(g, s.x, s.y), `${s.x},${s.y}`).toBe(true);
+    }
+  });
+
+  it("a glider in open water cannot go anywhere", () => {
+    const at = { x: 5, y: 5 };
+    for (let i = 0; i < 30; i++) {
+      expect(decideStep("glide", at, sensed(7, 5, at), open(), makeRng(i), noOne)).toBeNull();
+    }
+  });
+
+  it("drift is Brownian -- it does not reliably close", () => {
+    const at = { x: 5, y: 5 };
+    let closer = 0;
+    for (let i = 0; i < 300; i++) {
+      const s = decideStep("drift", at, sensed(9, 9, at), open(), makeRng(i), noOne);
+      if (s && chebyshev(s.x, s.y, 9, 9) < chebyshev(5, 5, 9, 9)) closer++;
+    }
+    expect(closer / 300).toBeLessThan(0.4);        // luck, not intent
+  });
+
+  it("a swarmer commits once its own kind is around", () => {
+    const at = { x: 3, y: 3 };
+    const lone = Array.from({ length: 60 }, (_v, i) =>
+      decideStep("swarm", at, sensed(7, 7, at, 0), open(), makeRng(i), noOne)).filter(Boolean).length;
+    const quorate = Array.from({ length: 60 }, (_v, i) =>
+      decideStep("swarm", at, sensed(7, 7, at, 3), open(), makeRng(i), noOne)).filter(Boolean).length;
+    expect(quorate).toBeGreaterThan(lone);
+  });
+
+  it("nothing ever steps into a wall or onto an occupied tile", () => {
+    const g = walled();
+    const at = { x: 5, y: 1 };
+    for (const b of ["chase", "glide", "drift", "swarm"] as const) {
+      for (let i = 0; i < 60; i++) {
+        const s = decideStep(b, at, sensed(5, 0, at), g, makeRng(i),
+                             (x, y) => x === 6 && y === 1);
+        if (!s) continue;
+        expect(g.isFloor(s.x, s.y), `${b} into wall`).toBe(true);
+        expect(s.x === 6 && s.y === 1, `${b} onto occupied`).toBe(false);
+      }
+    }
+  });
+
+  it("a step is always adjacent -- nothing teleports", () => {
+    const at = { x: 5, y: 5 };
+    for (const b of ["chase", "glide", "drift", "swarm"] as const) {
+      for (let i = 0; i < 80; i++) {
+        const s = decideStep(b, at, sensed(9, 9, at, 3), walled(), makeRng(i), noOne);
+        if (s) expect(chebyshev(s.x, s.y, 5, 5), b).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("nanowire strikes reach further than a body does", () => {
+    expect(canStrike("wire", "medium", 3)).toBe(true);
+    expect(canStrike("chase", "medium", 3)).toBe(false);
+    expect(canStrike("chase", "medium", 1)).toBe(true);
+  });
+
+  it("filaments are large, slow and long-reaching", () => {
+    expect(SIZES.filament.hp).toBeGreaterThan(SIZES.pico.hp);
+    expect(SIZES.filament.cooldown).toBeGreaterThan(SIZES.pico.cooldown);
+    expect(SIZES.filament.reach).toBeGreaterThan(SIZES.small.reach);
+  });
+
+  it("motility matches morphology for the diagnostic cases", () => {
+    const by = (id: string) => bio.MICROBES.find((m) => m.id === id)!;
+    expect(by("thiothrix").behaviour, "holdfast").toBe("sessile");
+    expect(by("beggiatoa").behaviour, "gliding mat").toBe("glide");
+    expect(by("nitzschia").behaviour, "diatoms glide via the raphe").toBe("glide");
+    expect(by("pseudomonas").behaviour, "polar flagellum").toBe("chase");
+    expect(by("geobacter").behaviour, "conductive pili").toBe("wire");
+    expect(by("beggiatoa").size, "genuinely enormous").toBe("filament");
+    expect(by("synechococcus").size, "picoplankton").toBe("pico");
+  });
+
+  it("every microbe declares a behaviour and a size", () => {
+    for (const m of bio.MICROBES) {
+      expect(senseRange(m.behaviour), m.id).toBeGreaterThan(0);
+      expect(SIZES[m.size], m.id).toBeDefined();
+    }
+  });
+});
+
+describe("status effects", () => {
+  it("expire on their own", () => {
+    const list: Status[] = [];
+    apply(list, "acid", 2);
+    tick(list); expect(list).toHaveLength(1);
+    tick(list); expect(list).toHaveLength(0);
+  });
+
+  it("stacking effects accumulate magnitude, others only refresh", () => {
+    const a: Status[] = [];
+    apply(a, "oxidative", 5); apply(a, "oxidative", 5);
+    expect(a[0]!.magnitude).toBe(2);
+    const b: Status[] = [];
+    apply(b, "acid", 3); apply(b, "acid", 6);
+    expect(b[0]!.magnitude).toBe(1);
+    expect(b[0]!.turns).toBe(6);
+  });
+
+  it("magnitude is capped, so nothing becomes unsurvivable", () => {
+    const list: Status[] = [];
+    for (let i = 0; i < 100; i++) apply(list, "oxidative", 9);
+    expect(list[0]!.magnitude).toBeLessThanOrEqual(6);
+  });
+
+  it("a lytic infection worsens over time", () => {
+    const list: Status[] = [];
+    apply(list, "phage", 8);
+    const first = tick(list);
+    const second = tick(list);
+    expect(second).toBeGreaterThan(first);
+  });
+
+  it("haste is never zero -- nothing is permanently frozen", () => {
+    const list: Status[] = [];
+    apply(list, "sulfide", 9); apply(list, "starved", 9); apply(list, "slowed", 9);
+    expect(haste(list)).toBeGreaterThan(0);
+    expect(haste(list)).toBeLessThan(1);
+  });
+
+  it("clear removes a named effect and leaves the rest", () => {
+    const list: Status[] = [];
+    apply(list, "acid", 4); apply(list, "sulfide", 4);
+    clearStatus(list, "acid");
+    expect(hasStatus(list, "acid")).toBe(false);
+    expect(hasStatus(list, "sulfide")).toBe(true);
+  });
+
+  it("every status id has a definition", () => {
+    for (const id of Object.keys(STATUS)) {
+      expect(STATUS[id as keyof typeof STATUS].name).toBeTruthy();
+    }
+  });
+});
+
+describe("entity model", () => {
+  it("describeEntity is exhaustive -- adding a kind breaks the build", () => {
+    const body = makeBody(0, 0, 10);
+    const kinds: Entity[] = [
+      { ...body, kind: "player", atp: 10, atpMax: 10, speed: 18 },
+      { ...body, kind: "microbe", id: "x", name: "X", glyph: "x", genes: [],
+        note: "", pigment: "#fff", facing: "none", behaviour: "drift",
+        size: "small", atk: 1, cooldown: 0 },
+      { ...body, kind: "hazard", id: "peroxide", radius: 2, potency: 1 },
+      { ...body, kind: "item", id: "cassette", gene: "mtrC" },
+    ];
+    for (const e of kinds) expect(describeEntity(e).length).toBeGreaterThan(0);
+  });
+
+  it("only solid kinds block movement", () => {
+    const body = makeBody(0, 0, 10);
+    expect(blocks({ ...body, kind: "hazard", id: "h", radius: 1, potency: 1 })).toBe(false);
+    expect(blocks({ ...body, kind: "item", id: "i", gene: null })).toBe(false);
+    expect(blocks({ ...body, kind: "player", atp: 1, atpMax: 1, speed: 1 })).toBe(true);
+  });
+
+  it("a dead microbe stops blocking", () => {
+    const m: Entity = { ...makeBody(0, 0, 10), kind: "microbe", id: "x", name: "X",
+      glyph: "x", genes: [], note: "", pigment: "#fff", facing: "none",
+      behaviour: "drift", size: "small", atk: 1, cooldown: 0 };
+    expect(blocks(m)).toBe(true);
+    m.alive = false;
+    expect(blocks(m)).toBe(false);
+  });
+});
+
+describe("save slots", () => {
+  it("slot indices outside the range are refused, not clamped silently", () => {
+    expect(loadSlot(-1)).toBeNull();
+    expect(loadSlot(99)).toBeNull();
+  });
+
+  it("suggested names look like strain designations", () => {
+    expect(NAME_POOL.length).toBeGreaterThan(3);
+    for (const n of NAME_POOL) expect(n.length).toBeGreaterThan(1);
+  });
+});
+
+describe("the microbe turn", () => {
+  const world = (mobs: Mob[], px = 5, py = 5) => ({
+    grid: new mg.Grid(15, 15, mg.FLOOR),
+    mobs,
+    player: { x: px, y: py, hp: 30, status: [] as Status[] },
+    rng: makeRng(7),
+    armour: 1,
+  });
+  const mob = (over: Partial<Mob>): Mob => ({
+    id: "pseudomonas", name: "Pseudomonas", glyph: "p", x: 8, y: 5,
+    ax: 8, ay: 5, hp: 12, maxhp: 12, atk: 4, genes: [], note: "",
+    pigment: "#fff", alive: true, facing: "rotate", heading: null,
+    behaviour: "chase", size: "medium", cooldown: 0, status: [],
+    ...over,
+  });
+
+  it("a chaser closes and then strikes", () => {
+    const m = mob({ x: 8, y: 5 });
+    const w = world([m]);
+    microbeTurn(w);
+    expect(m.x).toBeLessThan(8);
+    for (let i = 0; i < 6; i++) microbeTurn(w);
+    expect(w.player.hp).toBeLessThan(30);
+  });
+
+  it("a sessile microbe never moves but still strikes on contact", () => {
+    const m = mob({ id: "thiothrix", behaviour: "sessile", size: "filament", x: 6, y: 5 });
+    const w = world([m]);
+    microbeTurn(w);
+    expect(m.x).toBe(6);
+    expect(w.player.hp).toBeLessThan(30);
+  });
+
+  it("a nanowire strikes from beyond arm's reach", () => {
+    const m = mob({ id: "geobacter", behaviour: "wire", x: 8, y: 5 });
+    const w = world([m]);
+    microbeTurn(w);
+    expect(m.x).toBe(8);                       // did not move
+    expect(w.player.hp).toBeLessThan(30);      // still hit you
+  });
+
+  it("large bodies act less often than small ones", () => {
+    const big = mob({ size: "filament", behaviour: "sessile", x: 6, y: 5 });
+    const small = mob({ size: "pico", behaviour: "sessile", x: 6, y: 5 });
+    const a = world([big]); const b = world([small]);
+    let bigHits = 0, smallHits = 0;
+    for (let i = 0; i < 8; i++) {
+      const h1 = a.player.hp; microbeTurn(a); if (a.player.hp < h1) bigHits++;
+      const h2 = b.player.hp; microbeTurn(b); if (b.player.hp < h2) smallHits++;
+    }
+    expect(bigHits).toBeLessThan(smallHits);
+  });
+
+  it("microbes never stack on the same tile", () => {
+    const mobs = [mob({ x: 8, y: 5 }), mob({ x: 9, y: 5 }), mob({ x: 10, y: 5 })];
+    const w = world(mobs);
+    for (let i = 0; i < 12; i++) microbeTurn(w);
+    const seen = new Set(mobs.filter((m) => m.alive).map((m) => `${m.x},${m.y}`));
+    expect(seen.size).toBe(mobs.filter((m) => m.alive).length);
+  });
+
+  it("a microbe never steps onto the player", () => {
+    const mobs = [mob({ x: 6, y: 5 }), mob({ x: 5, y: 6 })];
+    const w = world(mobs);
+    for (let i = 0; i < 20; i++) {
+      microbeTurn(w);
+      for (const m of mobs) expect(`${m.x},${m.y}`).not.toBe("5,5");
+    }
+  });
+
+  it("Thiobacillus inflicts acid; a chaser with no product does not", () => {
+    const acid = world([mob({ id: "thiobacillus", behaviour: "sessile", x: 6, y: 5 })]);
+    for (let i = 0; i < 20; i++) microbeTurn(acid);
+    expect(hasStatus(acid.player.status, "acid")).toBe(true);
+
+    const plain = world([mob({ id: "shewanella", behaviour: "sessile", x: 6, y: 5 })]);
+    for (let i = 0; i < 20; i++) microbeTurn(plain);
+    expect(plain.player.status).toHaveLength(0);
+  });
+
+  it("armour reduces incoming damage", () => {
+    const bare = world([mob({ behaviour: "sessile", x: 6, y: 5 })]);
+    const armoured = { ...world([mob({ behaviour: "sessile", x: 6, y: 5 })]), armour: 0.4 };
+    microbeTurn(bare); microbeTurn(armoured);
+    expect(30 - armoured.player.hp).toBeLessThanOrEqual(30 - bare.player.hp);
+  });
+
+  it("a poisoned microbe can die of its own affliction", () => {
+    const m = mob({ hp: 2, behaviour: "sessile" });
+    applyStatus(m.status, "phage", 9, 3);
+    const w = world([m]);
+    for (let i = 0; i < 6; i++) microbeTurn(w);
+    expect(m.alive).toBe(false);
   });
 });
