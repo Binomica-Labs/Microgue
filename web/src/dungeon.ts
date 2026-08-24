@@ -8,6 +8,8 @@ import { SIZES, type Size } from "./behaviour.js";
 import { covers, tilesOf } from "./footprint.js";
 import { makeSight, type Sight } from "./fov.js";
 import { carveRooms, planFor, ROOM_STYLE, type Room } from "./rooms.js";
+import { barriersAt, type Barrier } from "./barrier.js";
+import { findPath } from "./path.js";
 import * as mg from "./mapgen.js";
 import type { Grid, Point } from "./mapgen.js";
 import { makeRng, type Rng } from "./rng.js";
@@ -21,6 +23,8 @@ export interface Level {
   /** The last floor of a stratum: a boss or a swarm waits here. */
   boss: boolean;
   rooms: Room[];
+  /** Material that has to be digested through. */
+  barriers: Barrier[];
   /** A boss floor stays sealed until whatever holds it is dead. */
   cleared: boolean;
   /** Set once a boss floor is populated, for the arrival message. */
@@ -97,8 +101,10 @@ export class Dungeon {
                          visited: false, boss: isBossFloor(floor),
                          // Rooms sealed off by the connectivity sweep are gone.
                          rooms: rooms.filter((r) => grid.isFloor(r.cx, r.cy)),
+                         barriers: [],
                          cleared: !isBossFloor(floor),
                          sight: makeSight(grid.w, grid.h) };
+    this.sealRooms(lvl, rng);
     this.populate(lvl, rng);
     this.stockRooms(lvl, rng);
     if (lvl.boss) this.placeBoss(lvl, rng);
@@ -109,7 +115,13 @@ export class Dungeon {
   private populate(lvl: Level, rng: Rng): void {
     const pool = microbesAt(lvl.depth);
     if (!pool.length) return;
-    const want = 6 + lvl.depth * 2;
+    // Scaled to the floor area that actually exists, so a sparse level does
+    // not end up with the same handful of microbes as a dense one. At 167 open
+    // tiles per microbe the column read as empty; this targets about 55.
+    const open = lvl.grid.countFloor();
+    const want = Math.min(
+      Math.round(open / 66) + lvl.depth * 2,
+      Math.floor(open / 24));
     let tries = 0;
 
     while (lvl.mobs.length < want && tries < want * 200) {
@@ -200,6 +212,67 @@ export class Dungeon {
    * bloom of one species, which is what a column actually produces when a
    * layer's chemistry runs away with it.
    */
+  /**
+   * Seal the good rooms behind something you have to digest.
+   *
+   * Only ports and enrichments -- the rooms actually worth crossing a level
+   * for. A barrier on a plain chamber is an obstacle; a barrier on a cache is
+   * a decision about what your plasmid is for.
+   */
+  private sealRooms(lvl: Level, rng: Rng): void {
+    const kinds = barriersAt(lvl.depth);
+    if (kinds.length === 0) return;
+    for (const room of lvl.rooms) {
+      if (room.kind !== "port" && room.kind !== "enrichment") continue;
+      const def = kinds[rng.int(kinds.length)];
+      if (!def) continue;
+      // Plug the ring one tile outside the room, which is where its corridor
+      // has to pass through.
+      const r = room.r + 1;
+      const ring: Point[] = [];
+      for (let a = 0; a < 64; a++) {
+        const th = (a / 64) * Math.PI * 2;
+        const x = Math.round(room.cx + Math.cos(th) * r);
+        const y = Math.round(room.cy + Math.sin(th) * r);
+        if (!lvl.grid.isFloor(x, y)) continue;
+        // Never on a stair. A barrier standing on the way down is not a gate,
+        // it is a locked exit.
+        if (x === lvl.up.x && y === lvl.up.y) continue;
+        if (lvl.down?.x === x && lvl.down.y === y) continue;
+        if (ring.some((p) => p.x === x && p.y === y)) continue;
+        ring.push({ x, y });
+      }
+      const added: Barrier[] = ring.map((p) => ({ x: p.x, y: p.y, id: def.id, work: 0 }));
+      lvl.barriers.push(...added);
+
+      // A barrier gates a CACHE, never progress. If sealing this room happens
+      // to cut the only route between the stairs -- because its corridor was
+      // that route -- unseal it rather than shipping a floor you cannot leave.
+      if (!this.exitReachable(lvl)) {
+        lvl.barriers = lvl.barriers.filter((b) => !added.includes(b));
+      }
+    }
+    // Belt and braces. Nothing above should be able to leave the exit sealed,
+    // but a floor you cannot leave is unrecoverable, so verify once more and
+    // drop every barrier rather than ship one.
+    if (!this.exitReachable(lvl)) lvl.barriers = [];
+  }
+
+  /** Is the way down still reachable with every barrier treated as solid? */
+  private exitReachable(lvl: Level): boolean {
+    if (!lvl.down) return true;
+    const blocked = new Set(lvl.barriers.map((b) => `${String(b.x)},${String(b.y)}`));
+    const open = new mg.Grid(lvl.grid.w, lvl.grid.h, mg.WALL);
+    for (let y = 0; y < lvl.grid.h; y++) {
+      for (let x = 0; x < lvl.grid.w; x++) {
+        if (lvl.grid.isFloor(x, y) && !blocked.has(`${String(x)},${String(y)}`)) {
+          open.set(x, y, mg.FLOOR);
+        }
+      }
+    }
+    return findPath(open, lvl.up, lvl.down) !== null;
+  }
+
   /** Extra microbes in the rooms that warrant them. */
   private stockRooms(lvl: Level, rng: Rng): void {
     const pool = microbesAt(lvl.depth);

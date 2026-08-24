@@ -171,7 +171,9 @@ export function planFor(depth: number, boss: boolean): RoomPlan {
   if (depth >= 3 && depth <= 7) kinds.push("mat");
   if (depth >= 2) kinds.push("bloom");
   if (depth >= 2) kinds.push("enrichment");
-  return { kinds, count: boss ? 3 : 4 + Math.floor(depth / 3) };
+  // More rooms: they are the landmarks, the caches and the reason to cross a
+  // level rather than beeline for the stairs.
+  return { kinds, count: boss ? 5 : 7 + Math.floor(depth / 2) };
 }
 
 export function roomAt(rooms: readonly Room[], x: number, y: number): Room | null {

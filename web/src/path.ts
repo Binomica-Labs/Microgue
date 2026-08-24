@@ -121,7 +121,14 @@ export function findPath(
   gScore[start] = 0;
   open.push(start, heuristic(from.x, from.y));
 
-  const budget = opts.maxNodes ?? 4000;
+  // The default must exceed the open area, or a perfectly good long path is
+  // reported as no path at all. 4000 was tuned when levels were 110x80 and
+  // sparser; a 96x96 disc has ~4600 open tiles and a corner-to-corner route
+  // silently failed. Callers that want a cheap speculative probe pass their
+  // own small budget.
+  const budget = Number.isFinite(opts.maxNodes ?? NaN)
+    ? Math.max(opts.maxNodes ?? 0, 1)
+    : Math.max(grid.w * grid.h * 2, 8000);
   let expanded = 0;
 
   while (open.size > 0) {

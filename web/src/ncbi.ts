@@ -49,6 +49,10 @@ export const SOURCES: Partial<Record<GeneId, Source>> = {
   dsrA: { query: 'dsrA[Gene] AND "Desulfovibrio vulgaris"[Organism]', organism: "Desulfovibrio vulgaris Hildenborough" },
   hydA: { query: 'hydA[Gene] AND "Desulfovibrio vulgaris"[Organism]', organism: "Desulfovibrio vulgaris Hildenborough" },
   luxAB: { query: 'luxA[Gene] AND "Aliivibrio fischeri"[Organism]', organism: "Aliivibrio fischeri" },
+  // Degradative enzymes. Each from the organism the enzyme is named for.
+  chiA: { query: 'chiA[Gene] AND "Serratia marcescens"[Organism]', organism: "Serratia marcescens" },
+  celA: { query: 'celA[Gene] AND "Clostridium thermocellum"[Organism]', organism: "Clostridium thermocellum" },
+  dspB: { query: 'dspB[Gene] AND "Aggregatibacter actinomycetemcomitans"[Organism]', organism: "Aggregatibacter actinomycetemcomitans" },
   mcrA: { query: 'mcrA[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   hdrB: { query: 'hdrB[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   // oriV is a design element, not a locus. It has no NCBI record and must not

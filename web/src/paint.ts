@@ -86,7 +86,11 @@ export function paintShapes(
   }
 }
 
+const CACHE_MAX = 96;
 const cache = new Map<string, HTMLCanvasElement>();
+
+/** Sprite cache size, for tests and diagnostics. */
+export const spriteCacheSize = (): number => cache.size;
 
 const ROLE_OF: Readonly<Record<string, Role>> =
   { "1": "dark", "2": "body", "3": "accent", "4": "hi" };
@@ -110,20 +114,34 @@ function paintPixels(
   }
 }
 
-/** Rasterised sprite, cached. Supersampled 2x then drawn down for clean edges. */
+/**
+ * Rasterised sprite, cached.
+ *
+ * Pixel art is cached at its AUTHORED size and scaled on draw, so the cache is
+ * independent of zoom. Keying it on the on-screen size meant a single pinch
+ * rasterised a fresh canvas at every intermediate size -- 198 for one organism
+ * across a hundred-step gesture, 784 with four in view -- and then blew the
+ * cache cap and full-flushed it, repeatedly, mid-gesture.
+ *
+ * Vector fallbacks still need a real raster, so their size is quantised to
+ * powers of two: at most a handful of entries per organism instead of one per
+ * pixel of zoom.
+ */
 export function sprite(id: string, size: number, p: Palette): HTMLCanvasElement | null {
   const art = PIXELS[id];
   const shapes = MORPHOLOGY[id];
   if (!art && !shapes) return null;
-  const px = Math.max(Math.round(size), 4);
+  const want = Math.max(Math.round(size), 4);
+  // Pixel art: one entry per organism per palette, whatever the zoom.
+  const px = art ? PX_SIZE : Math.min(2 ** Math.ceil(Math.log2(want)), 256);
   const key = `${id}:${px}:${p.body}${p.dark}${p.accent}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
   const c = document.createElement("canvas");
   const ss = art ? 1 : 2;                   // pixel art is authored at 1:1
-  c.width = art ? PX_SIZE : px * ss;
-  c.height = art ? PX_SIZE : px * ss;
+  c.width = px * ss;
+  c.height = px * ss;
   const cx = c.getContext("2d");
   if (!cx) return null;
 
@@ -143,28 +161,26 @@ export function sprite(id: string, size: number, p: Palette): HTMLCanvasElement 
     paintShapes(cx, shapes, 0, 0, px * ss, p);
   }
 
-  const out = document.createElement("canvas");
-  out.width = px;
-  out.height = px;
-  const ox = out.getContext("2d");
-  if (!ox) return null;
-  // Hard edges for pixel art, smoothed downscale for vector.
-  ox.imageSmoothingEnabled = !art;
-  if (art) {
-    // Separation halo behind the art, since a pale organism on a pale wall
-    // otherwise vanishes. Drawn on the OUTPUT canvas so it stays soft.
-    const r = px * 0.5;
-    const g = ox.createRadialGradient(r, r, r * 0.3, r, r, r);
-    g.addColorStop(0, "rgba(0,0,0,0.5)");
-    g.addColorStop(0.7, "rgba(0,0,0,0.3)");
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    ox.fillStyle = g;
-    ox.fillRect(0, 0, px, px);
-    ox.imageSmoothingEnabled = false;
+  // Pixel art needs no second canvas: `c` already holds the art at exactly its
+  // authored size, and the separation halo is drawn per-frame in drawBody so
+  // it stays soft at any zoom instead of being baked at 16px and stretched.
+  let out = c;
+  if (!art) {
+    out = document.createElement("canvas");
+    out.width = px;
+    out.height = px;
+    const ox = out.getContext("2d");
+    if (!ox) return null;
+    ox.imageSmoothingEnabled = true;        // smoothed downscale for vector
+    ox.drawImage(c, 0, 0, px, px);
   }
-  ox.drawImage(c, 0, 0, px, px);
 
-  if (cache.size > 120) cache.clear();
+  // Evict the oldest rather than flushing everything: a full clear mid-pinch
+  // throws away sprites that are about to be needed again.
+  if (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
   cache.set(key, out);
   return out;
 }
@@ -347,6 +363,7 @@ export function drawBody(
   axis: ArtAxis = "east",
   stretch = 1,
   flagellum: Flagellum | null = null,
+  halo = true,
 ): void {
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -375,6 +392,19 @@ export function drawBody(
     ctx.globalAlpha = alpha;
     strokeFlagellum(ctx, size, flagellum);
     ctx.globalAlpha = a;
+  }
+  // Separation halo, drawn here so it is soft at any zoom. A pale organism on
+  // a pale wall vanishes without it.
+  if (halo) {
+    const r = size * 0.52;
+    const g = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, r);
+    g.addColorStop(0, "rgba(0,0,0,0.5)");
+    g.addColorStop(0.7, "rgba(0,0,0,0.3)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.drawImage(img, -size / 2, -size / 2, size, size);
   ctx.restore();

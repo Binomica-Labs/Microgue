@@ -25,7 +25,8 @@ export type GeneId =
   | "psbA" | "cbbL" | "katG" | "amoA" | "narG" | "nosZ" | "nifH"
   | "soxB" | "sqr"  | "mtrC" | "omcS" | "pufM" | "fmoA" | "csmA"
   | "aclB" | "dsrA" | "aprA" | "hydA" | "mcrA" | "hdrB" | "ori"
-  | "nirS" | "norB" | "sat" | "nxrA" | "luxAB";
+  | "nirS" | "norB" | "sat" | "nxrA" | "luxAB"
+  | "chiA" | "celA" | "dspB";
 
 export type Teap = "O2" | "NO3-" | "Mn(IV)" | "Fe(III)" | "S0" | "H2S" | "SO4" | "CO2";
 
@@ -67,6 +68,9 @@ export const GENES: Readonly<Record<GeneId, Gene>> = {
   sat:  { id:"sat",  name:"sat",  kb:1.2, product:"ATP sulfurylase",                 tier:3, desc:"Activates sulfate to APS. Nothing downstream runs without it.", pathway:"sulfur" },
   nxrA: { id:"nxrA", name:"nxrA", kb:3.4, product:"nitrite oxidoreductase alpha",   tier:2, desc:"NO2- to NO3-. A nitrate reductase running the other way.", pathway:"nitrogen" },
   luxAB: { id:"luxAB", name:"luxAB", kb:2.1, product:"bacterial luciferase", tier:2, desc:"Emits blue-green light. Luciferase is an oxygenase: no O2, no glow.", pathway:"defense" },
+  chiA: { id:"chiA", name:"chiA", kb:1.7, product:"chitinase A",                  tier:1, desc:"Cuts chitin. Sediments are full of arthropod and fungal debris.", pathway:"carbon" },
+  celA: { id:"celA", name:"celA", kb:1.5, product:"endoglucanase",                tier:1, desc:"Cuts cellulose. Plant material sinks and settles.", pathway:"carbon" },
+  dspB: { id:"dspB", name:"dspB", kb:1.1, product:"dispersin B, a glycoside hydrolase", tier:1, desc:"Dissolves the poly-GlcNAc that holds a biofilm together.", pathway:"defense" },
   ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates.", pathway:"core" },
 };
 
@@ -92,15 +96,15 @@ export interface Microbe {
 
 export const MICROBES: readonly Microbe[] = [
   { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL","luxAB"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" , weapon:"melee" },
-  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG","luxAB"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
+  { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG","luxAB","celA"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" , facing:"rotate" , behaviour:"glide", size:"medium" , weapon:"melee" },
   { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["nxrA"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
-  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"spear" },
-  { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" , facing:"rotate" , behaviour:"glide", size:"filament" , weapon:"melee" },
+  { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ","dspB"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"spear" },
+  { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr","chiA"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" , facing:"rotate" , behaviour:"glide", size:"filament" , weapon:"melee" },
   { id:"thiothrix",       name:"Thiothrix",       depth:3, hp:14, atk:5,  glyph:"t", genes:["soxB"],        note:"Filamentous, rosette-forming sulfur oxidiser." , pigment:"#e6e6da" , facing:"none" , behaviour:"sessile", size:"filament" , weapon:"melee" },
   { id:"thiobacillus",    name:"Thiobacillus",    depth:3, hp:11, atk:6,  glyph:"T", genes:["sqr","soxB"],  note:"Chemolithoautotroph. Generates sulfuric acid." , pigment:"#d8cfa0" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"cloud" },
-  { id:"geobacter",       name:"Geobacter",       depth:4, hp:18, atk:7,  glyph:"G", genes:["omcS","mtrC"], note:"Grows conductive pili. Reduces solid Fe(III) oxides." , pigment:"#d0603c" , facing:"rotate" , behaviour:"wire", size:"medium" , weapon:"bolt" },
+  { id:"geobacter",       name:"Geobacter",       depth:4, hp:18, atk:7,  glyph:"G", genes:["omcS","mtrC","dspB"], note:"Grows conductive pili. Reduces solid Fe(III) oxides." , pigment:"#d0603c" , facing:"rotate" , behaviour:"wire", size:"medium" , weapon:"bolt" },
   { id:"shewanella",      name:"Shewanella",      depth:4, hp:16, atk:6,  glyph:"S", genes:["mtrC"],        note:"Mtr pathway respires minerals. Wildly versatile." , pigment:"#dd9078" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"melee" },
   { id:"rhodospirillum",  name:"Rhodospirillum",  depth:4, hp:15, atk:5,  glyph:"r", genes:["pufM","nifH"], note:"Purple non-sulfur. Photoheterotroph, fixes N2." , pigment:"#b0527a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"melee" },
   { id:"allochromatium",  name:"Allochromatium",  depth:5, hp:22, atk:8,  glyph:"C", genes:["pufM","sqr"],  note:"Purple sulfur. Intracellular S0 globules." , pigment:"#b34a86" , facing:"rotate" , behaviour:"swarm", size:"large" , weapon:"melee" },

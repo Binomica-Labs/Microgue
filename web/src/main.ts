@@ -31,6 +31,7 @@ import { WEAPONS } from "./weapons.js";
 import { drawClose, inBox as inBoxOf, type Box } from "./chrome.js";
 import { drawNotes, drawSplash } from "./screens.js";
 import { installUpdater } from "./sw_client.js";
+import { BUILD, VERSION } from "./version.js";
 import { SUBSTRATES, addDrop, dropAt, itemColour, itemName, itemNote, removeDrop,
          substratesAt, yieldOf, type Drop, type Item } from "./items.js";
 import * as say from "./flavour.js";
@@ -38,6 +39,7 @@ import { computeFov, isSeen, isVisible, sightRadius } from "./fov.js";
 import { isNight, lightAt, newClock, timeName, type Clock } from "./cycle.js";
 import { MAX_FLOOR } from "./dungeon.js";
 import { ROOM_STYLE, roomAt, type Room } from "./rooms.js";
+import { BARRIERS, barrierAt, blockedBy, degrade } from "./barrier.js";
 import { exportAnnotation, newRun, recordLocus, recordSighting,
          resynthesise, type RunState } from "./run.js";
 import { SOURCES, cached, fetchAll } from "./ncbi.js";
@@ -135,7 +137,7 @@ class Game {
     try {
       if (localStorage.getItem("microgue:updated") === "1") {
         localStorage.removeItem("microgue:updated");
-        this.toasts.push("Updated to the latest build.", "info", 0);
+        this.toasts.push(`Updated to ${VERSION} (${BUILD}).`, "info", 0);
       }
     } catch { /* private browsing */ }
     this.resize();
@@ -473,6 +475,27 @@ class Game {
     const m = this.dungeon.mobAt(x, y);
     if (m) { this.attack(m); return false; }
     if (!this.level.grid.isFloor(x, y)) return false;
+
+    // Material you have to digest through. Expressing the enzyme is the key;
+    // merely carrying it is not.
+    const bar = barrierAt(this.level.barriers, x, y);
+    if (bar) {
+      const r = degrade(bar, (g) => this.genome.expression(g, this.dungeon.depth) > 0);
+      if (r.kind === "blocked") {
+        this.note(blockedBy(r.def, (g) => bio.GENES[g].name));
+        this.walk = null;
+        return false;
+      }
+      this.fx.add({ kind: "burst", t0: this.now, dur: 340, x, y,
+                    colour: r.def.colour, n: 7, seed: this.now + x });
+      if (r.kind === "working") {
+        this.note(`You begin digesting the ${r.def.name}. ${String(r.left)} more.`);
+        this.mobTurn();
+        return false;
+      }
+      this.level.barriers = this.level.barriers.filter((b) => b !== bar);
+      this.note(`The ${r.def.name} gives way.`);
+    }
     this.player.x = x; this.player.y = y;
     this.look();
     this.onTile(x, y);
@@ -515,6 +538,8 @@ class Game {
         ? `${itemName(d.items[0])} lies here.`
         : `A lysate of ${String(d.items.length)} things lies here.`);
     }
+    const bar = barrierAt(this.level.barriers, x, y);
+    if (bar) parts.push(`${BARRIERS[bar.id].name}. ${BARRIERS[bar.id].note}`);
     if (this.level.down?.x === x && this.level.down.y === y) {
       parts.push("A way down into the next layer.");
     }
@@ -1241,6 +1266,28 @@ class Game {
       for (const t of room.tiles) {
         if (!isSeen(sight, t.x, t.y)) continue;
         ctx.fillRect(t.x * px, t.y * px, px + 1, px + 1);
+      }
+    }
+
+    // Barriers, drawn as material rather than as doors.
+    for (const b of this.level.barriers) {
+      if (!isSeen(sight, b.x, b.y)) continue;
+      const def = BARRIERS[b.id];
+      ctx.globalAlpha = isVisible(sight, b.x, b.y) ? 0.85 : 0.4;
+      ctx.fillStyle = def.colour;
+      ctx.fillRect(b.x * px, b.y * px, px, px);
+      ctx.globalAlpha = isVisible(sight, b.x, b.y) ? 0.35 : 0.15;
+      ctx.fillStyle = "#000000";
+      for (let i = 0; i < 4; i++) {
+        const j = jitter(b.x * 31 + b.y, i);
+        ctx.fillRect((b.x + 0.5 + j.x * 0.32) * px, (b.y + 0.5 + j.y * 0.32) * px,
+                     px * 0.2, px * 0.2);
+      }
+      ctx.globalAlpha = 1;
+      if (b.work > 0) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = Math.max(px * 0.05, 1);
+        ctx.strokeRect(b.x * px + px * 0.12, b.y * px + px * 0.12, px * 0.76, px * 0.76);
       }
     }
 

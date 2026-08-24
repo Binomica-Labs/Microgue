@@ -231,6 +231,28 @@ by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
 cap does the work. The clock bounds that remain are deliberately loose and
 only trip on an order-of-magnitude regression.
 
+## Version and build identity
+
+`package.json` holds the version. `build.mjs` derives `__VERSION__` from it and
+`__BUILD__` from a hash of every SOURCE file plus the static assets, and injects
+both into the game bundle and the worker. The tarball name is derived from the
+same field, so the file you download, the string on the splash screen and the
+`public/BUILD` file on the server cannot disagree.
+
+Hashing the INPUTS matters: hashing the output needed a second compile pass to
+inject the resulting hash, which left the worker cache named after a bundle
+that no longer existed on disk. Hashing inputs means the id is known before
+compiling and both bundles are emitted once.
+
+The build FAILS if either constant does not reach either bundle -- which it did
+immediately the first time, because `version.ts` was not yet imported and
+esbuild tree-shook the constants away. The fallback string is `unbuilt`, not a
+plausible version, so a define that goes missing looks obviously wrong on
+screen rather than like an old build.
+
+Shown on the splash screen (`v0.45 · 7c0c03b`), in the notebook header, and in
+the toast after a service worker update.
+
 ## sync.sh
 
 One command: `~/sync.sh "message"`. It finds the newest tarball in Downloads by
@@ -717,6 +739,50 @@ there could see you.
 Travel interrupts when something new comes into view, which is the single
 thing that stops auto-travel walking you into a fight. The spotted set is
 cleared as things leave sight, so re-entering a room alerts again.
+
+## Sprite cache is zoom-independent
+
+Pixel art is cached at its AUTHORED size and scaled on draw. Keying the cache
+on the on-screen size meant a single pinch rasterised a fresh canvas at every
+intermediate size: 198 canvases for one organism across a hundred-step
+gesture, 784 with four in view, and then the cache blew its cap and
+full-flushed itself repeatedly mid-gesture. Now 0.
+
+Two consequences to preserve: the separation halo is drawn per-frame in
+`drawBody` rather than baked into the sprite, because a halo baked at 16px and
+stretched is a blur; and vector fallbacks quantise their size to powers of two
+rather than caching one entry per pixel of zoom. Eviction drops the oldest
+entry instead of clearing everything, since a full flush mid-pinch throws away
+sprites about to be needed again.
+
+## Barriers
+
+Material you digest through, not doors you unlock. Each is something that
+genuinely accumulates in a column and each is opened by an enzyme that
+genuinely degrades it: biofilm matrix by dispersin B, cellulose rafts by an
+endoglucanase, chitin drift by chitinase, ferric crust by reducing the Fe(III),
+sulfur and carbonate crusts by oxidising or acidifying them.
+
+Two rules make them work, and both are asserted:
+
+- **A barrier must be openable by a gene found at or above its depth.** Three
+  of them initially were not -- biofilm needed `dspB` from D4 while appearing
+  at D1 -- which is not a gate, it is a wall.
+- **A barrier NEVER blocks the way down.** They seal ports and enrichments,
+  the caches worth crossing a level for. `sealRooms` verifies the exit is
+  still reachable with every barrier treated as solid and unseals the room if
+  not, with a final sweep that drops them all rather than ship a floor you
+  cannot leave.
+
+Expressing the enzyme is what opens a barrier; carrying it is not. So the
+answer is always "arrange your plasmid", never "find the key".
+
+## Density, not size
+
+At 167 open tiles per microbe the column read as empty, and making levels
+LARGER would only have spread the same content thinner. Mob counts scale with
+the floor area that actually exists, targeting about 50 tiles per microbe, and
+rooms went from ~4 to ~6 per floor.
 
 ## Loot, and why it is not automatic
 

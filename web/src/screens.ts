@@ -7,6 +7,7 @@ import * as bio from "./biology.js";
 import { drawClose, drawHeader, type Box, type Insets } from "./chrome.js";
 import { notebook, type RunState } from "./run.js";
 import { SLOTS as SAVE_SLOTS, listSlots } from "./saves.js";
+import { BUILD, VERSION } from "./version.js";
 
 export type Wrap = (text: string, max: number) => string[];
 
@@ -85,6 +86,12 @@ export function drawSplash(
   ctx.fillStyle = "#6f8f7c";
   ctx.font = `${10 * u}px ui-monospace,monospace`;
   ctx.fillText("tap a culture to begin", W / 2, H - ins.bottom - 20 * u);
+
+  // The build's identity, where you look at launch. This is the only place
+  // that answers "did the app actually update?" without guessing.
+  ctx.fillStyle = "#4f6a5c";
+  ctx.font = `${9 * u}px ui-monospace,monospace`;
+  ctx.fillText(`${VERSION} · ${BUILD}`, W / 2, H - ins.bottom - 6 * u);
   return drawClose(ctx, W, ins, u);
 }
 
@@ -97,7 +104,7 @@ export function drawNotes(
   ctx.fillRect(0, 0, W, H);
 
   const seen = notebook(run);
-  let y = drawHeader(ctx, ins, u, "FIELD NOTEBOOK",
+  let y = drawHeader(ctx, ins, u, `FIELD NOTEBOOK  ${VERSION}`,
     `${String(seen.length)}/${String(bio.MICROBES.length)} recorded · ` +
     `deepest D${String(run.deepest)} · ${String(run.deaths)} lysis events`);
 

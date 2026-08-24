@@ -20,6 +20,7 @@ import { MODULES } from "../src/kegg.js";
 import { PIXELS, validate } from "../src/pixels.js";
 import { MORPHOLOGY } from "../src/shapes.js";
 import { ROOM_STYLE, planFor } from "../src/rooms.js";
+import { BARRIERS, barriersAt, blockedBy, degrade } from "../src/barrier.js";
 
 // Everything here came out of an adversarial pass. Each assertion failed at
 // least once before it was written.
@@ -293,6 +294,131 @@ describe("every generated floor holds together", () => {
           }
         }
       }
+    }
+  });
+});
+
+describe("barriers", () => {
+  it("every barrier is opened by a gene that exists and is obtainable", () => {
+    const droppable = new Set(bio.MICROBES.flatMap((m) => [...m.genes]));
+    for (const def of Object.values(BARRIERS)) {
+      expect(def.opens.length, def.id).toBeGreaterThan(0);
+      for (const g of def.opens) {
+        expect(bio.GENES[g], `${def.id} opens with unknown ${g}`).toBeDefined();
+        expect(droppable.has(g), `${def.id} needs ${g}, which nothing drops`).toBe(true);
+      }
+    }
+  });
+
+  it("every barrier is openable by something found at or above its depth", () => {
+    // A barrier you can only pass with a gene from deeper down is a wall.
+    for (const def of Object.values(BARRIERS)) {
+      for (const d of def.depths) {
+        const reachable = new Set(
+          bio.MICROBES.filter((m) => m.depth <= d).flatMap((m) => [...m.genes]));
+        const any = def.opens.some((g) => reachable.has(g));
+        expect(any, `${def.id} at D${String(d)} needs a gene from deeper`).toBe(true);
+      }
+    }
+  });
+
+  it("expressing the enzyme is what opens it, not carrying it", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "dspB", optimised: true });   // in the bin only
+    const b = { x: 0, y: 0, id: "biofilm" as const, work: 0 };
+    const can = (g: bio.GeneId): boolean => p.expression(g, 2) > 0;
+    expect(degrade(b, can).kind, "a stashed gene must not open it").toBe("blocked");
+
+    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(5, { kind: "gene", id: "dspB", optimised: true });
+    expect(degrade(b, can).kind).not.toBe("blocked");
+  });
+
+  it("degrading takes the stated number of turns, then opens", () => {
+    const def = BARRIERS.ferric;
+    const b = { x: 0, y: 0, id: "ferric" as const, work: 0 };
+    const can = (): boolean => true;
+    for (let i = 1; i < def.turns; i++) {
+      expect(degrade(b, can).kind, `turn ${String(i)}`).toBe("working");
+    }
+    expect(degrade(b, can).kind).toBe("opened");
+  });
+
+  it("a blocked barrier makes no progress, however many times you try", () => {
+    const b = { x: 0, y: 0, id: "chitin" as const, work: 0 };
+    for (let i = 0; i < 50; i++) degrade(b, () => false);
+    expect(b.work, "blocked attempts must not accumulate").toBe(0);
+  });
+
+  it("the message names the enzymes you would need", () => {
+    const msg = blockedBy(BARRIERS.ferric, (g) => bio.GENES[g].name);
+    expect(msg).toContain("mtrC");
+    expect(msg).toContain("omcS");
+    expect(msg).toContain("ferric crust");
+  });
+
+  it("barriers only appear in strata where the material exists", () => {
+    for (const def of Object.values(BARRIERS)) {
+      for (const d of def.depths) {
+        expect(d).toBeGreaterThanOrEqual(1);
+        expect(d).toBeLessThanOrEqual(bio.MAX_DEPTH);
+      }
+      expect(barriersAt(def.depths[0] ?? 1)).toContainEqual(def);
+    }
+    // Cellulose is surface debris; it has no business on the methanogenic floor.
+    expect(barriersAt(8).map((b) => b.id)).not.toContain("cellulose");
+    expect(barriersAt(1).map((b) => b.id)).not.toContain("carbonate");
+  });
+
+  it("a barrier NEVER blocks the way down -- they gate caches, not progress", () => {
+    for (const seed of [3, 41, 99]) {
+      const d = new Dungeon(96, 96, seed);
+      for (let f = 1; f < MAX_FLOOR; f++) {
+        const L = d.level(f);
+        if (!L.down) continue;
+        // Path with every barrier tile treated as solid.
+        const blocked = new Set(L.barriers.map((b) => `${String(b.x)},${String(b.y)}`));
+        const g = new mg.Grid(L.grid.w, L.grid.h, mg.WALL);
+        for (let y = 0; y < L.grid.h; y++) {
+          for (let x = 0; x < L.grid.w; x++) {
+            if (L.grid.isFloor(x, y) && !blocked.has(`${String(x)},${String(y)}`)) {
+              g.set(x, y, mg.FLOOR);
+            }
+          }
+        }
+        expect(findPath(g, L.up, L.down), `seed ${String(seed)} f${String(f)}`).not.toBeNull();
+      }
+    }
+  });
+});
+
+describe("the path budget scales with the level", () => {
+  it("a long but valid route across a real floor is found by default", () => {
+    // 4000 was tuned for 110x80 levels. A 96x96 disc has ~4600 open tiles, and
+    // corner-to-corner silently returned "no path" -- auto-travel just refused
+    // to move with no explanation.
+    for (const seed of [7, 41, 99]) {
+      const d = new Dungeon(96, 96, seed);
+      for (let f = 1; f < MAX_FLOOR; f += 5) {
+        const L = d.level(f);
+        if (!L.down) continue;
+        expect(findPath(L.grid, L.up, L.down),
+               `seed ${String(seed)} f${String(f)}`).not.toBeNull();
+      }
+    }
+  });
+
+  it("an explicit small budget is still honoured for cheap probes", () => {
+    const g = new mg.Grid(96, 96, mg.FLOOR);
+    expect(findPath(g, { x: 2, y: 2 }, { x: 93, y: 93 }, { maxNodes: 20 })).toBeNull();
+    expect(findPath(g, { x: 2, y: 2 }, { x: 93, y: 93 })).not.toBeNull();
+  });
+
+  it("the default outgrows the grid it is given", () => {
+    for (const n of [40, 96, 160]) {
+      const g = new mg.Grid(n, n, mg.FLOOR);
+      expect(findPath(g, { x: 1, y: 1 }, { x: n - 2, y: n - 2 }),
+             `${String(n)}x${String(n)}`).not.toBeNull();
     }
   });
 });

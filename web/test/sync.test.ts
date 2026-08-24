@@ -120,3 +120,46 @@ describe("sync.sh", () => {
     expect(SRC).toMatch(/cp -r "\$src\/\." "\$REPO\/web\/"/);
   });
 });
+
+describe("build identity", () => {
+  const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
+  const buildFile = readFileSync("public/BUILD", "utf8").trim();
+  const buildScript = readFileSync("build.mjs", "utf8");
+
+  it("the version is declared once, in package.json", () => {
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
+    // Nothing may hard-code it: that is how the cache constant went stale.
+    const ver = readFileSync("src/version.ts", "utf8");
+    expect(ver).toContain("__VERSION__");
+    expect(ver, "a literal version string here would drift")
+      .not.toMatch(/["']v\d+\.\d+["']\s*;/);
+  });
+
+  it("BUILD is well formed: a version and a content hash", () => {
+    // Deliberately NOT compared against package.json. `npm run build` runs the
+    // tests BEFORE building, so public/BUILD is always one build behind at
+    // this point. The artefact-matches-source check belongs in build.mjs,
+    // which fails the build if either constant is missing from either bundle.
+    expect(buildFile).toMatch(/^v\d+\.\d+ [0-9a-f]{12}$/);
+  });
+
+  it("the build hashes its inputs, so the id is known before compiling", () => {
+    // Hashing the OUTPUT needed a second pass, which left the service worker
+    // cache named after a bundle that no longer existed on disk.
+    expect(buildScript).toMatch(/walk\("src"\)/);
+    expect(buildScript, "both bundles must receive the same define")
+      .toMatch(/const define = \{/);
+  });
+
+  it("the build fails loudly if the id does not reach a bundle", () => {
+    expect(buildScript).toMatch(/did not reach public\/sw\.js/);
+    expect(buildScript).toMatch(/did not reach public\/microgue\.js/);
+  });
+
+  it("the bundle carries a version and a hash, whichever build it is from", () => {
+    const js = readFileSync("public/microgue.js", "utf8");
+    expect(js, "no version in the bundle").toMatch(/v\d+\.\d+/);
+    expect(js, "no build hash in the bundle").toMatch(/[0-9a-f]{12}/);
+    expect(js, "the unbuilt fallback must never ship").not.toContain("unbuilt");
+  });
+});
