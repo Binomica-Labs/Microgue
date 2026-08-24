@@ -6,7 +6,16 @@
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
-import { BIN_CAP, SLOTS, type Part, type Strength } from "./plasmid.js";
+import { MAX_LEVEL, MODIFIERS, PROMOTERS, TERMINATORS, modifierSlots,
+         type ModifierId, type PromoterId, type TerminatorId } from "./parts.js";
+
+const isPromoterId = (v: unknown): v is PromoterId =>
+  typeof v === "string" && Object.prototype.hasOwnProperty.call(PROMOTERS, v);
+const isTerminatorId = (v: unknown): v is TerminatorId =>
+  typeof v === "string" && Object.prototype.hasOwnProperty.call(TERMINATORS, v);
+const isModifierId = (v: unknown): v is ModifierId =>
+  typeof v === "string" && Object.prototype.hasOwnProperty.call(MODIFIERS, v);
+import { BIN_CAP, SLOTS, type Part } from "./plasmid.js";
 
 export interface Settings {
   readonly uiScale: number;
@@ -18,7 +27,7 @@ export interface Settings {
 /** Bump when the shape changes incompatibly. A save from an older schema is
  *  discarded rather than half-loaded: `version` was being written and never
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
-export const SCHEMA = 5;
+export const SCHEMA = 8;
 
 export interface SaveData {
   readonly version: number;
@@ -32,6 +41,15 @@ export interface SaveData {
   readonly atp: number;
   readonly ring: readonly (Part | null)[];
   readonly bin: readonly Part[];
+  /** Modifiers picked up but not yet attached. These are the RARE drops --
+   *  losing them on reload is worse than losing anything else in the save. */
+  readonly heldMods: readonly ModifierId[];
+  /** Turn count, so the diel cycle resumes rather than restarting at dawn. */
+  readonly turn: number;
+  /** Clock turn each visited floor was last stocked, so the pump does not
+   *  reset on reload and a stripped floor stays stripped. */
+  readonly stocked: readonly [number, number][];
+  readonly won: boolean;
   /** Lineage state: the notebook, the score, the death count. Omitting this
    *  silently discarded every sighting the moment the tab closed. */
   readonly run: { deepest: number; deaths: number; bestiary: string[]; library: GeneId[] };
@@ -54,20 +72,41 @@ const bool = (v: unknown, fallback: boolean): boolean =>
 const isGeneId = (v: unknown): v is GeneId =>
   typeof v === "string" && Object.prototype.hasOwnProperty.call(GENES, v);
 
-const STRENGTHS: readonly string[] = ["weak", "medium", "strong"];
+/** Old three-strength promoters map onto the Anderson series they described. */
+const LEGACY_PROMOTER: Readonly<Record<string, PromoterId>> = {
+  weak: "j23114", medium: "j23106", strong: "j23119",
+};
 
 function parsePart(v: unknown): Part | null {
   if (!isRecord(v)) return null;
   const kind = v["kind"];
-  if (kind === "terminator") return { kind: "terminator" };
-  if (kind === "promoter") {
-    const st = v["strength"];
-    const strength: Strength =
-      typeof st === "string" && STRENGTHS.includes(st) ? (st as Strength) : "medium";
-    return { kind: "promoter", strength };
+
+  if (kind === "terminator") {
+    const id = v["id"];
+    // A save from before terminators had identities gets the standard single.
+    return { kind: "terminator",
+             id: isTerminatorId(id) ? id : "rrnbt1" };
   }
+
+  if (kind === "promoter") {
+    const id = v["id"];
+    if (isPromoterId(id)) return { kind: "promoter", id };
+    const legacy = v["strength"];
+    return { kind: "promoter",
+             id: typeof legacy === "string" ? LEGACY_PROMOTER[legacy] ?? "j23106" : "j23106" };
+  }
+
   if (kind === "gene" && isGeneId(v["id"])) {
-    return { kind: "gene", id: v["id"], optimised: bool(v["optimised"], false) };
+    // `optimised: true` becomes the codon modifier, which is what it was.
+    const legacyOptimised = bool(v["optimised"], false);
+    const mods = Array.isArray(v["mods"])
+      ? [...new Set((v["mods"] as unknown[]).filter(isModifierId))]
+      : legacyOptimised ? ["codon" as ModifierId] : [];
+    const level = Math.min(Math.max(Math.round(num(v["level"], 1)), 1), MAX_LEVEL);
+    // Never keep more modifiers than the level allows, or a hand-edited save
+    // would out-perform anything reachable in play.
+    return { kind: "gene", id: v["id"], level,
+             mods: mods.slice(0, modifierSlots(level)) };
   }
   return null;
 }
@@ -154,6 +193,18 @@ export function parseSave(raw: unknown): SaveData | null {
     atp: Math.min(Math.max(num(raw["atp"], 100), 0), 100),
     ring: parseRing(raw["ring"]),
     bin: parseBin(raw["bin"]),
+    heldMods: Array.isArray(raw["heldMods"])
+      ? (raw["heldMods"] as unknown[]).filter(isModifierId).slice(0, 40)
+      : [],
+    turn: Math.min(Math.max(Math.round(num(raw["turn"], 0)), 0), 1e7),
+    stocked: Array.isArray(raw["stocked"])
+      ? (raw["stocked"] as unknown[]).flatMap((e): [number, number][] =>
+          Array.isArray(e) && e.length === 2
+            && typeof e[0] === "number" && typeof e[1] === "number"
+            ? [[Math.round(e[0]), Math.max(Math.round(e[1]), 0)]] : [])
+          .slice(0, MAX_DEPTH * 3)
+      : [],
+    won: bool(raw["won"], false),
     run: parseRun(raw["run"]),
     settings: parseSettings(raw["settings"]),
   };

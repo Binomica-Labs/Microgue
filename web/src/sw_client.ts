@@ -38,13 +38,19 @@ export function installUpdater(hooks: UpdateHooks = {}): void {
   // reloading on that one would restart the app the first time it is opened.
   const hadController = navigator.serviceWorker.controller !== null;
 
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
+  // Every callback here is wrapped: a throw in an update check must not stop
+  // the app, and there is no console to read it on a phone.
+  const swallow = (fn: () => void): (() => void) => () => {
+    try { fn(); } catch { /* an update check is not worth a crash */ }
+  };
+
+  navigator.serviceWorker.addEventListener("controllerchange", swallow(() => {
     if (!hadController || reloading) return;
     reloading = true;
     hooks.onUpdating?.();
     if (hooks.reload) hooks.reload();
     else location.reload();
-  });
+  }));
 
   void navigator.serviceWorker
     .register("./sw.js", { scope: "./", updateViaCache: "none" })
@@ -53,13 +59,13 @@ export function installUpdater(hooks: UpdateHooks = {}): void {
 
       // Ask on resume. This is the one that matters on a phone, where the app
       // is suspended rather than closed.
-      document.addEventListener("visibilitychange", () => {
+      document.addEventListener("visibilitychange", swallow(() => {
         if (document.visibilityState === "visible") check();
-      });
-      addEventListener("focus", check);
+      }));
+      addEventListener("focus", swallow(check));
       // And on a long session, occasionally.
-      setInterval(check, 15 * 60 * 1000);
-      check();
+      setInterval(swallow(check), 15 * 60 * 1000);
+      swallow(check)();
     })
     .catch(() => undefined);
 }

@@ -6,8 +6,10 @@
 // not a wipe -- the lineage carries part of its genome forward, which is what
 // a culture actually does.
 
+import type { Part } from "./transcription.js";
 import { GENES, MICROBES, stratum, type GeneId } from "./biology.js";
 import { SOURCES, type Record_ } from "./ncbi.js";
+import { MODIFIERS, PROMOTERS, TERMINATORS } from "./parts.js";
 
 /** Fraction of acquired loci that survive resynthesis. */
 export const CARRYOVER = 0.5;
@@ -77,7 +79,7 @@ export function completeness(run: RunState): { seen: number; total: number } {
  */
 export function exportAnnotation(
   name: string, depth: number,
-  slots: readonly ({ kind: string; id?: GeneId; strength?: string } | null)[],
+  slots: readonly (Part | null)[],
   sequences?: Map<GeneId, Record_>,
 ): string {
   const s = stratum(depth);
@@ -93,18 +95,27 @@ export function exportAnnotation(
   slots.forEach((p, i) => {
     if (!p) return;
     const at = String(i).padStart(2, "0");
-    if (p.kind === "promoter") lines.push(`; ${at}  promoter    ${p.strength ?? ""}`);
-    else if (p.kind === "terminator") lines.push(`; ${at}  terminator`);
-    else if (p.kind === "gene" && p.id) {
+    if (p.kind === "promoter") lines.push(`; ${at}  promoter    ${PROMOTERS[p.id].name} (${PROMOTERS[p.id].mode})`);
+    else if (p.kind === "terminator") {
+      const t = TERMINATORS[p.id];
+      lines.push(`; ${at}  terminator  ${t.name.padEnd(10)} ` +
+                 `${((1 - t.readthrough) * 100).toFixed(0)}% efficient`);
+    }
+    else {
       const g = GENES[p.id];
-      lines.push(`; ${at}  CDS         ${g.name.padEnd(6)} ${g.kb.toFixed(1)} kb  ${g.product}`);
+      const extra = [
+        p.level > 1 ? `L${String(p.level)}` : "",
+        ...p.mods.map((m) => MODIFIERS[m].name),
+      ].filter(Boolean).join(", ");
+      lines.push(`; ${at}  CDS         ${g.name.padEnd(6)} ${g.kb.toFixed(1)} kb  ` +
+                 `${g.product}${extra ? `  [${extra}]` : ""}`);
     }
   });
   lines.push("");
 
   // Then the sequences themselves.
   for (const [i, p] of slots.entries()) {
-    if (p?.kind !== "gene" || !p.id) continue;
+    if (p?.kind !== "gene") continue;
     const g = GENES[p.id];
     const rec = sequences?.get(p.id);
     const src = SOURCES[p.id];

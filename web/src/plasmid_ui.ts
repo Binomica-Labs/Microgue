@@ -5,7 +5,9 @@
 // is as large as the ring is wide.
 
 import { GENES, type Pathway } from "./biology.js";
-import { PROMOTER_POWER, SLOTS, type Part, type Plasmid } from "./plasmid.js";
+import { SLOTS, type Part, type Plasmid } from "./plasmid.js";
+import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, rarityOfTier,
+         type Rarity } from "./parts.js";
 
 export const PATHWAY_COLOUR: Readonly<Record<Pathway, string>> = {
   photo: "#5ec98a", carbon: "#8fd4c2", nitrogen: "#cfe04a", sulfur: "#e0c25a",
@@ -35,9 +37,8 @@ export function slotCentre(g: RingGeom, i: number): { x: number; y: number } {
 
 function partLabel(p: Part): string {
   if (p.kind === "gene") return GENES[p.id].name;
-  if (p.kind === "promoter") return p.strength === "strong" ? "P+++"
-    : p.strength === "medium" ? "P++" : "P+";
-  return "term";
+  if (p.kind === "promoter") return PROMOTERS[p.id].name;
+  return TERMINATORS[p.id].name;
 }
 
 function partColour(p: Part): string {
@@ -66,6 +67,14 @@ export function binCell(g: BinGeom, i: number): { x: number; y: number } {
   return { x: g.x + c * (g.cell + g.gap), y: g.y + r * (g.cell + g.gap) };
 }
 
+/** The rarity of anything that can sit in the bin. Genes take theirs from
+ *  their tier, so the ladder is one thing rather than two. */
+export function partRarity(p: Part): Rarity {
+  if (p.kind === "gene") return rarityOfTier(GENES[p.id].tier);
+  if (p.kind === "promoter") return PROMOTERS[p.id].rarity;
+  return TERMINATORS[p.id].rarity;
+}
+
 export function drawBin(
   ctx: CanvasRenderingContext2D, g: BinGeom, parts: readonly Part[],
   u: number, dragging: number | null,
@@ -77,11 +86,36 @@ export function drawBin(
     if (!p) continue;
     const c = binCell(g, i);
     const held = dragging === i;
+    const tier = RARITY[partRarity(p)];
     ctx.globalAlpha = held ? 0.25 : 1;
+
+    // Body in the pathway colour, which says what it DOES; outline in the
+    // rarity colour, which says how hard it was to find. Two axes, two
+    // channels, so neither has to be read off the other.
     ctx.fillStyle = partColour(p);
     ctx.beginPath();
     ctx.roundRect(c.x, c.y, g.cell, g.cell, g.cell * 0.22);
     ctx.fill();
+
+    ctx.strokeStyle = tier.colour;
+    ctx.lineWidth = Math.max(g.cell * 0.075, 1.5);
+    ctx.beginPath();
+    ctx.roundRect(c.x + ctx.lineWidth / 2, c.y + ctx.lineWidth / 2,
+                  g.cell - ctx.lineWidth, g.cell - ctx.lineWidth, g.cell * 0.2);
+    ctx.stroke();
+
+    // A corner pip for the top two tiers, so they read at a glance and to a
+    // colourblind eye.
+    if (tier.id === "epic" || tier.id === "legendary") {
+      ctx.fillStyle = tier.colour;
+      ctx.beginPath();
+      ctx.moveTo(c.x + g.cell, c.y);
+      ctx.lineTo(c.x + g.cell, c.y + g.cell * 0.3);
+      ctx.lineTo(c.x + g.cell * 0.7, c.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     ctx.fillStyle = "#141414";
     ctx.font = `${Math.max(g.cell * 0.26, 8)}px ui-monospace,monospace`;
     ctx.fillText(partLabel(p), c.x + g.cell / 2, c.y + g.cell / 2);
@@ -117,7 +151,7 @@ export function drawRing(
     if (op.genes.length === 0) continue;
     const a0 = (op.promoter / SLOTS) * Math.PI * 2 - Math.PI / 2 + g.rot;
     const a1 = a0 + (op.genes.length + 1) * step;
-    ctx.strokeStyle = `rgba(255,209,102,${0.25 + 0.45 * PROMOTER_POWER[op.strength] / 1.2})`;
+    ctx.strokeStyle = `rgba(255,209,102,${0.25 + 0.45 * Math.min(op.output / 1.4, 1)})`;
     ctx.lineWidth = band + 8 * o.u;
     ctx.beginPath();
     ctx.arc(g.cx, g.cy, mid, a0 + 0.01, a1 - 0.01);
@@ -181,10 +215,18 @@ export function drawRing(
 export function describe(p: Plasmid, i: number, depth: number): string[] {
   const part = p.at(i);
   if (!part) return ["empty slot", "drag a part here"];
-  if (part.kind === "terminator") return ["terminator", "ends the transcript"];
+  if (part.kind === "terminator") {
+    const t = TERMINATORS[part.id];
+    return [t.name,
+            `${((1 - t.readthrough) * 100).toFixed(0)}% efficient · ` +
+            `${(t.readthrough * 100).toFixed(0)}% reads through`,
+            t.note];
+  }
   if (part.kind === "promoter") {
-    return [`${part.strength} promoter`,
-            `transcribes downstream at x${PROMOTER_POWER[part.strength].toFixed(2)}`];
+    const pr = PROMOTERS[part.id];
+    return [`${pr.name} · ${pr.mode}`,
+            `output x${pr.strength.toFixed(2)} when active`,
+            pr.note];
   }
   const g = GENES[part.id];
   const ctx = p.operonOf(part.id);
@@ -199,6 +241,10 @@ export function describe(p: Plasmid, i: number, depth: number): string[] {
       : `transcribed, but no substrate at this depth`,
     g.desc,
   ];
+  if (part.mods.length > 0) {
+    lines.push(`+ ${part.mods.map((mm) => MODIFIERS[mm].name).join(", ")}`);
+  }
+  if (part.level > 1) lines.push(`evolved to level ${String(part.level)}`);
   for (const c of p.complexes(depth)) {
     if (c.genes.includes(part.id)) lines.push(`\u2713 ${c.name}: ${c.note}`);
   }
@@ -206,4 +252,96 @@ export function describe(p: Plasmid, i: number, depth: number): string[] {
     if (h.present === part.id) lines.push(`\u26A0 ${h.name}: ${h.note}`);
   }
   return lines;
+}
+
+/**
+ * The item card.
+ *
+ * A roguelike lets you look at a thing and learn what it is. This is that:
+ * what it does mechanically, and where it came from historically. The
+ * discovery line is real in every case -- the point of the game is the
+ * organisms and the chemistry, and an invented citation would undercut it.
+ */
+export function drawItemCard(
+  ctx: CanvasRenderingContext2D, W: number, H: number, u: number,
+  part: Part, plasmid: Plasmid, depth: number,
+  wrap: (s: string, max: number) => string[],
+): void {
+  const tier = RARITY[partRarity(part)];
+  const pad = 14 * u;
+  const cardW = Math.min(W - 40 * u, 340 * u);
+
+  // Build the body first so the card can be sized to it.
+  const title = partLabel(part);
+  const lines: { text: string; colour: string; size: number }[] = [];
+  const add = (text: string, colour = "#c8d6ce", size = 10): void => {
+    for (const l of wrap(text, cardW - pad * 2)) lines.push({ text: l, colour, size });
+  };
+
+  if (part.kind === "gene") {
+    const gene = GENES[part.id];
+    add(gene.product, "#ffffff", 11);
+    add(`${gene.kb.toFixed(1)} kb · tier ${String(gene.tier)} · ${gene.pathway}`, "#8fa89a", 9.5);
+    const e = plasmid.expression(part.id, depth);
+    add(e > 0
+      ? `expressing at ${String(Math.round(e * 100))}%`
+      : "not expressing here", e > 0 ? "#7fe0a4" : "#e0a37a", 9.5);
+    if (part.level > 1) add(`evolved to level ${String(part.level)}`, "#cfe04a", 9.5);
+    if (part.mods.length > 0) {
+      add(part.mods.map((m) => MODIFIERS[m].name).join(", "), "#cfe04a", 9.5);
+    }
+    lines.push({ text: "", colour: "#000", size: 5 });
+    add(gene.desc);
+    lines.push({ text: "", colour: "#000", size: 5 });
+    add(gene.discovery, "#9fb0d8", 9.5);
+  } else if (part.kind === "promoter") {
+    const pr = PROMOTERS[part.id];
+    add(`${pr.mode} promoter`, "#ffffff", 11);
+    add(`output x${pr.strength.toFixed(2)} when active`, "#8fa89a", 9.5);
+    lines.push({ text: "", colour: "#000", size: 5 });
+    add(pr.note);
+  } else {
+    const t = TERMINATORS[part.id];
+    add("terminator", "#ffffff", 11);
+    add(`${String(Math.round((1 - t.readthrough) * 100))}% efficient · ` +
+        `${String(Math.round(t.readthrough * 100))}% reads through`, "#8fa89a", 9.5);
+    lines.push({ text: "", colour: "#000", size: 5 });
+    add(t.note);
+  }
+
+  const bodyH = lines.reduce((a, l) => a + l.size * u * 1.45, 0);
+  const cardH = bodyH + 54 * u;
+  const x = (W - cardW) / 2;
+  const y = Math.max((H - cardH) / 2, 20 * u);
+
+  ctx.fillStyle = "rgba(2,4,4,0.72)";
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = "rgba(12,18,15,0.99)";
+  ctx.strokeStyle = tier.colour;
+  ctx.lineWidth = Math.max(2 * u, 2);
+  ctx.beginPath();
+  ctx.roundRect(x, y, cardW, cardH, 9 * u);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = tier.colour;
+  ctx.font = `${15 * u}px ui-monospace,monospace`;
+  ctx.fillText(title, x + pad, y + 26 * u);
+  ctx.font = `${9 * u}px ui-monospace,monospace`;
+  ctx.textAlign = "right";
+  ctx.fillText(tier.name.toUpperCase(), x + cardW - pad, y + 26 * u);
+
+  ctx.textAlign = "left";
+  let ly = y + 46 * u;
+  for (const l of lines) {
+    if (l.text !== "") {
+      ctx.fillStyle = l.colour;
+      ctx.font = `${l.size * u}px ui-monospace,monospace`;
+      ctx.fillText(l.text, x + pad, ly);
+    }
+    ly += l.size * u * 1.45;
+  }
 }

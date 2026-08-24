@@ -7,6 +7,7 @@
 
 import { GENES, type GeneId } from "./biology.js";
 import { SUBSTRATES, type Item, type SubstrateId } from "./items.js";
+import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS } from "./parts.js";
 import type { WeaponKind } from "./weapons.js";
 
 const pick = <T,>(xs: readonly T[], seed: number): T =>
@@ -73,6 +74,13 @@ export function hgtLine(gene: GeneId, from: string): string {
 export function pickupLine(it: Item, atp: number, blocked: GeneId | null): string {
   if (it.kind === "cassette") {
     return `You pick up a ${GENES[it.gene].name} cassette. It goes into the bin.`;
+  }
+  if (it.kind === "promoter" || it.kind === "terminator" || it.kind === "modifier") {
+    const tier = RARITY[it.rarity];
+    const what = it.kind === "promoter" ? PROMOTERS[it.id].name
+      : it.kind === "terminator" ? TERMINATORS[it.id].name
+      : MODIFIERS[it.id].name;
+    return `You take up a ${tier.name} ${it.kind}: ${what}.`;
   }
   const s = SUBSTRATES[it.id];
   if (blocked !== null) {

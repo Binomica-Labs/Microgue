@@ -1,3 +1,5 @@
+import { drawItemCard } from "../src/plasmid_ui.js";
+import type { Part } from "../src/plasmid.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Exercises the real Game against a recording canvas stub. This exists because
@@ -132,5 +134,47 @@ describe("the real render path", () => {
     expect(() => { g.frame(16); }).not.toThrow();
     expect(rec.calls).toContain("fillText");     // the failure was drawn
     expect(g.toasts.all()[0]?.text).toContain("synthetic");
+  });
+
+  it("the research screen draws without throwing", async () => {
+    {
+      const g = await makeGame();
+      g.startRun(0);
+      // Give it something to work on, including a held modifier.
+      g.genome.put(4, { kind: "promoter", id: "j23119" });
+      g.genome.put(5, { kind: "gene", id: "mtrC", level: 2, mods: ["codon"] });
+      g.mods.push("rbs", "chaperone");
+      g.press("research");
+      expect(() => { g.frame(16); }).not.toThrow();
+      expect(g.toasts.all().filter((x) => x.level === "error")).toHaveLength(0);
+      g.press("research");
+    }
+  });
+
+  it("the research screen survives an empty ring and no modifiers", async () => {
+    const g = await makeGame();
+    g.startRun(0);
+    for (let i = 0; i < 16; i++) g.genome.put(i, null);
+    g.mods.length = 0;
+    g.press("research");
+    expect(() => { g.frame(16); }).not.toThrow();
+  });
+
+  it("the item card draws for every kind of part", async () => {
+    const g = await makeGame();
+    g.startRun(0);
+    g.genome.put(5, { kind: "gene", id: "mcrA", level: 3, mods: ["codon", "rbs"] });
+    const parts: Part[] = [
+      { kind: "gene", id: "mcrA", level: 3, mods: ["codon", "rbs"] },
+      { kind: "gene", id: "psbA", level: 1, mods: [] },
+      { kind: "promoter", id: "plac" },
+      { kind: "terminator", id: "rrnbt1t2" },
+    ];
+    for (const part of parts) {
+      expect(() => {
+        drawItemCard(g.ctx, 400, 800, 1.9, part, g.genome, 4,
+                     (s: string, max: number) => [s.slice(0, Math.max(max / 6, 1))]);
+      }, JSON.stringify(part)).not.toThrow();
+    }
   });
 });

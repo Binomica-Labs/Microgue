@@ -12,6 +12,9 @@
 // cell -- which opens as a container rather than being hoovered up blind.
 
 import { GENES, type GeneId } from "./biology.js";
+import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, partsOfRarity, rollRarity,
+         type ModifierId, type PromoterId, type Rarity, type TerminatorId }
+  from "./parts.js";
 
 export type SubstrateId =
   | "acetate" | "glucose" | "h2" | "sulfide" | "nitrate" | "ferric" | "co2";
@@ -47,21 +50,76 @@ export const SUBSTRATES: Readonly<Record<SubstrateId, SubstrateDef>> = {
 
 export type Item =
   | { kind: "cassette"; gene: GeneId }
-  | { kind: "substrate"; id: SubstrateId };
+  | { kind: "substrate"; id: SubstrateId }
+  // Regulatory parts. These are the rare drops: a conditional promoter or a
+  // tandem terminator changes what your plasmid can BE, not just what it does.
+  | { kind: "promoter"; id: PromoterId; rarity: Rarity }
+  | { kind: "terminator"; id: TerminatorId; rarity: Rarity }
+  | { kind: "modifier"; id: ModifierId; rarity: Rarity };
+
+/** Rarity of an item, for colouring and for messages. `common` for anything
+ *  that has no tier of its own. */
+export function rarityOf(it: Item): Rarity {
+  return it.kind === "cassette" || it.kind === "substrate" ? "common" : it.rarity;
+}
+
+/**
+ * Roll a regulatory part, biased richer with depth.
+ *
+ * Falls DOWN the ladder if a tier happens to be empty, so adding a rarity with
+ * no members can never produce nothing.
+ */
+export function rollPart(roll: number, pick: number, depth: number): Item | null {
+  const order: Rarity[] = ["legendary", "epic", "rare", "uncommon", "common"];
+  const start = order.indexOf(rollRarity(roll, depth));
+  for (let k = Math.max(start, 0); k < order.length; k++) {
+    const tier = order[k];
+    if (!tier) continue;
+    const { promoters, terminators, modifiers } = partsOfRarity(tier);
+    const pool: Item[] = [
+      ...promoters.map((id): Item => ({ kind: "promoter", id, rarity: tier })),
+      ...terminators.map((id): Item => ({ kind: "terminator", id, rarity: tier })),
+      ...modifiers.map((id): Item => ({ kind: "modifier", id, rarity: tier })),
+    ];
+    if (pool.length > 0) {
+      // A non-finite pick must not index to nothing: the whole point of this
+      // function is that it always yields a part.
+      const p = Number.isFinite(pick) ? Math.abs(pick) % 1 : 0;
+      return pool[Math.min(Math.floor(p * pool.length), pool.length - 1)] ?? null;
+    }
+  }
+  return null;
+}
 
 export interface Drop {
   x: number; y: number;
   items: Item[];
 }
 
-export const itemName = (it: Item): string =>
-  it.kind === "cassette" ? GENES[it.gene].name : SUBSTRATES[it.id].name;
+export function itemName(it: Item): string {
+  switch (it.kind) {
+    case "cassette":    return GENES[it.gene].name;
+    case "substrate":   return SUBSTRATES[it.id].name;
+    case "promoter":    return PROMOTERS[it.id].name;
+    case "terminator":  return TERMINATORS[it.id].name;
+    case "modifier":    return MODIFIERS[it.id].name;
+  }
+}
 
-export const itemColour = (it: Item): string =>
-  it.kind === "cassette" ? "#a0ffd0" : SUBSTRATES[it.id].colour;
+export function itemColour(it: Item): string {
+  if (it.kind === "cassette") return "#a0ffd0";
+  if (it.kind === "substrate") return SUBSTRATES[it.id].colour;
+  return RARITY[it.rarity].colour;      // rarity is the signal that matters
+}
 
 export function itemNote(it: Item): string {
-  return it.kind === "cassette" ? GENES[it.gene].desc : SUBSTRATES[it.id].note;
+  switch (it.kind) {
+    case "cassette":   return GENES[it.gene].desc;
+    case "substrate":  return SUBSTRATES[it.id].note;
+    case "promoter":   return PROMOTERS[it.id].note;
+    case "terminator": return TERMINATORS[it.id].note;
+    case "modifier":   return MODIFIERS[it.id].note;
+  }
 }
 
 /** ATP actually recovered, which is zero without the enzyme for it. */

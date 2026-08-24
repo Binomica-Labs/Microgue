@@ -76,7 +76,9 @@ describe("soak", () => {
       if (t % 7 === 0) g.press("wait");
       g.frame(t * 16);
     }
-    expect(g.toasts.count(), g.toasts.all().map((x) => x.text).join(" | ")).toBe(0);
+    // Death is a legitimate outcome of two thousand turns; a CRASH is not.
+    const errors = g.toasts.all().filter((x) => x.level === "error");
+    expect(errors.map((x) => x.text)).toEqual([]);
   });
 
   it("nothing unbounded accumulates over a long session", async () => {
@@ -113,14 +115,20 @@ describe("soak", () => {
   it("cycling every screen a hundred times leaks nothing and throws nothing", async () => {
     const g = await makeGame();
     g.startRun(0);
+    // No `wait` here: this test is about the SCREENS. Passing a hundred turns
+    // next to hostiles is a survival test, and at current mob density it can
+    // legitimately end in death -- which made this fail intermittently on an
+    // assertion that had nothing to do with what it was checking.
     for (let i = 0; i < 100; i++) {
       g.press("plasmid"); g.frame(i * 32);
       g.press("plasmid"); g.press("map"); g.frame(i * 32 + 8);
       g.press("map"); g.press("notes"); g.frame(i * 32 + 16);
-      g.press("notes"); g.press("wait"); g.frame(i * 32 + 24);
+      g.press("notes"); g.press("research"); g.frame(i * 32 + 24);
+      g.press("research"); g.frame(i * 32 + 28);
     }
-    expect(g.toasts.count(), g.toasts.all().map((x) => x.text).join(" | ")).toBe(0);
-    expect(g.showPlasmid || g.showMap || g.showNotes).toBe(false);
+    const errors = g.toasts.all().filter((x) => x.level === "error");
+    expect(errors.map((x) => x.text)).toEqual([]);
+    expect(g.showPlasmid || g.showMap || g.showNotes || g.showResearch).toBe(false);
   });
 
   it("descending the whole column never breaks an invariant", async () => {
@@ -136,5 +144,67 @@ describe("soak", () => {
     }
     expect(g.dungeon.floor).toBe(24);
     expect(g.toasts.all().filter((t) => t.level === "error")).toHaveLength(0);
+  });
+});
+
+describe("the save carries the whole game", () => {
+  // Every time state has been added it has been forgotten in the save: the
+  // run notebook at v31, and now held modifiers -- which are the RARE drops,
+  // so losing them is the worst version of this bug.
+  it("held modifiers, the clock and the win flag all survive a reload", async () => {
+    const { Game } = await import("../src/main.js");
+    const canvas = {
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement;
+
+    const a = new Game(canvas);
+    a.startRun(0);
+    a.mods.push("chaperone", "fusion");
+    a.clock.turn = 517;
+    a.won = true;
+    a.genome.put(5, { kind: "gene", id: "mtrC", level: 3, mods: ["codon"] });
+    a.save();
+
+    const b = new Game(canvas);
+    b.startRun(0);
+    expect(b.mods, "held modifiers were lost").toEqual(["chaperone", "fusion"]);
+    expect(b.clock.turn, "the diel cycle restarted").toBe(517);
+    expect(b.won, "the win was forgotten").toBe(true);
+    const gene = b.genome.slots.find((p) => p?.kind === "gene" && p.id === "mtrC");
+    expect(gene?.kind).toBe("gene");
+    if (gene?.kind === "gene") {
+      expect(gene.level).toBe(3);
+      expect(gene.mods).toEqual(["codon"]);
+    }
+  });
+
+  it("the saved snapshot does not alias the live plasmid", async () => {
+    // `{ ...part }` copies a gene's `mods` ARRAY BY REFERENCE, so the snapshot
+    // kept changing along with the plasmid after it was written.
+    const { Game } = await import("../src/main.js");
+    const canvas = {
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement;
+
+    const a = new Game(canvas);
+    a.startRun(0);
+    a.genome.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    a.save();
+    // Mutate AFTER saving. The stored copy must not follow.
+    a.genome.addModifier("mtrC", "codon");
+    a.genome.evolve("mtrC");
+
+    const b = new Game(canvas);
+    b.startRun(0);
+    const gene = b.genome.slots.find((p) => p?.kind === "gene" && p.id === "mtrC");
+    if (gene?.kind !== "gene") { expect(gene?.kind).toBe("gene"); return; }
+    expect(gene.mods, "the snapshot followed the live plasmid").toEqual([]);
+    expect(gene.level).toBe(1);
   });
 });

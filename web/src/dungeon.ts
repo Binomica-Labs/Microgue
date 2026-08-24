@@ -27,6 +27,9 @@ export interface Level {
   barriers: Barrier[];
   /** A boss floor stays sealed until whatever holds it is dead. */
   cleared: boolean;
+  /** Clock turn when this floor's substrate was last topped up. A floor is a
+   *  resource that regenerates; see production.ts. */
+  stockedAt: number;
   /** Set once a boss floor is populated, for the arrival message. */
   bossName?: string;
   up: Point; down: Point | null; mobs: Mob[]; visited: boolean;
@@ -103,6 +106,7 @@ export class Dungeon {
                          rooms: rooms.filter((r) => grid.isFloor(r.cx, r.cy)),
                          barriers: [],
                          cleared: !isBossFloor(floor),
+                         stockedAt: 0,
                          sight: makeSight(grid.w, grid.h) };
     this.sealRooms(lvl, rng);
     this.populate(lvl, rng);
@@ -151,6 +155,11 @@ export class Dungeon {
     const want = tilesOf(fp, x, y, null);
     for (const t of want) {
       if (!lvl.grid.isFloor(t.x, t.y)) return false;
+      // Never on a stair. On the last floor there is no way down, so
+      // placeBoss anchors around the way UP -- and a boss standing on the
+      // arrival tile means you materialise inside it.
+      if (t.x === lvl.up.x && t.y === lvl.up.y) return false;
+      if (lvl.down?.x === t.x && lvl.down.y === t.y) return false;
     }
     for (const m of lvl.mobs) {
       if (!m.alive) continue;
@@ -188,6 +197,9 @@ export class Dungeon {
     if (!lvl) { lvl = this.build(f); this.cache.set(f, lvl); }
     return lvl;
   }
+
+  /** Every floor that has been generated so far. */
+  visitedLevels(): Level[] { return [...this.cache.values()].filter((l) => l.visited); }
 
   current(): Level { return this.level(this.floor); }
   regenerate(): void { this.cache.delete(this.floor); }
@@ -302,18 +314,39 @@ export class Dungeon {
     // The footprint checked must be the one the boss will ACTUALLY have. A
     // promoted pico validated as a single tile and then occupied a 2x2 block,
     // half of it inside the glass.
+    // Widen until something fits, then fall back to anywhere on the floor. A
+    // boss floor with no boss is a gate that silently opens: `isCleared` sees
+    // no elites and lets you straight through. Excluding the stairs and
+    // raising mob density together made the tight local search fail outright.
     const spot = (r: number, size: Size): Point | null => {
-      for (let i = 0; i < 300; i++) {
-        const a = rng.next() * Math.PI * 2;
-        const d2 = rng.next() * r;
-        const x = Math.round(at.x + Math.cos(a) * d2);
-        const y = Math.round(at.y + Math.sin(a) * d2);
+      for (const radius of [r, r * 2, r * 4]) {
+        for (let i = 0; i < 300; i++) {
+          const a = rng.next() * Math.PI * 2;
+          const d2 = rng.next() * radius;
+          const x = Math.round(at.x + Math.cos(a) * d2);
+          const y = Math.round(at.y + Math.sin(a) * d2);
+          if (this.canPlace(lvl, size, x, y)) return { x, y };
+        }
+      }
+      for (let i = 0; i < 2000; i++) {
+        const x = rng.int(this.w), y = rng.int(this.h);
         if (this.canPlace(lvl, size, x, y)) return { x, y };
+      }
+      // Last resort: evict an ordinary body to make room, since the boss is
+      // the reason the floor exists.
+      const victim = lvl.mobs.findIndex((m) => !m.elite);
+      if (victim >= 0) {
+        const v = lvl.mobs[victim];
+        lvl.mobs.splice(victim, 1);
+        if (v && this.canPlace(lvl, size, v.x, v.y)) return { x: v.x, y: v.y };
       }
       return null;
     };
 
-    if (rng.next() < 0.5) {
+    // A bloom that places nothing is not a boss. Try the single overgrown
+    // individual as a fallback, which needs only one spot.
+    const wantBloom = rng.next() < 0.5;
+    if (!wantBloom) {
       // An overgrown individual.
       const grown: Size =
         proto.size === "pico" || proto.size === "small" ? "large" : "filament";
@@ -339,7 +372,25 @@ export class Dungeon {
         });
         placed++;
       }
-      if (placed > 0) lvl.bossName = `a bloom of ${proto.name}`;
+      if (placed > 0) {
+        lvl.bossName = `a bloom of ${proto.name}`;
+      } else {
+        // The bloom found nowhere to grow. Fall back to a single overgrown
+        // individual, which needs one spot rather than fourteen -- a boss
+        // floor with no elite lets `isCleared` wave you straight through.
+        const grown: Size =
+          proto.size === "pico" || proto.size === "small" ? "large" : "filament";
+        const p = spot(9, grown);
+        if (p) {
+          lvl.mobs.push({
+            ...this.spawn(proto, p.x, p.y),
+            name: `${proto.name} (overgrown)`,
+            hp: Math.round(proto.hp * 6), maxhp: Math.round(proto.hp * 6),
+            atk: Math.round(proto.atk * 1.8), elite: true, size: grown,
+          });
+          lvl.bossName = `an overgrown ${proto.name}`;
+        }
+      }
     }
   }
 

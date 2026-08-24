@@ -7,6 +7,10 @@ import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { DEFAULT_SETTINGS, SCHEMA, parseSave } from "../src/save.js";
 import { BIN_CAP, Plasmid, SLOTS, type Part } from "../src/plasmid.js";
+import { MAX_LEVEL, MODIFIERS, PROMOTERS, RARITY, RARITY_IDS, TERMINATORS,
+         RARITY_RANK, evolutionCost, modifierSlots, partsOfRarity,
+         rarityOfTier, rollRarity,
+         type ModifierId, type PromoterId, type TerminatorId } from "../src/parts.js";
 import { describe as describeSlot, slotAt, slotCentre } from "../src/plasmid_ui.js";
 import { buttonAt, layoutButtons, makeButtons } from "../src/buttons.js";
 import { classify, traceWalls } from "../src/walls.js";
@@ -34,8 +38,8 @@ import { launch, stepClouds, stepPackets, type Cloud, type Packet }
   from "../src/projectile.js";
 import { Toasts, guard } from "../src/toast.js";
 import { drawClose, inBox as inBoxChrome } from "../src/chrome.js";
-import { SUBSTRATES, addDrop, dropAt, removeDrop, substratesAt, yieldOf,
-         type Drop } from "../src/items.js";
+import { SUBSTRATES, addDrop, dropAt, itemColour, itemName, itemNote, removeDrop,
+         rollPart, substratesAt, yieldOf, type Drop } from "../src/items.js";
 import * as say from "../src/flavour.js";
 import { computeFov, fractionSeen, isSeen, isVisible, makeSight, sightRadius }
   from "../src/fov.js";
@@ -46,6 +50,9 @@ import { NAME_POOL, loadSlot } from "../src/saves.js";
 import type { Mob } from "../src/dungeon.js";
 import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
          orphanMetabolites } from "../src/kegg.js";
+import { partRarity } from "../src/plasmid_ui.js";
+import { RESTOCK_TURNS, capacityAt, describeStock, meanLight, rateAt,
+         restockAmount } from "../src/production.js";
 import { NODE_W, NODE_H, clampView, fitView, frame, litBounds, moduleBoxes,
          toScreen, toWorld, zoomAbout, type View } from "../src/kegg_ui.js";
 
@@ -246,16 +253,16 @@ describe("rng", () => {
 });
 
 describe("save validation", () => {
-  const good = { version: 5, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
-                 ring: [{ kind: "promoter", strength: "strong" },
-                        { kind: "gene", id: "mtrC", optimised: true }],
+  const good = { version: SCHEMA, depth: 4, seed: 7, px: 10, py: 12, hp: 22,
+                 ring: [{ kind: "promoter", id: "j23119" },
+                        { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] }],
                  settings: { uiScale: 1.5, highContrast: true, reduceMotion: false, diagonal: false } };
 
   it("round-trips a valid save", () => {
     const s = parseSave(good);
     expect(s?.depth).toBe(4);
-    expect(s?.ring[0]).toEqual({ kind: "promoter", strength: "strong" });
-    expect(s?.ring[1]).toEqual({ kind: "gene", id: "mtrC", optimised: true });
+    expect(s?.ring[0]).toEqual({ kind: "promoter", id: "j23119" });
+    expect(s?.ring[1]).toEqual({ kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
     expect(s?.ring).toHaveLength(SLOTS);
     expect(s?.settings.highContrast).toBe(true);
   });
@@ -286,27 +293,27 @@ describe("save validation", () => {
   });
   it("drops ring entries that are not real parts", () => {
     const s = parseSave({ ...good, ring: [
-      { kind: "gene", id: "mtrC", optimised: true },
+      { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] },
       { kind: "gene", id: "notAGene" }, "junk", 7,
       { kind: "gene", id: "mtrC" },                    // duplicate
     ]});
-    expect(s?.ring[0]).toEqual({ kind: "gene", id: "mtrC", optimised: true });
+    expect(s?.ring[0]).toEqual({ kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
     expect(s?.ring[1]).toBeNull();
     expect(s?.ring[2]).toBeNull();
     expect(s?.ring[4]).toBeNull();
   });
   it("clamps an over-long ring and defaults a bad promoter strength", () => {
-    const long = Array.from({ length: 40 }, () => ({ kind: "terminator" }));
+    const long = Array.from({ length: 40 }, () => ({ kind: "terminator", id: "rrnbt1" }));
     expect(parseSave({ ...good, ring: long })?.ring).toHaveLength(SLOTS);
     const s = parseSave({ ...good, ring: [{ kind: "promoter", strength: "nuclear" }] });
-    expect(s?.ring[0]).toEqual({ kind: "promoter", strength: "medium" });
+    expect(s?.ring[0]).toEqual({ kind: "promoter", id: "j23106" });
   });
   it("falls back to defaults on malformed settings", () => {
     expect(parseSave({ ...good, settings: "corrupt" })?.settings).toEqual(DEFAULT_SETTINGS);
     expect(parseSave({ ...good, settings: { uiScale: 500 } })?.settings.uiScale).toBe(3);
   });
   it("survives a hand-edited hostile payload", () => {
-    const s = parseSave({ version: 5, depth: {}, seed: [], px: 1, py: 1, hp: -50,
+    const s = parseSave({ version: SCHEMA, depth: {}, seed: [], px: 1, py: 1, hp: -50,
                           ring: "all of them", settings: null });
     expect(s).not.toBeNull();
     expect(s?.hp).toBeGreaterThan(0);
@@ -326,7 +333,7 @@ describe("plasmid operons", () => {
 
   it("a gene outside any operon is not expressed", () => {
     const p = P();
-    p.put(8, { kind: "gene", id: "mtrC", optimised: false });   // no promoter
+    p.put(8, { kind: "gene", id: "mtrC", level: 1, mods: [] });   // no promoter
     expect(p.has("mtrC")).toBe(true);
     expect(p.operonOf("mtrC")).toBeNull();
     expect(p.expression("mtrC", 4)).toBe(0);
@@ -334,42 +341,55 @@ describe("plasmid operons", () => {
 
   it("a promoter upstream switches it on", () => {
     const p = P();
-    p.put(7, { kind: "promoter", strength: "medium" });
-    p.put(8, { kind: "gene", id: "mtrC", optimised: false });
+    p.put(7, { kind: "promoter", id: "j23106" });
+    p.put(8, { kind: "gene", id: "mtrC", level: 1, mods: [] });
     expect(p.expression("mtrC", 4)).toBeGreaterThan(0);
   });
 
-  it("a terminator ends the operon", () => {
-    const p = P();
-    p.put(7, { kind: "promoter", strength: "strong" });
-    p.put(8, { kind: "terminator" });
-    p.put(9, { kind: "gene", id: "mtrC", optimised: false });
-    expect(p.expression("mtrC", 4)).toBe(0);
+  it("a terminator attenuates rather than ends the operon", () => {
+    // Real terminators are 60-98% efficient; the rest reads through. That is
+    // what makes the CHOICE of terminator matter instead of being a full stop.
+    const build = (id: TerminatorId) => {
+      const p = P();
+      p.put(0, { kind: "promoter", id: "j23119" });
+      p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+      p.put(2, { kind: "terminator", id });
+      p.put(3, { kind: "gene", id: "omcS", level: 1, mods: [] });
+      return { before: p.expression("mtrC", 4), after: p.expression("omcS", 4) };
+    };
+    const leaky = build("hairpin");
+    const tight = build("rrnbt1t2");
+    expect(leaky.before).toBeGreaterThan(0);
+    expect(leaky.after, "a leaky hairpin must let some through").toBeGreaterThan(0);
+    expect(tight.after, "a tandem terminator must let far less through")
+      .toBeLessThan(leaky.after / 5);
+    expect(tight.before).toBeCloseTo(leaky.before, 6);
   });
+
 
   it("a gap ends the operon", () => {
     const p = P();
-    p.put(7, { kind: "promoter", strength: "strong" });
-    p.put(9, { kind: "gene", id: "mtrC", optimised: false });   // slot 8 empty
+    p.put(7, { kind: "promoter", id: "j23119" });
+    p.put(9, { kind: "gene", id: "mtrC", level: 1, mods: [] });   // slot 8 empty
     expect(p.expression("mtrC", 4)).toBe(0);
   });
 
   it("promoter strength scales output", () => {
-    const build = (s: "weak" | "medium" | "strong") => {
+    const build = (s: PromoterId) => {
       const p = P();
-      p.put(7, { kind: "promoter", strength: s });
-      p.put(8, { kind: "gene", id: "mtrC", optimised: false });
+      p.put(7, { kind: "promoter", id: s });
+      p.put(8, { kind: "gene", id: "mtrC", level: 1, mods: [] });
       return p.expression("mtrC", 4);
     };
-    expect(build("weak")).toBeLessThan(build("medium"));
-    expect(build("medium")).toBeLessThan(build("strong"));
+    expect(build("j23114")).toBeLessThan(build("j23106"));
+    expect(build("j23106")).toBeLessThan(build("j23119"));
   });
 
   it("polarity starves the tail of a long operon", () => {
     const p = P();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
-    p.put(6, { kind: "gene", id: "omcS", optimised: false });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    p.put(6, { kind: "gene", id: "omcS", level: 1, mods: [] });
     const near = p.expression("mtrC", 4);
     const far = p.expression("omcS", 4);
     expect(far).toBeLessThan(near);
@@ -377,49 +397,49 @@ describe("plasmid operons", () => {
 
   it("same-pathway neighbours co-regulate", () => {
     const lone = P();
-    lone.put(4, { kind: "promoter", strength: "medium" });
-    lone.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    lone.put(4, { kind: "promoter", id: "j23106" });
+    lone.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
     const solo = lone.expression("mtrC", 4);
 
     const clustered = P();
-    clustered.put(4, { kind: "promoter", strength: "medium" });
-    clustered.put(5, { kind: "gene", id: "mtrC", optimised: false });
-    clustered.put(6, { kind: "gene", id: "omcS", optimised: false });  // also iron
+    clustered.put(4, { kind: "promoter", id: "j23106" });
+    clustered.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    clustered.put(6, { kind: "gene", id: "omcS", level: 1, mods: [] });  // also iron
     expect(clustered.expression("mtrC", 4)).toBeGreaterThan(solo);
   });
 
   it("a mixed-pathway operon beats nothing but loses to a clean one", () => {
     const mixed = P();
-    mixed.put(4, { kind: "promoter", strength: "medium" });
-    mixed.put(5, { kind: "gene", id: "mtrC", optimised: false });
-    mixed.put(6, { kind: "gene", id: "katG", optimised: false });      // defense
+    mixed.put(4, { kind: "promoter", id: "j23106" });
+    mixed.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    mixed.put(6, { kind: "gene", id: "katG", level: 1, mods: [] });      // defense
     const clean = P();
-    clean.put(4, { kind: "promoter", strength: "medium" });
-    clean.put(5, { kind: "gene", id: "mtrC", optimised: false });
-    clean.put(6, { kind: "gene", id: "omcS", optimised: false });
+    clean.put(4, { kind: "promoter", id: "j23106" });
+    clean.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    clean.put(6, { kind: "gene", id: "omcS", level: 1, mods: [] });
     expect(clean.expression("mtrC", 4)).toBeGreaterThan(mixed.expression("mtrC", 4));
   });
 
   it("substrate gating still applies inside an operon", () => {
     const p = P();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "mcrA", optimised: false });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "mcrA", level: 1, mods: [] });
     expect(p.expression("mcrA", 4)).toBe(0);          // no CO2 acceptor here
     expect(p.expression("mcrA", 8)).toBeGreaterThan(0);
   });
 
   it("oxygen still destroys nifH regardless of promoter", () => {
     const p = P();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "nifH", optimised: false });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "nifH", level: 1, mods: [] });
     expect(p.expression("nifH", 1)).toBe(0);
     expect(p.expression("nifH", 5)).toBeGreaterThan(0);
   });
 
   it("rotation preserves relative order, so operons survive", () => {
     const p = P();
-    p.put(4, { kind: "promoter", strength: "medium" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    p.put(4, { kind: "promoter", id: "j23106" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
     const before = p.expression("mtrC", 4);
     p.rotate(5);
     expect(p.expression("mtrC", 4)).toBeCloseTo(before, 10);
@@ -427,8 +447,8 @@ describe("plasmid operons", () => {
 
   it("swap is the drag primitive and can break an operon", () => {
     const p = P();
-    p.put(4, { kind: "promoter", strength: "medium" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    p.put(4, { kind: "promoter", id: "j23106" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
     expect(p.expression("mtrC", 4)).toBeGreaterThan(0);
     p.swap(5, 12);                                     // drag it far away
     expect(p.expression("mtrC", 4)).toBe(0);
@@ -442,20 +462,20 @@ describe("plasmid operons", () => {
 
   it("refuses duplicates and reports a full ring", () => {
     const p = P();
-    expect(p.add({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(true);
-    expect(p.add({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(false);
-    for (let i = 0; i < SLOTS; i++) p.put(i, { kind: "terminator" });
-    expect(p.add({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
+    expect(p.add({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(true);
+    expect(p.add({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(false);
+    for (let i = 0; i < SLOTS; i++) p.put(i, { kind: "terminator", id: "rrnbt1" });
+    expect(p.add({ kind: "gene", id: "psbA", level: 1, mods: [] }).ok).toBe(false);
   });
 
   it("power rises when you arrange well", () => {
     const bad = P();
-    bad.put(5, { kind: "gene", id: "mtrC", optimised: false });   // orphaned
-    bad.put(9, { kind: "gene", id: "omcS", optimised: false });
+    bad.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });   // orphaned
+    bad.put(9, { kind: "gene", id: "omcS", level: 1, mods: [] });
     const good = P();
-    good.put(4, { kind: "promoter", strength: "strong" });
-    good.put(5, { kind: "gene", id: "mtrC", optimised: false });
-    good.put(6, { kind: "gene", id: "omcS", optimised: false });
+    good.put(4, { kind: "promoter", id: "j23119" });
+    good.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    good.put(6, { kind: "gene", id: "omcS", level: 1, mods: [] });
     expect(good.power(4)).toBeGreaterThan(bad.power(4));
   });
 });
@@ -482,7 +502,7 @@ describe("plasmid ring geometry", () => {
   });
   it("describe() flags an untranscribed gene", () => {
     const p = new Plasmid();
-    p.put(9, { kind: "gene", id: "mtrC", optimised: false });
+    p.put(9, { kind: "gene", id: "mtrC", level: 1, mods: [] });
     expect(describeSlot(p, 9, 4).join(" ")).toContain("NOT TRANSCRIBED");
   });
 });
@@ -906,7 +926,7 @@ describe("parts bin", () => {
 
   it("loot goes to the bin, not onto the ring", () => {
     const p = new Plasmid();
-    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(true);
+    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(true);
     expect(p.inBin("mtrC")).toBe(true);
     expect(p.has("mtrC")).toBe(false);
     expect(p.expression("mtrC", 4)).toBe(0);          // stashed is not expressed
@@ -914,17 +934,17 @@ describe("parts bin", () => {
 
   it("refuses a duplicate whether it is on the ring or in the bin", () => {
     const p = new Plasmid();
-    p.stash({ kind: "gene", id: "mtrC", optimised: false });
-    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(false);
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
+    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(false);
     p.install(p.bin.findIndex((x) => x.kind === "gene"), 8);
-    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(false);
+    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(false);
   });
 
   it("install and uninstall conserve parts -- nothing is destroyed", () => {
     const p = new Plasmid();
     const count = () => p.bin.length + p.slots.filter((x) => x !== null).length;
     const before = count();
-    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
     const i = p.bin.findIndex((x) => x.kind === "gene");
     p.install(i, 8);
     expect(count()).toBe(before + 1);
@@ -935,8 +955,8 @@ describe("parts bin", () => {
 
   it("installing over an occupied slot returns the old part to the bin", () => {
     const p = new Plasmid();
-    p.put(8, { kind: "terminator" });
-    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    p.put(8, { kind: "terminator", id: "rrnbt1" });
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
     const binBefore = p.bin.length;
     p.install(p.bin.findIndex((x) => x.kind === "gene"), 8);
     expect(p.bin.length).toBe(binBefore);            // one out, one back in
@@ -947,7 +967,7 @@ describe("parts bin", () => {
     const p = new Plasmid();
     const oi = p.slots.findIndex((x) => x?.kind === "gene" && x.id === "ori");
     expect(p.uninstall(oi).ok).toBe(false);
-    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
     expect(p.install(p.bin.findIndex((x) => x.kind === "gene"), oi).ok).toBe(false);
   });
 });
@@ -959,25 +979,25 @@ describe("operon complexes", () => {
     return p;
   };
   const gene = (id: Parameters<Plasmid["has"]>[0]): Part =>
-    ({ kind: "gene", id, optimised: true });
+    ({ kind: "gene", id, level: 1, mods: ["codon"] as ModifierId[] });
 
   it("a complete pathway in one operon activates; scattered genes do not", () => {
     const together = build([
-      [4, { kind: "promoter", strength: "strong" }],
+      [4, { kind: "promoter", id: "j23119" }],
       [5, gene("mtrC")], [6, gene("omcS")],
     ]);
     expect(together.complexes(4).map((c) => c.id)).toContain("eet");
 
     const apart = build([
-      [4, { kind: "promoter", strength: "strong" }], [5, gene("mtrC")],
-      [9, { kind: "promoter", strength: "strong" }], [10, gene("omcS")],
+      [4, { kind: "promoter", id: "j23119" }], [5, gene("mtrC")],
+      [9, { kind: "promoter", id: "j23119" }], [10, gene("omcS")],
     ]);
     expect(apart.complexes(4).map((c) => c.id)).not.toContain("eet");
   });
 
   it("a complex is inert where its genes have no substrate", () => {
     const p = build([
-      [4, { kind: "promoter", strength: "strong" }],
+      [4, { kind: "promoter", id: "j23119" }],
       [5, gene("mtrC")], [6, gene("omcS")],
     ]);
     expect(p.complexes(4).map((c) => c.id)).toContain("eet");   // ferruginous
@@ -985,24 +1005,24 @@ describe("operon complexes", () => {
   });
 
   it("electron transfer grants reach, sulfate reduction grants an aura", () => {
-    const eet = build([[4, { kind: "promoter", strength: "strong" }],
+    const eet = build([[4, { kind: "promoter", id: "j23119" }],
                        [5, gene("mtrC")], [6, gene("omcS")]]);
     expect(eet.reach(4)).toBe(2);
-    const sr = build([[4, { kind: "promoter", strength: "strong" }],
+    const sr = build([[4, { kind: "promoter", id: "j23119" }],
                       [5, gene("dsrA")], [6, gene("aprA")]]);
     expect(sr.aura(7)).toBeGreaterThan(0);
   });
 
   it("a complex multiplies output beyond the sum of its genes", () => {
-    const pair = build([[4, { kind: "promoter", strength: "strong" }],
+    const pair = build([[4, { kind: "promoter", id: "j23119" }],
                         [5, gene("mcrA")], [6, gene("hdrB")]]);
-    const solo = build([[4, { kind: "promoter", strength: "strong" }],
+    const solo = build([[4, { kind: "promoter", id: "j23119" }],
                         [5, gene("mcrA")], [7, gene("hdrB")]]);  // gap between
     expect(pair.power(8)).toBeGreaterThan(solo.power(8) * 1.4);
   });
 
   it("armour reduces incoming damage only while the complex holds", () => {
-    const p = build([[4, { kind: "promoter", strength: "strong" }],
+    const p = build([[4, { kind: "promoter", id: "j23119" }],
                      [5, gene("katG")], [6, gene("sqr")]]);
     expect(p.armour(3)).toBeLessThan(1);
     p.put(6, null);
@@ -1013,24 +1033,24 @@ describe("operon complexes", () => {
 describe("toxic intermediates", () => {
   it("nitrate reductase without N2O reductase accumulates nitrous oxide", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "narG", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "narG", level: 1, mods: ["codon"] });
     expect(p.hazards(2).map((h) => h.id)).toContain("n2o");
     expect(p.toxicity(2)).toBeGreaterThan(0);
   });
 
   it("completing the chain clears the hazard and grants the complex", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "narG", optimised: true });
-    p.put(6, { kind: "gene", id: "nosZ", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "narG", level: 1, mods: ["codon"] });
+    p.put(6, { kind: "gene", id: "nosZ", level: 1, mods: ["codon"] });
     expect(p.hazards(2).map((h) => h.id)).not.toContain("n2o");
     expect(p.complexes(2).map((c) => c.id)).toContain("denitrification");
   });
 
   it("a hazard needs the offending gene to actually be expressed", () => {
     const p = new Plasmid();
-    p.put(9, { kind: "gene", id: "narG", optimised: true });   // no promoter
+    p.put(9, { kind: "gene", id: "narG", level: 1, mods: ["codon"] });   // no promoter
     expect(p.toxicity(2)).toBe(0);
   });
 
@@ -1052,24 +1072,24 @@ describe("toxic intermediates", () => {
 describe("save round-trips the bin", () => {
   it("keeps stashed parts across a reload", () => {
     const s = parseSave({
-      version: 5, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
-      ring: [{ kind: "promoter", strength: "medium" }],
-      bin: [{ kind: "gene", id: "mtrC", optimised: false }, { kind: "terminator" }],
+      version: SCHEMA, depth: 4, seed: 7, px: 5, py: 5, hp: 20,
+      ring: [{ kind: "promoter", id: "j23106" }],
+      bin: [{ kind: "gene", id: "mtrC", level: 1, mods: [] }, { kind: "terminator", id: "rrnbt1" }],
       settings: {},
     });
     expect(s?.bin).toHaveLength(2);
-    expect(s?.bin[0]).toEqual({ kind: "gene", id: "mtrC", optimised: false });
+    expect(s?.bin[0]).toEqual({ kind: "gene", id: "mtrC", level: 1, mods: [] });
   });
   it("drops junk and duplicates from the bin", () => {
     const s = parseSave({
-      version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
+      version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {},
       bin: [{ kind: "gene", id: "mtrC" }, { kind: "gene", id: "mtrC" }, "junk", 7,
             { kind: "gene", id: "notReal" }],
     });
     expect(s?.bin).toHaveLength(1);
   });
   it("a missing bin is an empty bin, not a crash", () => {
-    const s = parseSave({ version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
+    const s = parseSave({ version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, ring: [], settings: {} });
     expect(s?.bin).toEqual([]);
   });
 });
@@ -1121,7 +1141,7 @@ describe("KEGG modules", () => {
 
   it("stashed genes count toward completeness, like a genome scan", () => {
     const p = new Plasmid();
-    p.stash({ kind: "gene", id: "sat", optimised: false });
+    p.stash({ kind: "gene", id: "sat", level: 1, mods: [] });
     expect(p.carried().has("sat")).toBe(true);
   });
 });
@@ -1130,13 +1150,13 @@ describe("module auto-assembly", () => {
   const sulfate: bio.GeneId[] = ["sat", "aprA", "dsrA"];
   const stocked = () => {
     const p = new Plasmid();
-    for (const g of sulfate) p.stash({ kind: "gene", id: g, optimised: true });
+    for (const g of sulfate) p.stash({ kind: "gene", id: g, level: 1, mods: ["codon"] });
     return p;
   };
 
   it("refuses when an enzyme is missing, and names it", () => {
     const p = new Plasmid();
-    p.stash({ kind: "gene", id: "dsrA", optimised: true });
+    p.stash({ kind: "gene", id: "dsrA", level: 1, mods: ["codon"] });
     const r = p.assemble(sulfate);
     expect(r.ok).toBe(false);
     if (!r.ok) { expect(r.err).toContain("sat"); expect(r.err).toContain("aprA"); }
@@ -1155,7 +1175,7 @@ describe("module auto-assembly", () => {
   it("refuses without contiguous room, and says how much it needs", () => {
     const p = stocked();
     for (let i = 0; i < SLOTS; i++) {
-      if (p.at(i) === null) p.put(i, { kind: "terminator" });
+      if (p.at(i) === null) p.put(i, { kind: "terminator", id: "rrnbt1" });
     }
     const r = p.assemble(sulfate);
     expect(r.ok).toBe(false);
@@ -1191,7 +1211,7 @@ describe("module auto-assembly", () => {
   it("re-assembling an already-installed module does not duplicate genes", () => {
     const p = stocked();
     p.assemble(sulfate);
-    p.bin.push({ kind: "promoter", strength: "weak" });
+    p.bin.push({ kind: "promoter", id: "j23114" });
     p.assemble(sulfate);
     for (const g of sulfate) {
       const n = p.slots.filter((x) => x?.kind === "gene" && x.id === g).length;
@@ -1310,8 +1330,8 @@ describe("edge cases across modules", () => {
 
   it("rotating the ring by absurd amounts is a no-op modulo SLOTS", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "medium" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: false });
+    p.put(4, { kind: "promoter", id: "j23106" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [] });
     const before = p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null));
     p.rotate(SLOTS * 1000);
     expect(p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null))).toEqual(before);
@@ -1333,25 +1353,25 @@ describe("edge cases across modules", () => {
 
   it("a completely full ring reports no free slots and refuses installs", () => {
     const p = new Plasmid();
-    for (let i = 0; i < SLOTS; i++) if (p.at(i) === null) p.put(i, { kind: "terminator" });
+    for (let i = 0; i < SLOTS; i++) if (p.at(i) === null) p.put(i, { kind: "terminator", id: "rrnbt1" });
     expect(p.free()).toBe(0);
-    expect(p.add({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
+    expect(p.add({ kind: "gene", id: "psbA", level: 1, mods: [] }).ok).toBe(false);
   });
 
   it("a full bin refuses further loot rather than dropping it silently", () => {
     const p = new Plasmid();
-    while (p.stash({ kind: "terminator" }).ok) { /* fill */ }
+    while (p.stash({ kind: "terminator", id: "rrnbt1" }).ok) { /* fill */ }
     expect(p.bin.length).toBeLessThanOrEqual(18);
-    expect(p.stash({ kind: "gene", id: "psbA", optimised: false }).ok).toBe(false);
+    expect(p.stash({ kind: "gene", id: "psbA", level: 1, mods: [] }).ok).toBe(false);
   });
 
   it("expression is finite and non-negative at every depth for every gene", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(4, { kind: "promoter", id: "j23119" });
     let slot = 5;
     for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
       if (id === "ori" || slot >= SLOTS) continue;
-      p.put(slot++, { kind: "gene", id, optimised: true });
+      p.put(slot++, { kind: "gene", id, level: 1, mods: ["codon"] });
     }
     for (let d = 1; d <= bio.MAX_DEPTH; d++) {
       for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
@@ -1498,7 +1518,7 @@ describe("starter parts library", () => {
   it("a fresh plasmid can assemble a looted module without extra promoters", () => {
     const p = new Plasmid();
     for (const g of ["sat", "aprA", "dsrA"] as const) {
-      p.stash({ kind: "gene", id: g, optimised: false });
+      p.stash({ kind: "gene", id: g, level: 1, mods: [] });
     }
     expect(p.assemble(["sat", "aprA", "dsrA"]).ok).toBe(true);
     // and still has parts left for a second transcript
@@ -1838,8 +1858,8 @@ describe("facing and movement", () => {
 describe("ATP economy", () => {
   const withOperon = (...genes: bio.GeneId[]) => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    genes.forEach((g, i) => { p.put(5 + i, { kind: "gene", id: g, optimised: true }); });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    genes.forEach((g, i) => { p.put(5 + i, { kind: "gene", id: g, level: 1, mods: ["codon"] }); });
     return p;
   };
 
@@ -1848,7 +1868,7 @@ describe("ATP economy", () => {
     // replicon genuinely costs energy, so compare against that baseline.
     const base = new Plasmid().atpCost(2);
     const p = new Plasmid();
-    p.put(9, { kind: "gene", id: "narG", optimised: true });   // no promoter
+    p.put(9, { kind: "gene", id: "narG", level: 1, mods: ["codon"] });   // no promoter
     expect(p.atpCost(2)).toBeCloseTo(base, 6);
   });
 
@@ -1858,7 +1878,7 @@ describe("ATP economy", () => {
 
   it("switching an operon on creates a cost", () => {
     const off = new Plasmid();
-    off.put(9, { kind: "gene", id: "cbbL", optimised: true });
+    off.put(9, { kind: "gene", id: "cbbL", level: 1, mods: ["codon"] });
     const on = withOperon("cbbL");
     expect(on.atpCost(1)).toBeGreaterThan(off.atpCost(1));
   });
@@ -2280,8 +2300,8 @@ describe("the microbe turn", () => {
 describe("plasmid memoisation cannot go stale", () => {
   const fresh = () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "narG", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "narG", level: 1, mods: ["codon"] });
     return p;
   };
 
@@ -2289,20 +2309,20 @@ describe("plasmid memoisation cannot go stale", () => {
   // stale value is a mutator that forgets to bump it. Enumerate them.
   it("every public mutator bumps the revision", () => {
     const cases: [string, (p: Plasmid) => void][] = [
-      ["put",        (p) => { p.put(9, { kind: "terminator" }); }],
+      ["put",        (p) => { p.put(9, { kind: "terminator", id: "rrnbt1" }); }],
       ["swap",       (p) => { p.swap(4, 9); }],
       ["remove",     (p) => { p.remove(5); }],
       ["rotate",     (p) => { p.rotate(3); }],
-      ["optimise",   (p) => { p.put(9, { kind: "gene", id: "katG", optimised: false });
+      ["optimise",   (p) => { p.put(9, { kind: "gene", id: "katG", level: 1, mods: [] });
                               p.optimise("katG"); }],
-      ["stash",      (p) => { p.stash({ kind: "terminator" }); }],
-      ["add",        (p) => { p.add({ kind: "terminator" }, 9); }],
-      ["install",    (p) => { p.stash({ kind: "gene", id: "katG", optimised: false });
+      ["stash",      (p) => { p.stash({ kind: "terminator", id: "rrnbt1" }); }],
+      ["add",        (p) => { p.add({ kind: "terminator", id: "rrnbt1" }, 9); }],
+      ["install",    (p) => { p.stash({ kind: "gene", id: "katG", level: 1, mods: [] });
                               p.install(p.bin.findIndex((x) => x.kind === "gene"), 9); }],
       ["uninstall",  (p) => { p.uninstall(5); }],
-      ["assemble",   (p) => { p.stash({ kind: "gene", id: "nirS", optimised: false });
-                              p.stash({ kind: "gene", id: "norB", optimised: false });
-                              p.stash({ kind: "gene", id: "nosZ", optimised: false });
+      ["assemble",   (p) => { p.stash({ kind: "gene", id: "nirS", level: 1, mods: [] });
+                              p.stash({ kind: "gene", id: "norB", level: 1, mods: [] });
+                              p.stash({ kind: "gene", id: "nosZ", level: 1, mods: [] });
                               p.assemble(["narG", "nirS", "norB", "nosZ"]); }],
     ];
     for (const [name, mutate] of cases) {
@@ -2323,7 +2343,7 @@ describe("plasmid memoisation cannot go stale", () => {
   it("ATP figures reflect a mutation immediately", () => {
     const p = fresh();
     const before = p.atpGain(2);
-    p.put(6, { kind: "gene", id: "nosZ", optimised: true });
+    p.put(6, { kind: "gene", id: "nosZ", level: 1, mods: ["codon"] });
     expect(p.atpGain(2)).not.toBeCloseTo(before, 6);
   });
 
@@ -2345,9 +2365,9 @@ describe("plasmid memoisation cannot go stale", () => {
   it("a memoised read matches a freshly built plasmid", () => {
     const a = fresh();
     a.atpGain(4); a.operons();             // warm the memo
-    a.put(7, { kind: "gene", id: "katG", optimised: true });
+    a.put(7, { kind: "gene", id: "katG", level: 1, mods: ["codon"] });
     const b = fresh();
-    b.put(7, { kind: "gene", id: "katG", optimised: true });
+    b.put(7, { kind: "gene", id: "katG", level: 1, mods: ["codon"] });
     expect(a.atpGain(4)).toBeCloseTo(b.atpGain(4), 10);
     expect(a.operons().length).toBe(b.operons().length);
   });
@@ -2865,8 +2885,8 @@ describe("the run, as a roguelike", () => {
 
   it("the export names real loci and refuses to invent sequence", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "dsrA", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: ["codon"] });
     const out = exportAnnotation("SP162", 7, p.slots);
     expect(out).toContain("dsrA");
     expect(out).toContain("dissimilatory sulfite reductase");
@@ -2899,22 +2919,22 @@ describe("running out of ATP is lethal, not cosmetic", () => {
   it("a plasmid with no respiration for this depth runs a deficit", () => {
     // A load of structural genes and no generator, deep down.
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(4, { kind: "promoter", id: "j23119" });
     (["katG", "cbbL", "aclB"] as const).forEach((g, i) => {
-      p.put(5 + i, { kind: "gene", id: g, optimised: true });
+      p.put(5 + i, { kind: "gene", id: g, level: 1, mods: ["codon"] });
     });
     expect(p.atpBalance(8)).toBeLessThan(0);
   });
 
   it("acquiring the right respiration turns the deficit around", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
+    p.put(4, { kind: "promoter", id: "j23119" });
     (["katG", "cbbL", "aclB"] as const).forEach((g, i) => {
-      p.put(5 + i, { kind: "gene", id: g, optimised: true });
+      p.put(5 + i, { kind: "gene", id: g, level: 1, mods: ["codon"] });
     });
     const before = p.atpBalance(8);
-    p.put(8, { kind: "gene", id: "mcrA", optimised: true });
-    p.put(9, { kind: "gene", id: "hdrB", optimised: true });
+    p.put(8, { kind: "gene", id: "mcrA", level: 1, mods: ["codon"] });
+    p.put(9, { kind: "gene", id: "hdrB", level: 1, mods: ["codon"] });
     expect(p.atpBalance(8)).toBeGreaterThan(before);
   });
 
@@ -3016,8 +3036,8 @@ describe("NCBI sequence retrieval", () => {
 
   it("the export emits real FASTA when sequences are in hand", async () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
     const got = await fetchAll(["mtrC"], stub());
     const out = exportAnnotation("MR-1", 4, p.slots, got);
     expect(out).toContain(">NC_004347.2");
@@ -3027,8 +3047,8 @@ describe("NCBI sequence retrieval", () => {
 
   it("a locus without a sequence exports its query, never invented bases", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "dsrA", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: ["codon"] });
     const out = exportAnnotation("Hilden", 7, p.slots, new Map());
     expect(out).toContain("no sequence retrieved");
     expect(out).toContain("dsrA[Gene]");
@@ -3060,7 +3080,7 @@ describe("audit regressions", () => {
     // The notebook, score and death count were written nowhere. Every sighting
     // was discarded the moment the tab closed.
     const s = parseSave({
-      version: 5, depth: 3, seed: 7, px: 5, py: 5, hp: 20, atp: 90,
+      version: SCHEMA, depth: 3, seed: 7, px: 5, py: 5, hp: 20, atp: 90,
       ring: [], bin: [], settings: {},
       run: { deepest: 6, deaths: 2, bestiary: ["geobacter", "beggiatoa"], library: ["mtrC"] },
     });
@@ -3071,7 +3091,7 @@ describe("audit regressions", () => {
   });
 
   it("a corrupt lineage block degrades to an empty one", () => {
-    const base = { version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+    const base = { version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
                    ring: [], bin: [], settings: {} };
     expect(parseSave({ ...base, run: "nonsense" })?.run.bestiary).toEqual([]);
     expect(parseSave(base)?.run.deepest).toBe(1);
@@ -3079,7 +3099,7 @@ describe("audit regressions", () => {
 
   it("the bestiary rejects organisms that do not exist and drops duplicates", () => {
     const s = parseSave({
-      version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
       ring: [], bin: [], settings: {},
       run: { deepest: 1, deaths: 0, bestiary: ["geobacter", "geobacter", "sasquatch", 7],
              library: ["mtrC", "notAGene"] },
@@ -3090,7 +3110,7 @@ describe("audit regressions", () => {
 
   it("deepest depth is clamped to the column", () => {
     const s = parseSave({
-      version: 5, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
       ring: [], bin: [], settings: {},
       run: { deepest: 9999, deaths: -5, bestiary: [], library: [] },
     });
@@ -3426,14 +3446,14 @@ describe("crawl-like behaviours", () => {
 
   it("a discarded part leaves the bin and does not come back", () => {
     const p = new Plasmid();
-    p.stash({ kind: "gene", id: "mtrC", optimised: false });
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
     const before = p.bin.length;
     const i = p.bin.findIndex((x) => x.kind === "gene");
     p.bin.splice(i, 1);
     expect(p.bin.length).toBe(before - 1);
     expect(p.inBin("mtrC")).toBe(false);
     // and the slot is free again for a fresh copy
-    expect(p.stash({ kind: "gene", id: "mtrC", optimised: false }).ok).toBe(true);
+    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(true);
   });
 
   it("waiting is a real turn: microbes act and status ticks", () => {
@@ -3517,8 +3537,8 @@ describe("day and night", () => {
 describe("bioluminescence", () => {
   const lit = () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "luxAB", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "luxAB", level: 1, mods: ["codon"] });
     return p;
   };
 
@@ -3531,7 +3551,7 @@ describe("bioluminescence", () => {
 
   it("glowing costs energy rather than making it", () => {
     const dark = new Plasmid();
-    dark.put(4, { kind: "promoter", strength: "strong" });
+    dark.put(4, { kind: "promoter", id: "j23119" });
     expect(lit().atpGain(1)).toBeLessThan(dark.atpGain(1));
   });
 
@@ -3597,11 +3617,11 @@ describe("the difficulty curve", () => {
       if (m.depth > depth || m.depth < depth - 2) continue;
       for (const g of m.genes) if (!useful.includes(g)) useful.push(g);
     }
-    p.put(3, { kind: "promoter", strength: "strong" });
+    p.put(3, { kind: "promoter", id: "j23119" });
     let kb = 0.7, slot = 4;
     for (const g of useful) {
       if (kb + bio.GENES[g].kb > p.capacityKb() * 0.7 || slot >= 14) break;
-      p.put(slot++, { kind: "gene", id: g, optimised: true });
+      p.put(slot++, { kind: "gene", id: g, level: 1, mods: ["codon"] });
       kb += bio.GENES[g].kb;
     }
     return p;
@@ -3614,11 +3634,11 @@ describe("the difficulty curve", () => {
 
   it("an over-stuffed plasmid is crippled but never silently switched off", () => {
     const p = new Plasmid();
-    p.put(3, { kind: "promoter", strength: "strong" });
+    p.put(3, { kind: "promoter", id: "j23119" });
     let slot = 4;
     for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
       if (id === "ori" || slot >= 15) continue;
-      p.put(slot++, { kind: "gene", id, optimised: true });
+      p.put(slot++, { kind: "gene", id, level: 1, mods: ["codon"] });
     }
     expect(p.burden()).toBeGreaterThan(0.5);
     expect(p.burden(), "a cliff to exactly zero is a trap").toBeLessThan(1);
@@ -4088,5 +4108,474 @@ describe("a pinch is never a tap", () => {
     down(s, 1);
     s.panMoved = 40;
     expect(wouldBuild(s)).toBe(false);
+  });
+});
+
+describe("the part catalogue is data, not code", () => {
+  it("every promoter declares a mode, a strength and an activation rule", () => {
+    for (const p of Object.values(PROMOTERS)) {
+      expect(p.strength, p.id).toBeGreaterThan(0);
+      expect(["constitutive", "conditional", "inducible"], p.id).toContain(p.mode);
+      expect(p.note.length, `${p.id}: must say why it exists`).toBeGreaterThan(30);
+      for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+        const a = p.active({ stratum: bio.stratum(d), inducers: new Set() });
+        expect(a, `${p.id} at D${String(d)}`).toBeGreaterThanOrEqual(0);
+        expect(a, `${p.id} at D${String(d)}`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("constitutive promoters ignore the chemistry; conditional ones do not", () => {
+    const at = (id: PromoterId, d: number): number =>
+      PROMOTERS[id].active({ stratum: bio.stratum(d), inducers: new Set() });
+    for (const id of ["j23114", "j23106", "j23119"] as PromoterId[]) {
+      expect(at(id, 1), id).toBe(at(id, 8));
+    }
+    // FNR carries a [4Fe-4S] cluster that O2 destroys: that IS the promoter.
+    expect(at("pfnr", 1)).toBeLessThan(at("pfnr", 8));
+    // SoxRS answers superoxide, which only exists where oxygen does.
+    expect(at("psoxs", 1)).toBeGreaterThan(at("psoxs", 8));
+  });
+
+  it("an inducible promoter is dead weight until you carry the inducer", () => {
+    const bare = PROMOTERS.plac.active({ stratum: bio.stratum(1), inducers: new Set() });
+    const fed = PROMOTERS.plac.active({
+      stratum: bio.stratum(1), inducers: new Set(["glucose"]),
+    });
+    expect(bare).toBeLessThan(0.1);
+    expect(fed).toBe(1);
+  });
+
+  it("terminators leak, and a tandem leaks least", () => {
+    // Efficiency is measured as readthrough and is never zero -- which is
+    // exactly why tandem terminators are standard practice.
+    for (const t of Object.values(TERMINATORS)) {
+      expect(t.readthrough, t.id).toBeGreaterThan(0);
+      expect(t.readthrough, t.id).toBeLessThan(1);
+    }
+    expect(TERMINATORS.rrnbt1t2.readthrough).toBeLessThan(TERMINATORS.rrnbt1.readthrough);
+    expect(TERMINATORS.rrnbt1.readthrough).toBeLessThan(TERMINATORS.hairpin.readthrough);
+    // And the tandem costs more space, or it would be a free win.
+    expect(TERMINATORS.rrnbt1t2.kb).toBeGreaterThan(TERMINATORS.rrnbt1.kb);
+  });
+
+  it("readthrough reaches genes downstream, proportionally", () => {
+    const build = (id: TerminatorId): number => {
+      const p = new Plasmid();
+      p.put(0, { kind: "promoter", id: "j23119" });
+      p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+      p.put(2, { kind: "terminator", id });
+      p.put(3, { kind: "gene", id: "omcS", level: 1, mods: [] });
+      return p.expression("omcS", 4);
+    };
+    const leaky = build("hairpin");
+    const tight = build("rrnbt1t2");
+    expect(leaky / tight).toBeCloseTo(
+      TERMINATORS.hairpin.readthrough / TERMINATORS.rrnbt1t2.readthrough, 1);
+  });
+
+  it("every modifier declares at least one effect and a cost or a trade", () => {
+    for (const m of Object.values(MODIFIERS)) {
+      const e = m.effect;
+      const changes = Object.values(e).filter((v) => v !== undefined).length;
+      expect(changes, `${m.id} changes nothing`).toBeGreaterThan(0);
+      expect(m.note.length, `${m.id}: must explain itself`).toBeGreaterThan(25);
+      // A pure upside with no cost anywhere is not a decision.
+      const pureUpside = (e.expression ?? 1) > 1 && (e.power ?? 1) >= 1
+        && (e.upkeep ?? 1) <= 1 && (e.kb ?? 0) <= 0;
+      if (pureUpside) expect(m.id, `${m.id} is a free win`).toBe("codon");
+    }
+  });
+
+  it("modifiers compose multiplicatively and are capped by level", () => {
+    const p = new Plasmid();
+    p.put(0, { kind: "promoter", id: "j23119" });
+    p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    const bare = p.expression("mtrC", 4);
+    expect(p.addModifier("mtrC", "codon").ok).toBe(true);
+    const one = p.expression("mtrC", 4);
+    expect(one / bare).toBeCloseTo(MODIFIERS.codon.effect.expression ?? 1, 5);
+    // Level 1 allows a single modifier.
+    expect(p.addModifier("mtrC", "rbs").ok, "level 1 must cap at one slot").toBe(false);
+    expect(p.evolve("mtrC").ok).toBe(true);
+    expect(p.addModifier("mtrC", "rbs").ok, "level 2 allows a second").toBe(true);
+    expect(p.addModifier("mtrC", "codon").ok, "no duplicates").toBe(false);
+  });
+
+  it("directed evolution raises efficacy and costs more each time", () => {
+    const p = new Plasmid();
+    p.put(0, { kind: "promoter", id: "j23119" });
+    p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    let last = p.expression("mtrC", 4);
+    let cost = p.evolutionCost("mtrC");
+    for (let l = 2; l <= MAX_LEVEL; l++) {
+      expect(p.evolve("mtrC").ok, `to level ${String(l)}`).toBe(true);
+      const now = p.expression("mtrC", 4);
+      expect(now, `level ${String(l)} must be stronger`).toBeGreaterThan(last);
+      last = now;
+      const next = p.evolutionCost("mtrC");
+      if (l < MAX_LEVEL) expect(next, "cost must rise").toBeGreaterThan(cost);
+      cost = next;
+    }
+    expect(p.evolve("mtrC").ok, "cannot exceed the cap").toBe(false);
+    expect(p.evolutionCost("mtrC")).toBe(Infinity);
+  });
+
+  it("rarity skews richer with depth, and always returns a real tier", () => {
+    const sample = (depth: number): Record<string, number> => {
+      const out: Record<string, number> = {};
+      for (let i = 0; i < 4000; i++) {
+        const r = rollRarity(i / 4000, depth);
+        out[r] = (out[r] ?? 0) + 1;
+      }
+      return out;
+    };
+    const shallow = sample(1);
+    const deep = sample(8);
+    expect((deep["rare"] ?? 0) + (deep["legendary"] ?? 0))
+      .toBeGreaterThan((shallow["rare"] ?? 0) + (shallow["legendary"] ?? 0));
+    expect(shallow["common"]).toBeGreaterThan(0);
+    for (const n of [NaN, -1, 2, Infinity]) {
+      expect(RARITY_IDS).toContain(rollRarity(n, 4));
+    }
+  });
+
+  it("a legacy save migrates onto the new part model", () => {
+    // `strength` becomes an Anderson promoter, `optimised` becomes the codon
+    // modifier. Old saves must load, not be discarded.
+    const s = parseSave({
+      version: SCHEMA, depth: 2, floor: 4, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [
+        { kind: "promoter", strength: "strong" },
+        { kind: "gene", id: "mtrC", optimised: true },
+        { kind: "terminator" },
+      ],
+      bin: [], run: {}, settings: {},
+    });
+    expect(s).not.toBeNull();
+    expect(s?.ring[0]).toEqual({ kind: "promoter", id: "j23119" });
+    expect(s?.ring[1]).toEqual({ kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
+    expect(s?.ring[2]).toEqual({ kind: "terminator", id: "rrnbt1" });
+  });
+
+  it("a hand-edited save cannot exceed what play allows", () => {
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [{ kind: "gene", id: "mtrC", level: 99,
+               mods: ["codon", "rbs", "chaperone", "ssra", "signal", "fusion"] }],
+      bin: [], run: {}, settings: {},
+    });
+    const g = s?.ring[0];
+    expect(g?.kind).toBe("gene");
+    if (g?.kind !== "gene") return;
+    expect(g.level).toBeLessThanOrEqual(MAX_LEVEL);
+    expect(g.mods.length).toBeLessThanOrEqual(modifierSlots(g.level));
+  });
+});
+
+describe("rare parts drop and research spends", () => {
+  it("every rarity tier has parts, so a roll can never come back empty", () => {
+    for (const r of RARITY_IDS) {
+      const { promoters, terminators, modifiers } = partsOfRarity(r);
+      expect(promoters.length + terminators.length + modifiers.length,
+             `${r} has no members`).toBeGreaterThan(0);
+    }
+  });
+
+  it("rollPart always returns a real part, whatever the input", () => {
+    for (const roll of [0, 0.5, 0.999, NaN, -1, 2, Infinity]) {
+      for (const pick of [0, 0.5, 0.999, NaN, -3]) {
+        const it = rollPart(roll, pick, 4);
+        expect(it, `roll ${String(roll)} pick ${String(pick)}`).not.toBeNull();
+        if (!it) continue;
+        expect(["promoter", "terminator", "modifier"]).toContain(it.kind);
+        expect(itemName(it).length).toBeGreaterThan(0);
+        expect(itemNote(it).length).toBeGreaterThan(10);
+      }
+    }
+  });
+
+  it("the deep column yields better parts than the surface", () => {
+    const score: Record<string, number> = { common: 0, uncommon: 1, rare: 2, legendary: 3 };
+    const mean = (depth: number): number => {
+      let t = 0;
+      for (let i = 0; i < 3000; i++) {
+        const it = rollPart(i / 3000, (i * 7919 % 1000) / 1000, depth);
+        if (it && it.kind !== "cassette" && it.kind !== "substrate") {
+          t += score[it.rarity] ?? 0;
+        }
+      }
+      return t / 3000;
+    };
+    expect(mean(8)).toBeGreaterThan(mean(1));
+  });
+
+  it("the rarity ladder matches the power ladder", () => {
+    // A legendary part must not be worse than a common one, or rarity is a lie.
+    expect(PROMOTERS.plac.strength).toBeGreaterThan(PROMOTERS.j23114.strength);
+    expect(TERMINATORS.rrnbt1t2.readthrough).toBeLessThan(TERMINATORS.hairpin.readthrough);
+    expect(PROMOTERS.j23114.rarity).toBe("common");
+    expect(PROMOTERS.plac.rarity).toBe("legendary");
+  });
+
+  it("a modifier is held, not stashed on the ring", () => {
+    // Modifiers attach to a gene; they are not parts you can transcribe.
+    const it = { kind: "modifier" as const, id: "codon" as ModifierId,
+                 rarity: "uncommon" as const };
+    expect(itemName(it)).toBe(MODIFIERS.codon.name);
+    expect(itemColour(it)).toBe(RARITY.uncommon.colour);
+  });
+
+  it("evolution cost rises steeply and is finite until the cap", () => {
+    for (const g of ["mtrC", "dsrA", "psbA"] as bio.GeneId[]) {
+      let last = 0;
+      for (let l = 1; l < MAX_LEVEL; l++) {
+        const c = evolutionCost(l, g);
+        expect(Number.isFinite(c), `${g} L${String(l)}`).toBe(true);
+        expect(c, `${g} L${String(l)} must cost more than L${String(l - 1)}`)
+          .toBeGreaterThan(last);
+        last = c;
+      }
+      expect(evolutionCost(MAX_LEVEL, g)).toBe(Infinity);
+    }
+  });
+
+  it("a higher-tier gene costs more to evolve than a starter one", () => {
+    expect(evolutionCost(1, "mcrA")).toBeGreaterThan(evolutionCost(1, "psbA"));
+  });
+
+  it("modifier slots open with level and are never exceeded", () => {
+    expect(modifierSlots(1)).toBe(1);
+    expect(modifierSlots(2)).toBe(2);
+    expect(modifierSlots(MAX_LEVEL)).toBe(3);
+    const p = new Plasmid();
+    p.put(0, { kind: "promoter", id: "j23119" });
+    p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+    let added = 0;
+    for (const m of ["codon", "rbs", "chaperone", "ssra"] as ModifierId[]) {
+      if (p.addModifier("mtrC", m).ok) added++;
+    }
+    expect(added).toBe(modifierSlots(1));
+  });
+
+  it("evolving is atomic: a refusal changes nothing", () => {
+    const p = new Plasmid();
+    p.put(1, { kind: "gene", id: "mtrC", level: MAX_LEVEL, mods: [] });
+    const before = JSON.stringify(p.slots);
+    expect(p.evolve("mtrC").ok).toBe(false);
+    expect(JSON.stringify(p.slots)).toBe(before);
+    expect(p.evolve("dsrA").ok, "not carried").toBe(false);
+    expect(JSON.stringify(p.slots)).toBe(before);
+  });
+});
+
+describe("rarity reads at a glance", () => {
+  it("uses the classic five, in the colours everyone already knows", () => {
+    expect(RARITY_IDS).toEqual(["common", "uncommon", "rare", "epic", "legendary"]);
+    // Grey, green, blue, purple, orange -- not decorative, conventional.
+    expect(RARITY.common.colour.toLowerCase()).toMatch(/^#9|^#a/);
+    expect(RARITY.uncommon.colour.toLowerCase()).toMatch(/^#4fd|^#5/);
+    expect(RARITY.legendary.colour.toLowerCase()).toMatch(/^#f0|^#e/);
+    // Every colour distinct, or the channel carries no information.
+    expect(new Set(RARITY_IDS.map((r) => RARITY[r].colour)).size).toBe(5);
+  });
+
+  it("rarer tiers are strictly less common", () => {
+    for (let i = 1; i < RARITY_IDS.length; i++) {
+      const lo = RARITY[RARITY_IDS[i - 1]!], hi = RARITY[RARITY_IDS[i]!];
+      expect(hi.weight, `${hi.id} must be rarer than ${lo.id}`).toBeLessThan(lo.weight);
+      expect(RARITY_RANK[hi.id]).toBeGreaterThan(RARITY_RANK[lo.id]);
+    }
+  });
+
+  it("every tier holds parts, so no rarity is decoration", () => {
+    for (const r of RARITY_IDS) {
+      const { promoters, terminators, modifiers } = partsOfRarity(r);
+      expect(promoters.length + terminators.length + modifiers.length, r)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("a gene's rarity follows its tier, so the two cannot disagree", () => {
+    expect(rarityOfTier(1)).toBe("common");
+    expect(rarityOfTier(8)).toBe("legendary");
+    for (let t = 1; t <= 8; t++) {
+      expect(RARITY_IDS).toContain(rarityOfTier(t));
+      if (t > 1) {
+        expect(RARITY_RANK[rarityOfTier(t)])
+          .toBeGreaterThanOrEqual(RARITY_RANK[rarityOfTier(t - 1)]);
+      }
+    }
+    // And the deepest genes really are the rarest.
+    expect(rarityOfTier(bio.GENES.mcrA.tier)).toBe("legendary");
+    expect(rarityOfTier(bio.GENES.psbA.tier)).toBe("common");
+  });
+
+  it("the bin colours a part by its own rarity", () => {
+    expect(partRarity({ kind: "gene", id: "mcrA", level: 1, mods: [] })).toBe("legendary");
+    expect(partRarity({ kind: "gene", id: "psbA", level: 1, mods: [] })).toBe("common");
+    expect(partRarity({ kind: "promoter", id: "plac" })).toBe("legendary");
+    expect(partRarity({ kind: "terminator", id: "hairpin" })).toBe("common");
+  });
+});
+
+describe("every gene carries its real history", () => {
+  it("all of them have a discovery line", () => {
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      const d = bio.GENES[id].discovery;
+      expect(d, `${id} has no discovery line`).toBeTruthy();
+      expect(d.length, `${id}: too terse to be worth reading`).toBeGreaterThan(60);
+      expect(d.trim().endsWith("."), `${id}: unfinished sentence`).toBe(true);
+    }
+  });
+
+  it("they are distinct, not a template with the name swapped", () => {
+    const all = (Object.keys(bio.GENES) as bio.GeneId[]).map((id) => bio.GENES[id].discovery);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("the ones tied to this column name the right people", () => {
+    // Winogradsky discovered nitrite oxidation, and the column is his.
+    expect(bio.GENES.nxrA.discovery).toContain("Winogradsky");
+    // Beijerinck named Desulfovibrio and found nitrogen fixation.
+    expect(bio.GENES.dsrA.discovery).toContain("Beijerinck");
+    expect(bio.GENES.nifH.discovery).toContain("Beijerinck");
+    // Shewanella oneidensis is named for the lake it came out of.
+    expect(bio.GENES.mtrC.discovery).toContain("Oneida");
+    // The purple bacterial reaction centre was the first membrane structure.
+    expect(bio.GENES.pufM.discovery).toContain("1985");
+  });
+
+  it("history is separate from mechanics, so neither crowds the other", () => {
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      const g = bio.GENES[id];
+      expect(g.discovery, `${id}: history duplicates the description`)
+        .not.toBe(g.desc);
+    }
+  });
+});
+
+describe("the column feeds from the top", () => {
+  it("capacity and restock rate both fall with depth", () => {
+    // The biological pump: phototrophs fix carbon at the surface, it sinks,
+    // and less of it is still edible the further down it gets.
+    for (let d = 2; d <= bio.MAX_DEPTH; d++) {
+      expect(capacityAt(d), `D${String(d)}`).toBeLessThanOrEqual(capacityAt(d - 1));
+      expect(rateAt(d, 1), `D${String(d)}`).toBeLessThan(rateAt(d - 1, 1));
+    }
+    expect(capacityAt(1)).toBeGreaterThan(capacityAt(bio.MAX_DEPTH) * 2);
+  });
+
+  it("production nearly stops at night, at every depth", () => {
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      expect(rateAt(d, 0), `D${String(d)}`).toBeLessThan(rateAt(d, 1) / 5);
+      expect(rateAt(d, 0), "never exactly zero, or a night camp is a deadlock")
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("a stripped floor refills over time, and never past capacity", () => {
+    const clock = { turn: RESTOCK_TURNS * 2 };
+    const gained = restockAmount(1, 0, RESTOCK_TURNS, clock, RESTOCK_TURNS);
+    expect(gained).toBeGreaterThan(0);
+    expect(gained).toBeLessThanOrEqual(capacityAt(1));
+    // Already full: nothing more falls.
+    expect(restockAmount(1, capacityAt(1), 9999, clock, 0)).toBe(0);
+  });
+
+  it("leaving and coming straight back gains nothing", () => {
+    const clock = { turn: 100 };
+    expect(restockAmount(4, 0, 0, clock, 100)).toBe(0);
+    expect(restockAmount(4, 0, -50, clock, 150)).toBe(0);
+  });
+
+  it("the surface refills far faster than the floor", () => {
+    const clock = { turn: 40 };
+    const shallow = restockAmount(1, 0, 300, clock, 0);
+    const deep = restockAmount(8, 0, 300, clock, 0);
+    expect(shallow, "climbing must actually be worth the turns")
+      .toBeGreaterThan(deep * 2);
+  });
+
+  it("restocking survives absurd inputs", () => {
+    const clock = { turn: 0 };
+    for (const n of [NaN, Infinity, -Infinity, 1e12]) {
+      const g = restockAmount(4, 0, n, clock, 0);
+      expect(Number.isFinite(g), String(n)).toBe(true);
+      expect(g).toBeGreaterThanOrEqual(0);
+      expect(g).toBeLessThanOrEqual(capacityAt(4));
+      expect(Number.isFinite(capacityAt(n))).toBe(true);
+      expect(Number.isFinite(rateAt(n, n))).toBe(true);
+    }
+  });
+
+  it("the description matches how bare the floor actually is", () => {
+    expect(describeStock(1, 0)).toMatch(/bare|Nothing/i);
+    expect(describeStock(1, capacityAt(1))).toMatch(/Fresh|feeds/i);
+    expect(describeStock(8, capacityAt(8))).not.toMatch(/feeds itself/);
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      for (const n of [0, 1, capacityAt(d)]) {
+        expect(describeStock(d, n).length).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  it("the stock clock survives a reload, so a stripped floor stays stripped", () => {
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [], bin: [], run: {}, settings: {}, heldMods: [], turn: 900,
+      stocked: [[1, 400], [2, 850], ["bad", 3], [4]],
+    });
+    expect(s?.stocked).toEqual([[1, 400], [2, 850]]);
+    expect(s?.turn).toBe(900);
+  });
+});
+
+describe("regeneration is monotonic", () => {
+  // Sampling daylight at the ENDPOINTS of the interval made 600 turns away
+  // return less than 300, because both ends landed at night. That is
+  // indefensible and was invisible until the numbers were printed.
+  it("more time away never yields less material", () => {
+    const clock = { turn: 0 };
+    for (const depth of [1, 4, 8]) {
+      let last = -1;
+      for (let t = 0; t <= 1200; t += 20) {
+        clock.turn = t;
+        const g = restockAmount(depth, 0, t, clock, 0);
+        expect(g, `D${String(depth)} at ${String(t)} turns went backwards`)
+          .toBeGreaterThanOrEqual(last);
+        last = g;
+      }
+    }
+  });
+
+  it("the result does not depend on where in the day the span begins", () => {
+    // Sampling across the interval means a long span averages out the cycle.
+    const clock = { turn: 0 };
+    const long = 600;
+    const values = [0, 55, 110, 165].map((start) =>
+      restockAmount(1, 0, long, clock, start));
+    const spread = Math.max(...values) - Math.min(...values);
+    expect(spread, `start phase changed the yield by ${String(spread)}`)
+      .toBeLessThanOrEqual(2);
+  });
+
+  it("mean light over a whole day matches the daily average", () => {
+    const a = meanLight(0, TURNS_PER_DAY);
+    const b = meanLight(TURNS_PER_DAY / 2, TURNS_PER_DAY);
+    expect(a).toBeCloseTo(b, 2);
+    expect(a).toBeGreaterThan(0.1);
+    expect(a).toBeLessThan(0.7);
+  });
+
+  it("the climb is worth it and the floor is not", () => {
+    // The whole point: going up refills, staying down does not.
+    const clock = { turn: 0 };
+    const day = TURNS_PER_DAY;
+    expect(restockAmount(1, 0, day, clock, 0) / capacityAt(1),
+           "a day at the surface should visibly refill it").toBeGreaterThan(0.5);
+    expect(restockAmount(8, 0, day, clock, 0) / capacityAt(8),
+           "the floor must stay barren, or there is no reason to climb")
+      .toBeLessThan(0.2);
   });
 });

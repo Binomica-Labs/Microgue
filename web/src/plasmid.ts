@@ -25,7 +25,6 @@ export const PROMOTER_POWER: Readonly<Record<Strength, number>> =
   { weak: 0.55, medium: 0.85, strong: 1.2 };
 
 /** Per-step decay downstream of the promoter. */
-const POLARITY = 0.82;
 /** Bonus per same-pathway neighbour in the same operon. */
 const SYNERGY = 0.18;
 const BURDEN_KNEE = 0.7;
@@ -66,15 +65,17 @@ const GENERATORS: Partial<Record<GeneId, number>> = {
 /** Cost scales with size and how hard the gene is being driven. */
 const COST_PER_KB = 0.7;
 
-export type Part =
-  | { kind: "gene"; id: GeneId; optimised: boolean }
-  | { kind: "promoter"; strength: Strength }
-  | { kind: "terminator" };
+// The part model lives in transcription.ts and the catalogue in parts.ts, so
+// adding a promoter, a terminator or a gene modifier does not touch this class.
+export type { Part } from "./transcription.js";
+import { modEffect, transcribe, type Part } from "./transcription.js";
+import { MAX_LEVEL, MODIFIERS, evolutionCost, levelMultiplier, modifierSlots,
+         type Context, type ModifierId } from "./parts.js";
 
 export interface Operon {
   readonly promoter: number;
-  readonly strength: Strength;
-  readonly genes: readonly { slot: number; id: GeneId; rank: number }[];
+  readonly output: number;
+  readonly genes: readonly { slot: number; id: GeneId; rank: number; flow: number }[];
 }
 
 const O2_LABILE: ReadonlySet<GeneId> = new Set(["nifH", "hydA", "mcrA"]);
@@ -100,20 +101,20 @@ export class Plasmid {
   constructor() {
     // You start replicable and minimally transcribing, with spare regulatory
     // parts to build a second transcript once you have something to put in it.
-    this.slots[0] = { kind: "promoter", strength: "medium" };
-    this.slots[1] = { kind: "gene", id: "ori", optimised: false };
+    this.slots[0] = { kind: "promoter", id: "j23106" };
+    this.slots[1] = { kind: "gene", id: "ori", level: 1, mods: [] };
     // A working parts library, not a token. Two weak and two medium promoters
     // plus three terminators is enough to lay down three transcripts before
     // you have looted anything, which is what makes the ring feel like a
     // bench rather than a puzzle piece.
     this.bin.push(
-      { kind: "promoter", strength: "weak" },
-      { kind: "promoter", strength: "weak" },
-      { kind: "promoter", strength: "medium" },
-      { kind: "promoter", strength: "medium" },
-      { kind: "terminator" },
-      { kind: "terminator" },
-      { kind: "terminator" },
+      { kind: "promoter", id: "j23114" },
+      { kind: "promoter", id: "j23114" },
+      { kind: "promoter", id: "j23106" },
+      { kind: "promoter", id: "j23106" },
+      { kind: "terminator", id: "rrnbt1" },
+      { kind: "terminator", id: "rrnbt1" },
+      { kind: "terminator", id: "rrnbt1" },
     );
   }
 
@@ -237,34 +238,40 @@ export class Plasmid {
     return value;
   }
 
+  /**
+   * Operons are now derived from the transcription model, which attenuates at
+   * a terminator rather than stopping there. A gene downstream of a leaky
+   * hairpin really does get a share of the upstream promoter.
+   */
   private computeOperons(): Operon[] {
-    const out: Operon[] = [];
-    for (let i = 0; i < SLOTS; i++) {
-      const head = this.slots[i];
-      if (head?.kind !== "promoter") continue;
-      const genes: { slot: number; id: GeneId; rank: number }[] = [];
-      let rank = 0;
-      for (let k = 1; k < SLOTS; k++) {
-        const j = this.norm(i + k);
-        const p = this.slots[j];
-        if (p === null || p === undefined) break;          // a gap ends it
-        if (p.kind === "promoter") break;                  // next transcript
-        if (p.kind === "terminator") break;                // explicit stop
-        genes.push({ slot: j, id: p.id, rank });
-        rank++;
-      }
-      out.push({ promoter: i, strength: head.strength, genes });
-    }
-    return out;
+    const ctx = this.context();
+    return transcribe(this.slots, ctx).map((t) => ({
+      promoter: t.promoter,
+      output: t.output,
+      genes: t.readings.map((r) => ({ slot: r.slot, id: r.id, rank: r.rank, flow: r.flow })),
+    }));
+  }
+
+  /** What conditional and inducible promoters can see. Depth is set by the
+   *  game each turn; without it every promoter would be constitutive. */
+  depth = 1;
+  inducers: ReadonlySet<string> = new Set();
+  private context(): Context {
+    return { stratum: stratum(this.depth), inducers: this.inducers };
   }
 
   /** The operon a slot belongs to, if any. */
-  operonOf(id: GeneId): { operon: Operon; rank: number } | null {
+  operonOf(id: GeneId): { operon: Operon; rank: number; flow: number } | null {
+    let best: { operon: Operon; rank: number; flow: number } | null = null;
     for (const op of this.operons()) {
       const hit = op.genes.find((g) => g.id === id);
-      if (hit) return { operon: op, rank: hit.rank };
+      // The strongest driver wins when several promoters reach one gene,
+      // which happens as soon as a terminator leaks.
+      if (!hit) continue;
+      const here = { operon: op, rank: hit.rank, flow: hit.flow };
+      if (!best || op.output * hit.flow > best.operon.output * best.flow) best = here;
     }
-    return null;
+    return best;
   }
 
   burden(): number {
@@ -315,7 +322,7 @@ export class Plasmid {
     const at = free >= 0 ? free : this.slots.findIndex((s) => s?.kind !== "gene");
     const i = at >= 0 ? at : 0;
     // Direct assignment: going through put() would recurse into touch().
-    this.slots[i] = { kind: "gene", id: "ori", optimised: false };
+    this.slots[i] = { kind: "gene", id: "ori", level: 1, mods: [] };
   }
 
   /** Revision counter, exposed so tests can assert invalidation. */
@@ -350,10 +357,14 @@ export class Plasmid {
     // rather than an invisible tax.
     let e = need === "light" ? Math.max(s.light, 0.25) : 1;
 
-    e *= PROMOTER_POWER[ctx.operon.strength];
-    e *= POLARITY ** ctx.rank;                              // polarity
+    // `flow` already carries polarity AND every terminator's readthrough on
+    // the path from the promoter, so it must not be recomputed here -- doing
+    // that silently discarded the whole attenuation model.
+    e *= ctx.operon.output * ctx.flow;
     e *= this.synergy(ctx.operon, id);
-    if (!slot.optimised) e *= 0.6;
+    // Modifiers and evolution level, from the part itself.
+    const m = modEffect(slot.mods);
+    e *= m.expression * levelMultiplier(slot.level);
     return Math.max(e * (1 - this.burden()), 0);
   }
 
@@ -417,12 +428,41 @@ export class Plasmid {
   }
 
   optimise(id: GeneId): Result {
-    const p = this.slots.find((x) => x?.kind === "gene" && x.id === id);
-    if (p?.kind !== "gene") return { ok: false, err: "not carried" };
-    if (p.optimised) return { ok: false, err: "already optimised" };
-    p.optimised = true;
+    // Codon optimisation is one modifier among several now, so this is a thin
+    // wrapper over the general slot machinery.
+    return this.addModifier(id, "codon");
+  }
+
+  /** Attach a modifier to a carried gene, if it has a free slot. */
+  addModifier(id: GeneId, mod: ModifierId): Result {
+    const g = this.slots.find((x) => x?.kind === "gene" && x.id === id);
+    if (g?.kind !== "gene") return { ok: false, err: "not carried" };
+    if (g.mods.includes(mod)) {
+      return { ok: false, err: `already has ${MODIFIERS[mod].name}` };
+    }
+    const slots = modifierSlots(g.level);
+    if (g.mods.length >= slots) {
+      return { ok: false, err: `no free modifier slot (level ${String(g.level)} allows ${String(slots)})` };
+    }
+    g.mods.push(mod);
     this.touch();
     return { ok: true };
+  }
+
+  /** Directed evolution: raise a gene's level. The caller pays the ATP. */
+  evolve(id: GeneId): Result {
+    const g = this.slots.find((x) => x?.kind === "gene" && x.id === id);
+    if (g?.kind !== "gene") return { ok: false, err: "not carried" };
+    if (g.level >= MAX_LEVEL) return { ok: false, err: "already fully evolved" };
+    g.level += 1;
+    this.touch();
+    return { ok: true };
+  }
+
+  /** What the next round of directed evolution would cost. */
+  evolutionCost(id: GeneId): number {
+    const g = this.slots.find((x) => x?.kind === "gene" && x.id === id);
+    return g?.kind === "gene" ? evolutionCost(g.level, id) : Infinity;
   }
 
   /** Every gene you carry, installed or stashed -- KEGG completeness is scored

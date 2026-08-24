@@ -231,6 +231,262 @@ by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
 cap does the work. The clock bounds that remain are deliberately loose and
 only trip on an order-of-magnitude regression.
 
+## The part catalogue, and why not an ECS
+
+`parts.ts` is a registry of DATA with declared effects: seven promoters, four
+terminators, six gene modifiers, evolution levels, rarity tiers. `parts.ts`
+knows nothing about the plasmid; `transcription.ts` reads the catalogue and
+knows nothing about any specific part; `plasmid.ts` owns arrangement and
+economics and no longer owns the model. Adding a promoter is a table entry.
+
+**An ECS is the wrong tool here.** ECS pays off when many entity KINDS need
+orthogonal behaviours composed at runtime and iterated in bulk. What this needs
+is composition WITHIN a part -- a gene carrying modifiers, a promoter carrying
+an activation rule -- which is a socket system, not an entity system. A
+registry of declared effects gives the same extensibility while KEEPING static
+exhaustiveness, which an ECS explicitly gives up. That exhaustiveness is what
+listed every construction site during this migration.
+
+### Terminators attenuate, they do not stop
+
+The important model change. Real terminators are 60-98% efficient and the rest
+reads THROUGH. So `transcribe()` carries a flow that decays with polarity and
+is multiplied by each terminator's readthrough, and a gene can be driven by
+more than one promoter. That makes the choice of terminator a real decision --
+a leaky hairpin is cheap and bleeds signal into the next operon, a tandem
+rrnB T1T2 costs twice the space and seals it.
+
+`rawExpression` must use the transcript's `flow` and NOT recompute polarity.
+Doing both silently discarded the entire attenuation model, and the only sign
+was one test expecting zero and getting 1.2.
+
+### Promoters have modes
+
+Constitutive (Anderson series) ignore the chemistry. Conditional ones read it:
+`PfnrS` fires only once oxygen is gone, because FNR carries a [4Fe-4S] cluster
+that O2 destroys -- that IS the promoter. `PsoxS` is the mirror. `Plac` is dead
+weight until you are carrying sugar. `Plasmid.depth` and `.inducers` are set
+each turn in `upkeep`; without them every promoter silently behaves as
+constitutive.
+
+### Saves migrate, they are not discarded
+
+Schema 6. `strength: "strong"` becomes `id: "j23119"`, `optimised: true`
+becomes the `codon` modifier. A hand-edited save is clamped to what play
+allows: level to MAX_LEVEL, modifiers to what the level permits.
+
+## The column feeds from the top
+
+`production.ts`. A Winogradsky column is fed by phototrophs in the photic zone;
+that biomass sinks and everything below lives on what falls. Nothing down there
+makes its own food. So:
+
+* A floor you strip does NOT refill on its own. It refills from ABOVE, over
+  time, and `Level.stockedAt` records when it was last topped up.
+* Production stops at night, because photosynthesis does. Never quite to zero,
+  or camping through a night would deadlock.
+* Capacity and rate both fall with depth. Measured: a full day away refills
+  the surface to about 60% and the floor to under 20%.
+
+**Daylight is sampled ACROSS the interval, not at its endpoints.** Endpoint
+sampling made 600 turns away return LESS than 300, because both ends happened
+to land at night. Non-monotonic regeneration is indefensible, and it was
+invisible until the numbers were printed -- the code looked right and the
+comment claimed it was "within a few percent", which was simply untested. There
+is a test asserting more time never yields less, and another asserting the
+result does not depend on where in the day the span begins.
+
+That is the tension the column was missing. Descend now with what you have, or
+spend turns climbing to harvest and fund the next tier of directed evolution --
+while the clock runs, the microbes act and ATP drains. Climbing to the surface
+pays for itself within about a day; the floor never restocks meaningfully.
+
+`stockedAt` is SAVED, per floor, because a stripped floor that refills itself
+on reload would make the whole mechanic free to bypass.
+
+## The golden render trace
+
+573 tests proved the refactor did not CRASH. They could not prove it did not
+CHANGE anything -- a moved line drawing at the wrong coordinate passes every
+assertion in the suite. So the same tracer was run against the pre-refactor
+tree and the post-refactor tree: **42220 canvas calls, identical, in order,
+with arguments**. That is the evidence the split was behaviour-preserving.
+
+`test/golden.test.ts` keeps an in-suite anchor of the same scenario. Two things
+about it are worth knowing:
+
+* **It only guards what its scenario exercises.** Injecting a one-pixel shift
+  into BARRIER rendering did not fail it, because floor 1 in the traced run has
+  no barriers in view; shifting HUD text by one pixel did. It anchors the
+  world, the HUD and the four screens. Widen `play()` before trusting it
+  further, and there is a test asserting each screen is actually reached.
+* **The hash is recorded in the file, not read from an env var.** An earlier
+  draft took the expectation from `process.env.GOLDEN`, which nobody sets --
+  it asserted nothing while looking rigorous.
+
+Getting the harness right took three tries, and each failure was instructive:
+`Object.assign` cannot replace `navigator` (getter-only); `Date.now` must be
+pinned or each run seeds a different dungeon; and storage must be cleared per
+run or the second play LOADS the first one's save.
+
+## The split
+
+`main.ts` was 2272 lines and was where every save and state bug in this project
+hid. It is now 702, and holds STATE and LIFECYCLE only:
+
+    main.ts    702  fields, constructor, frame, resize, save/load, enter, boot
+    render.ts  766  the world, the HUD, and the two screens needing game state
+    turn.ts    630  everything that happens because time passed
+    input.ts   370  pointers, gestures, keys, buttons
+
+The transform was mechanical on purpose. Bodies moved out as functions taking
+the Game; `main.ts` kept a ONE-LINE DELEGATE for each, so no call site and no
+test had to change. 569 tests passed at every stage, which is what made a
+refactor this size verifiable rather than hopeful.
+
+Four things went wrong and are worth remembering:
+
+1. **The brace walker treated an apostrophe in a `//` comment as a string
+   delimiter.** "the plasmid's" opened a string that ran to the next quote and
+   swallowed real braces, so methods closed dozens of lines early and the
+   splice silently corrupted the file. Any tool that walks this source must
+   skip comments.
+2. **The parameter could not be `g`.** Several bodies declare a local `g` for a
+   gene or a grid, and a mechanical `this.` -> `g.` rename then pointed at the
+   wrong one. It is `_g`.
+3. **The rename replaced `this.` but not bare `this`.** `const { ctx } = this`
+   survived in eighteen places -- a runtime error the moment those functions
+   ran, invisible to a regex looking for a dot. `spec` asserts no extracted
+   module binds `this`.
+4. **Pruning imports with a regex mangled aliased ones**, turning
+   `apply as applyStatus` into `apply as`. Prune by whole statement or by
+   exact binding, never by pattern.
+
+`Game` is imported as a TYPE ONLY in all three modules, so there is no runtime
+cycle; `spec` asserts that, and that no module exceeds 900 lines.
+
+## The save has been forgotten twice. Check it every time.
+
+Adding state to `Game` and not adding it to the save is now a THREE-time
+pattern: the run notebook at v31, and held modifiers plus the clock plus the
+win flag at v54. Held modifiers were the worst version -- they are the rare
+drops, so a reload silently destroyed the scarcest thing in the game.
+
+**The save snapshot also aliased the live plasmid.** `{ ...part }` copies a
+gene's `mods` ARRAY BY REFERENCE, so the stored copy kept changing along with
+the plasmid after it was written. `clonePart` is deep now, and
+`test/soak.test.ts` saves, mutates the live plasmid, reloads and asserts the
+stored copy did not follow.
+
+Whenever a field is added to `Game`, ask three things: does it go in
+`SaveData`, does the writer DEEP copy it, and does `applySave` read it back.
+
+## Soak tests assert crashes, not outcomes
+
+`survives two thousand frames` and `cycling every screen` both used to assert
+ZERO toasts. Death after two thousand turns is a legitimate outcome, and at
+current mob density standing still for a hundred turns can kill you -- so both
+began failing intermittently on something unrelated to what they check. They
+assert no ERROR toasts now, and the screen test no longer passes turns at all,
+because it is about screens.
+
+The distinction is worth keeping: a soak test proves the machinery does not
+break, not that the player wins.
+
+## Rarity, and the item card
+
+The classic five: grey / green / blue / purple / orange, common through
+legendary. Conventional rather than decorative -- the whole point is that
+nobody has to be told what blue means. `spec` asserts all five colours are
+distinct, that weight falls strictly with tier, and that every tier holds
+parts, so no rarity is decoration.
+
+A GENE takes its rarity from its tier, which already encodes depth and power,
+so the two ladders cannot disagree. In the bin the body is the PATHWAY colour
+(what it does) and the outline is the RARITY colour (how hard it was to find):
+two axes, two channels, neither read off the other. Epic and legendary also
+get a corner pip, which survives a colourblind eye.
+
+Tapping a bin part opens an item card: mechanics, current expression, level
+and modifiers, then its DISCOVERY. Every one of those lines is real -- nxrA
+names Winogradsky, whose column this is; dsrA and nifH name Beijerinck; mtrC
+names Lake Oneida; pufM the 1985 reaction-centre structure. An invented
+citation would undercut the only thing the game is actually for. `spec`
+asserts all 29 exist, are distinct, and are not a restatement of `desc`.
+
+## Rare parts and directed evolution
+
+Rarity lives ON the part, so a loot table is a FILTER rather than a second
+list that can drift. `rollPart` rolls a tier and falls DOWN the ladder if that
+tier is empty, so adding a rarity with no members can never yield nothing.
+Measured distribution: singular runs 1.6% at the surface and 2.3% on the
+floor, rare 7.2% to 11.2%. Every elite drops one outright.
+
+The rarity ladder must match the power ladder, and `spec` asserts it: a
+singular part that is worse than a common one makes rarity a lie.
+
+`drawResearch` is where ATP becomes a DECISION. Everywhere else it is spent
+passively on upkeep; here you choose between banking it for a deeper stratum
+and converting it into a permanently better enzyme. Cost rises steeply with
+level so "always evolve" is never right, and modifier slots open with level
+(1 / 2 / 3) so evolution and modification pull on each other.
+
+Modifiers are held in `Game.mods`, not stashed on the ring: they attach to a
+gene rather than being transcribed.
+
+## Sacred invariants
+
+`src/invariants.ts` holds 23 properties that must NEVER be false. Not balance
+preferences -- things that mean the game is broken, and that fail SILENTLY: a
+body inside rock is invisible and unhittable, a lost origin makes every
+expression zero, a NaN coordinate simply stops being drawn.
+
+They run after every turn, every death and every descent, and a violation
+surfaces as an error toast naming which one broke and how.
+
+**Rules for adding one.** It must be cheap, because it runs every turn. It must
+be a MUST and not a SHOULD -- "openness is around 40%" is a balance target and
+belongs in a balance test; "every body stands on floor" is an invariant. And it
+must name what broke specifically enough to act on.
+
+**Coverage is proven by execution.** `test/invariant.test.ts` holds a BREAKERS
+table: one function per invariant that deliberately violates it. The suite
+asserts every invariant has a breaker, every breaker names a live invariant,
+and each breaker trips the one it claims. An earlier version matched words in
+the test file and gave false coverage for eleven of them. An invariant nobody
+has seen fail may be checking nothing at all.
+
+Adding an invariant without a breaker fails the build.
+
+## What the invariants caught immediately
+
+Adding them found three real defects within minutes, all silent:
+
+1. **The final boss stood on the arrival tile.** Floor 24 has no way down, so
+   `placeBoss` anchors around the way UP -- and you would materialise inside
+   it. No body may occupy a stair now, enforced by `canPlace` and by an
+   invariant.
+2. **Boss floors could have no boss.** Excluding stairs and raising mob density
+   together made the tight local search around the stairs fail outright, and a
+   boss floor with no elite is a gate `isCleared` waves you straight through.
+   Placement widens, then falls back to anywhere on the floor, then evicts an
+   ordinary body; a bloom that places nothing falls back to a single overgrown
+   individual. Verified across 320 boss floors.
+3. **A barrier with a non-finite work count could never be opened by
+   anything**, because NaN never reaches the threshold.
+
+And one where the invariant itself was wrong: `player state is finite` called
+`Number.isFinite` on the status ARRAY, so it reported itself. The soak test
+surfaced that on the first run.
+
+## Atomicity
+
+Every mutator that returns a `Result` validates completely before it commits.
+A partial mutation is worse than a refusal: the part is gone and nothing said
+so. `test/invariant.test.ts` forces all thirteen failure paths and compares the
+whole plasmid before and after, and separately asserts a SUCCESSFUL mutation is
+never a no-op.
+
 ## Never assert on a generated artefact
 
 Twice a test read a file that the same command produces -- `public/microgue.js`
@@ -553,6 +809,30 @@ half-loaded — `version` was previously written and never read, which would hav
 fed a flat gene list into ring code during the plasmid rewrite.
 
 ## Nothing may throw out of a browser boundary
+
+Guarding call sites one at a time DOES NOT WORK. I wrapped the three gesture
+listeners and missed the four pinch ones sitting immediately below them, and
+nothing complained for several versions. So:
+
+* `safety.ts` owns `on()`, and `spec` fails the build if a raw
+  `addEventListener` appears anywhere outside `safety.ts`, `sw.ts` and
+  `sw_client.ts`. All ten listeners in `main.ts` go through it.
+* `installGlobalHandlers()` catches `error` and `unhandledrejection` at boot,
+  because a throw from a timer or a dropped promise passes through no wrapper
+  at all -- and on a phone the alternative is a console nobody can read.
+* The worker guards its own three handlers. A throw in `install` means the new
+  worker never activates and the app is stuck on an old build; a throw in
+  `fetch` turns every request into a network error.
+* Every `sw_client` callback is wrapped in `swallow`: an update check is not
+  worth a crash.
+
+**The guard itself was broken when first written.** Its pattern only matched
+`addEventListener` at line start or after a dot, so a call nested inside an
+expression passed straight through. I only found that by deliberately
+reintroducing a raw listener and watching the test stay green. Any guard of
+this kind must be tested by breaking the thing it guards.
+
+
 
 Every entry point the browser calls into -- frame, pointerdown/move/up, keydown,
 resize -- is wrapped in `guard()`, which reports to a toast and returns a

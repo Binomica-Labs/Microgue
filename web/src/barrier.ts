@@ -88,7 +88,9 @@ export function degrade(
 ): Attempt {
   const def = BARRIERS[b.id];
   if (!def.opens.some(can)) return { kind: "blocked", def };
-  b.work += 1;
+  // A non-finite work count never reaches the threshold, so the barrier could
+  // never be opened by anything. Repair rather than accumulate onto it.
+  b.work = (Number.isFinite(b.work) ? b.work : 0) + 1;
   if (b.work >= def.turns) return { kind: "opened", def };
   return { kind: "working", def, left: def.turns - b.work };
 }

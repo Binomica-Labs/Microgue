@@ -89,8 +89,8 @@ describe("no pure function returns a non-finite number", () => {
 
   it("biology and the plasmid survive any depth", () => {
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
     for (const n of NASTY) {
       const s = String(n);
       finite(`energyYield(${s})`, bio.energyYield(n));
@@ -108,8 +108,8 @@ describe("no pure function returns a non-finite number", () => {
   it("a poisoned supply cannot spread through the plasmid", () => {
     // `supply` is public and assigned from an ATP division every turn.
     const p = new Plasmid();
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "mtrC", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
     for (const n of NASTY) {
       p.supply = n;
       finite(`expression, supply=${String(n)}`, p.expression("mtrC", 4));
@@ -140,7 +140,7 @@ describe("the origin is an invariant, not a hope", () => {
 
   it("survives a ring with no room left", () => {
     const p = new Plasmid();
-    for (let i = 0; i < 16; i++) p.put(i, { kind: "terminator" });
+    for (let i = 0; i < 16; i++) p.put(i, { kind: "terminator", id: "rrnbt1" });
     expect(p.has("ori")).toBe(true);
   });
 
@@ -150,7 +150,7 @@ describe("the origin is an invariant, not a hope", () => {
       p.rotate(i);
       p.swap(i, i * 7);
       p.put(i, null);
-      p.stash({ kind: "terminator" });
+      p.stash({ kind: "terminator", id: "rrnbt1" });
     }
     expect(p.has("ori")).toBe(true);
     expect(p.slots).toHaveLength(16);
@@ -160,24 +160,24 @@ describe("the origin is an invariant, not a hope", () => {
   it("a restored origin actually restores expression", () => {
     const p = new Plasmid();
     for (let i = 0; i < 16; i++) p.put(i, null);
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "cbbL", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "cbbL", level: 1, mods: ["codon"] });
     expect(p.expression("cbbL", 1)).toBeGreaterThan(0);
   });
 });
 
 describe("hostile saves", () => {
   const HOSTILE: unknown[] = [
-    null, undefined, 0, "", [], {}, { version: 5 },
-    { version: 5, depth: {}, floor: [], seed: "x", px: {}, py: null, hp: [],
+    null, undefined, 0, "", [], {}, { version: 8 },
+    { version: 8, depth: {}, floor: [], seed: "x", px: {}, py: null, hp: [],
       atp: "z", ring: {}, bin: 7, run: [], settings: 3 },
-    { version: 5, depth: 1, floor: 1, seed: 1, px: 1, py: 1, hp: 1, atp: 1,
+    { version: 8, depth: 1, floor: 1, seed: 1, px: 1, py: 1, hp: 1, atp: 1,
       ring: new Array<unknown>(10000).fill({ kind: "gene", id: "mtrC" }),
-      bin: new Array<unknown>(10000).fill({ kind: "terminator" }),
+      bin: new Array<unknown>(10000).fill({ kind: "terminator", id: "rrnbt1" }),
       run: { deepest: 1e9, deaths: -1e9,
              bestiary: new Array<unknown>(9999).fill("geobacter"),
              library: new Array<unknown>(9999).fill("mtrC") }, settings: {} },
-    { version: 5, depth: NaN, floor: NaN, seed: NaN, px: NaN, py: NaN, hp: NaN,
+    { version: 8, depth: NaN, floor: NaN, seed: NaN, px: NaN, py: NaN, hp: NaN,
       atp: NaN, ring: [], bin: [], run: {}, settings: {} },
   ];
 
@@ -324,13 +324,13 @@ describe("barriers", () => {
 
   it("expressing the enzyme is what opens it, not carrying it", () => {
     const p = new Plasmid();
-    p.stash({ kind: "gene", id: "dspB", optimised: true });   // in the bin only
+    p.stash({ kind: "gene", id: "dspB", level: 1, mods: ["codon"] });   // in the bin only
     const b = { x: 0, y: 0, id: "biofilm" as const, work: 0 };
     const can = (g: bio.GeneId): boolean => p.expression(g, 2) > 0;
     expect(degrade(b, can).kind, "a stashed gene must not open it").toBe("blocked");
 
-    p.put(4, { kind: "promoter", strength: "strong" });
-    p.put(5, { kind: "gene", id: "dspB", optimised: true });
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "dspB", level: 1, mods: ["codon"] });
     expect(degrade(b, can).kind).not.toBe("blocked");
   });
 

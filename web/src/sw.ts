@@ -25,6 +25,9 @@ const ASSETS: readonly string[] = [
   "./icons/favicon-32.png",
 ];
 
+// The worker's own handlers are the update path. A throw in `install` means
+// the new worker never activates and the app is stuck on an old build with no
+// way to say so -- so each one swallows its own failures.
 self.addEventListener("install", (event: ExtendableEvent) => {
   event.waitUntil(
     caches.open(VERSION)
@@ -41,7 +44,10 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
       .then(async (keys) => {
         await Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)));
       })
-      .then(async () => { await self.clients.claim(); }),
+      .then(async () => { await self.clients.claim(); })
+      // Failing to sweep old caches must not stop the new worker taking over.
+      // An activate that rejects leaves the app on the previous build.
+      .catch(() => undefined),
   );
 });
 
@@ -52,7 +58,11 @@ self.addEventListener("fetch", (event: FetchEvent) => {
   // Any navigation resolves to the shell, so a deep link works offline too.
   if (req.mode === "navigate") {
     event.respondWith(
-      caches.match("./index.html").then((hit) => hit ?? fetch(req)),
+      caches.match("./index.html")
+        .then((hit) => hit ?? fetch(req))
+        // A cache read that throws would otherwise turn every navigation into
+        // a network error, offline or not.
+        .catch(() => fetch(req)),
     );
     return;
   }
@@ -68,7 +78,7 @@ self.addEventListener("fetch", (event: FetchEvent) => {
         }
         return res;
       });
-    }),
+    }).catch(() => fetch(req)),
   );
 });
 
