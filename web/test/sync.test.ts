@@ -123,7 +123,6 @@ describe("sync.sh", () => {
 
 describe("build identity", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
-  const buildFile = readFileSync("public/BUILD", "utf8").trim();
   const buildScript = readFileSync("build.mjs", "utf8");
 
   it("the version is declared once, in package.json", () => {
@@ -135,12 +134,10 @@ describe("build identity", () => {
       .not.toMatch(/["']v\d+\.\d+["']\s*;/);
   });
 
-  it("BUILD is well formed: a version and a content hash", () => {
-    // Deliberately NOT compared against package.json. `npm run build` runs the
-    // tests BEFORE building, so public/BUILD is always one build behind at
-    // this point. The artefact-matches-source check belongs in build.mjs,
-    // which fails the build if either constant is missing from either bundle.
-    expect(buildFile).toMatch(/^v\d+\.\d+ [0-9a-f]{12}$/);
+  it("build.mjs writes BUILD in the form the app and the server compare", () => {
+    // Checked as a format the SCRIPT produces, read from the script's source.
+    expect(buildScript).toMatch(/writeFileSync\("public\/BUILD"/);
+    expect(buildScript).toContain("${VERSION} ${BUILD}");
   });
 
   it("the build hashes its inputs, so the id is known before compiling", () => {
@@ -156,10 +153,38 @@ describe("build identity", () => {
     expect(buildScript).toMatch(/did not reach public\/microgue\.js/);
   });
 
-  it("the bundle carries a version and a hash, whichever build it is from", () => {
-    const js = readFileSync("public/microgue.js", "utf8");
-    expect(js, "no version in the bundle").toMatch(/v\d+\.\d+/);
-    expect(js, "no build hash in the bundle").toMatch(/[0-9a-f]{12}/);
-    expect(js, "the unbuilt fallback must never ship").not.toContain("unbuilt");
+  it("version.ts cannot ship a literal, so the define must do the work", () => {
+    // NOT an assertion about public/microgue.js. That artefact is produced by
+    // the very command that runs these tests, and it is not committed -- so in
+    // CI it is absent or stale, which is exactly how this failed there while
+    // passing locally. The artefact check lives in build.mjs, which runs AFTER
+    // compiling and fails the build if a constant is missing from a bundle.
+    const ver = readFileSync("src/version.ts", "utf8");
+    expect(ver).toContain("__VERSION__");
+    expect(ver).toContain("__BUILD__");
+    expect(ver, "the fallback must not look like a real version").toContain("unbuilt");
+  });
+});
+
+describe("generated artefacts are not committed", () => {
+  const ignore = readFileSync(".gitignore", "utf8");
+
+  it("the bundles and BUILD are ignored, because CI regenerates them", () => {
+    for (const f of ["public/microgue.js", "public/sw.js", "public/BUILD"]) {
+      expect(ignore, `${f} should be gitignored`).toContain(f);
+    }
+  });
+
+  it("no test reads a generated artefact", () => {
+    // Twice now a test asserted on something the same command produces: it
+    // passed locally, where the file was fresh, and failed in CI, where it was
+    // stale or absent. Source is the only reliable subject.
+    for (const f of ["sync.test.ts", "audit.test.ts", "logic.test.ts"]) {
+      const src = readFileSync(join("test", f), "utf8");
+      const reads = src.split("\n").filter((l) =>
+        !l.trimStart().startsWith("//")
+        && /readFileSync\(\s*"public\//.test(l));
+      expect(reads, `${f} reads a generated file`).toEqual([]);
+    }
   });
 });

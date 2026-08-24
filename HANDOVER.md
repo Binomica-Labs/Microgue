@@ -231,6 +231,22 @@ by showing a tiny `maxNodes` fails even where a path EXISTS, which proves the
 cap does the work. The clock bounds that remain are deliberately loose and
 only trip on an order-of-magnitude regression.
 
+## Never assert on a generated artefact
+
+Twice a test read a file that the same command produces -- `public/microgue.js`
+and `public/BUILD` -- and both times it passed locally, where the file was
+fresh, and failed in CI, where it was stale or absent. `npm run build` runs the
+tests BEFORE bundling, and the bundles are not committed, so from inside the
+suite those files are never trustworthy.
+
+The generated files are gitignored now, and `spec` asserts that no test reads
+anything under `public/`. The artefact check lives in `build.mjs`, which runs
+after compiling and fails the build if a constant is missing from a bundle --
+which is the right place and the right time.
+
+`npm run verify:clean` deletes the generated files and rebuilds, reproducing a
+fresh checkout. Run it before shipping anything that touches the build.
+
 ## Version and build identity
 
 `package.json` holds the version. `build.mjs` derives `__VERSION__` from it and
