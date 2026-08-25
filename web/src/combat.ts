@@ -4,6 +4,7 @@
 // state, which is what makes it testable without a canvas.
 
 import { canStrike, chebyshev, decideStep, senseRange, SIZES } from "./behaviour.js";
+import { speedOf, tick as speedTick } from "./speed.js";
 import { covers, tilesOf } from "./footprint.js";
 import type { Mob } from "./dungeon.js";
 import type { Grid } from "./mapgen.js";
@@ -140,8 +141,16 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       continue;
     }
 
+    // Movement budget. A flagellated chaser genuinely acts more often than a
+    // gliding filament rather than lurching two tiles at once, because the
+    // fractional remainder carries across turns.
+    const budget = { banked: m.banked ?? 0 };
+    const steps = speedTick(budget, speedOf(m.behaviour, m.size), haste(m.status));
+    m.banked = budget.banked;
+
     const allies = w.mobs.filter(
       (o) => o.alive && o !== m && o.id === m.id && chebyshev(o.x, o.y, m.x, m.y) <= 3).length;
+    for (let s = 0; s < steps; s++) {
     const step = decideStep(
       m.behaviour, { x: m.x, y: m.y },
       { px: w.player.x, py: w.player.y, dist, alliesNear: allies },
@@ -151,9 +160,11 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
              && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y)),
       fp);
 
-    if (step) {
-      m.heading = Math.atan2(step.y - m.y, step.x - m.x);
-      m.x = step.x; m.y = step.y; events.push({ kind: "move", mob: m }); }
+    if (!step) break;
+    m.heading = Math.atan2(step.y - m.y, step.x - m.x);
+    m.x = step.x; m.y = step.y;
+    events.push({ kind: "move", mob: m });
+    }
   }
 
   return events;

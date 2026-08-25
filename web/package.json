@@ -1,6 +1,6 @@
 {
   "name": "microgue",
-  "version": "0.68.0",
+  "version": "0.70.0",
   "type": "module",
   "scripts": {
     "build": "npm run verify && node build.mjs",

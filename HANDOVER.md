@@ -303,6 +303,65 @@ The suite now runs in about 36 seconds, dominated by level-generation sweeps
 across many seeds. Those are the tests that have caught the most real bugs, so
 the coverage stays and the time is the price.
 
+## Healing is repair, and repair costs ATP
+
+Only TWO of nine complexes granted regeneration and a starting plasmid had
+none, so a scratch on the first floor followed you to the last. That was an
+omission, not a difficulty choice.
+
+A cell does not heal, it repairs, and repair is expensive -- and that is not a
+metaphor. Every repair enzyme in this game is literally an ATPase: GroEL
+hydrolyses ATP on every folding cycle, DnaK binds and releases substrate
+ATP-dependently, RecA drives strand exchange by hydrolysis, UvrA pays to reset
+after recognising damage. So healing is a CONVERSION: spend ATP, recover hp, at
+a rate and efficiency set by what you express.
+
+    expressing            hp/turn  ATP/hp   close a 15hp gap
+    nothing               0.14     3.40     108 turns, 51 ATP
+    groL                  0.36     2.45      42 turns, 37 ATP
+    groL + dnaK           0.52     1.96      29 turns, 29 ATP
+    full repair suite     0.92     1.34      17 turns, 20 ATP
+
+This is what makes `wait` a real command: holding position after a fight is the
+rest action, and it spends the energy budget you were going to need deeper
+down while the clock runs.
+
+**It never spends the last 20% of the ATP.** Running the pumps dry to close a
+scratch is how you die to the next thing, and letting that happen by accident
+punishes the wrong mistake.
+
+Regeneration complexes are free healing ON TOP, which is what keeps them worth
+building around.
+
+## The death sequence was never visible
+
+`r_drawLysis` paints the world by calling `r_draw`, and `r_draw`'s death branch
+was guarded only on the INNER condition -- so the call fell straight through to
+the lab screen. The shop appeared instantly underneath and the lysis was drawn
+over a shop. `!drawingLysis` is on the OUTER condition now, and `spec` checks
+the ledger is absent during the still beat and present by the end.
+
+## Speed
+
+`speed.ts`. Bacteria do not all move at one rate and the differences are
+enormous: a flagellated chaser acts 11 times per 10 turns, a gliding Beggiatoa
+3, a stalked Thiothrix never. Implemented as an energy budget rather than a
+"moves twice" flag, so fractional speed carries across turns -- 0.6 gives an
+action every OTHER turn rather than none -- and the bank is capped so a
+creature that could not move for a hundred turns does not then take a hundred
+steps.
+
+The player's speed comes from what is EXPRESSED: `flhD` for the flagellar
+regulon, `cheA` to steer rather than tumble, `pilA` for the last stretch.
+Motility is among the most expensive things a cell builds, which is why so many
+give it up -- so it is something you choose to carry.
+
+## Damage numbers
+
+They existed, at 0.34 tiles with no outline and a 620ms fade, which over a pale
+wall is the same as not having them. Larger, outlined, with a scale punch on
+appearance, rising further and lasting longer.
+
 ## Auto-explore and travel-to-strike
 
 Both are ONE input that spends many turns, and both stop the moment anything

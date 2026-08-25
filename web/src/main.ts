@@ -151,6 +151,8 @@ class Game {
   strikeAfterTravel: Mob | null = null;
   /** Whatever last hurt the player, for the ledger. */
   lastAttacker: string | null = null;
+  /** Fractional hit points repaired but not yet applied. */
+  repairDebt = 0;
   /** Persists across every strain. Saved separately from the run. */
   lab: Lab = newLab();
   showResearch = false;

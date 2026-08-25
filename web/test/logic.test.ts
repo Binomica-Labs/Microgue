@@ -66,6 +66,9 @@ import { parseLab } from "../src/lab_save.js";
 import { LYSIS_MS, phaseAt, shards } from "../src/lysis.js";
 import { levelProgress } from "../src/strain.js";
 import { frontier, nextExplore, unexplored } from "../src/explore.js";
+import { playerSpeed, speedOf, tick as speedTick } from "../src/speed.js";
+import { REPAIR_GENES, estimate, profileFor, repairTurn }
+  from "../src/repair.js";
 import { NODE_W, NODE_H, clampView, fitView, frame, litBounds, moduleBoxes,
          toScreen, toWorld, zoomAbout, type View } from "../src/kegg_ui.js";
 
@@ -5316,5 +5319,138 @@ describe("auto-explore targets the frontier", () => {
     computeFov(sight, g, 5, 5, 8);
     const r = nextExplore(g, sight, { x: 5, y: 5 });
     expect(r.kind).toBe("go");
+  });
+});
+
+describe("speed varies by organism", () => {
+  it("a chaser genuinely outpaces a glider, and a stalk never moves", () => {
+    const acts = (b: Parameters<typeof speedOf>[0], s: Parameters<typeof speedOf>[1]) => {
+      const budget = { banked: 0 };
+      let n = 0;
+      for (let i = 0; i < 20; i++) n += speedTick(budget, speedOf(b, s));
+      return n;
+    };
+    expect(acts("chase", "medium")).toBeGreaterThan(acts("glide", "medium"));
+    expect(acts("glide", "medium")).toBeGreaterThan(acts("drift", "medium"));
+    expect(acts("sessile", "filament"), "an attached cell should never move").toBe(0);
+  });
+
+  it("size drags: a filament is slower than a coccus of the same habit", () => {
+    expect(speedOf("chase", "filament")).toBeLessThan(speedOf("chase", "small"));
+  });
+
+  it("fractional speed carries across turns rather than being lost", () => {
+    // 0.6 must give an action every other turn, not none at all.
+    const b = { banked: 0 };
+    let acts = 0;
+    for (let i = 0; i < 10; i++) acts += speedTick(b, 0.6);
+    expect(acts).toBeGreaterThanOrEqual(5);
+    expect(acts).toBeLessThanOrEqual(7);
+  });
+
+  it("a budget never banks without limit", () => {
+    // A creature that could not move for a hundred turns must not then take a
+    // hundred steps at once.
+    const b = { banked: 0 };
+    for (let i = 0; i < 100; i++) speedTick(b, 3);
+    expect(b.banked).toBeLessThanOrEqual(4);
+    expect(speedTick(b, 3)).toBeLessThanOrEqual(4);
+  });
+
+  it("haste multiplies and absurd input does not break it", () => {
+    const fast = { banked: 0 };
+    const slow = { banked: 0 };
+    let f = 0, s = 0;
+    for (let i = 0; i < 10; i++) { f += speedTick(fast, 1, 2); s += speedTick(slow, 1, 1); }
+    expect(f).toBeGreaterThan(s);
+    for (const n of [NaN, -5, Infinity]) {
+      const b = { banked: 0 };
+      const r = speedTick(b, n, n);
+      expect(Number.isFinite(r), String(n)).toBe(true);
+      expect(r).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("player speed is something you carry, not something you have", () => {
+    // Building and turning a flagellum is among the most expensive things a
+    // cell does, which is why so many give it up.
+    const bare = playerSpeed(() => false);
+    const full = playerSpeed((g) => ["flhD", "cheA", "pilA"].includes(g));
+    expect(bare).toBeLessThan(1);
+    expect(full).toBeGreaterThan(bare);
+    expect(full).toBeLessThanOrEqual(1.6);
+  });
+
+  it("every organism has a defined speed", () => {
+    for (const m of bio.MICROBES) {
+      const s = speedOf(m.behaviour, m.size);
+      expect(Number.isFinite(s), m.id).toBe(true);
+      expect(s, m.id).toBeGreaterThanOrEqual(0);
+      expect(s, m.id).toBeLessThan(2);
+    }
+  });
+});
+
+describe("repair costs energy, because repair enzymes are ATPases", () => {
+  it("a cell with no repair machinery can still limp", () => {
+    // Only two of nine complexes grant free regeneration, so without a
+    // baseline a scratch on the first floor followed you to the last.
+    const p = profileFor(() => false);
+    expect(p.rate).toBeGreaterThan(0);
+    const r = repairTurn(p, 5, 20, 100, 100);
+    expect(r.hp).toBeGreaterThan(0);
+    expect(r.atp).toBeGreaterThan(0);
+  });
+
+  it("chaperones make repair both faster and cheaper", () => {
+    const bare = profileFor(() => false);
+    const full = profileFor((g) => ["groL", "dnaK", "recA", "uvrA"].includes(g));
+    expect(full.rate).toBeGreaterThan(bare.rate * 3);
+    expect(full.cost).toBeLessThan(bare.cost);
+    expect(estimate(full, 15).turns).toBeLessThan(estimate(bare, 15).turns / 3);
+  });
+
+  it("it never spends the last of the ATP", () => {
+    // Running the pumps dry to close a scratch is how you die to the next
+    // thing, and doing it by accident punishes the wrong mistake.
+    const p = profileFor(() => true);
+    const r = repairTurn(p, 1, 40, 18, 100);      // 18 is under the 20% floor
+    expect(r.hp).toBe(0);
+    expect(r.atp).toBe(0);
+    const ok = repairTurn(p, 1, 40, 60, 100);
+    expect(ok.atp).toBeLessThanOrEqual(60 - 20);
+  });
+
+  it("it never overheals or repairs a full cell", () => {
+    const p = profileFor(() => true);
+    expect(repairTurn(p, 20, 20, 100, 100).hp).toBe(0);
+    const r = repairTurn(p, 19.9, 20, 100, 100);
+    expect(r.hp).toBeLessThanOrEqual(0.1 + 1e-9);
+  });
+
+  it("repair is bounded by what the ATP will buy", () => {
+    const p = profileFor(() => true);
+    // Barely above the reserve: it should heal a sliver, not a full tick.
+    const r = repairTurn(p, 1, 40, 21, 100);
+    expect(r.atp).toBeLessThanOrEqual(1.0001);
+    expect(r.hp).toBeLessThan(p.rate);
+  });
+
+  it("survives absurd input", () => {
+    const p = profileFor(() => false);
+    for (const n of [NaN, -50, Infinity]) {
+      const r = repairTurn(p, n, n, n, n);
+      expect(Number.isFinite(r.hp), String(n)).toBe(true);
+      expect(Number.isFinite(r.atp), String(n)).toBe(true);
+      expect(r.hp).toBeGreaterThanOrEqual(0);
+      expect(r.atp).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(estimate(p, n).turns)).toBe(true);
+    }
+  });
+
+  it("every repair gene named is a real gene in the catalogue", () => {
+    for (const id of Object.keys(REPAIR_GENES)) {
+      expect(bio.GENES[id as bio.GeneId], `${id} is not a gene`).toBeDefined();
+    }
   });
 });

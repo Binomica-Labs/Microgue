@@ -746,3 +746,115 @@ describe("travel and explore stop when they should", () => {
     expect(g.strikeAfterTravel, "the strike target was not cleared").toBeNull();
   });
 });
+
+describe("death shows the lysis before the ledger", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("the world is still drawn while the cell is coming apart", async () => {
+    // The bug: r_drawLysis calls r_draw to paint the world, and r_draw's death
+    // branch was only guarded on the INNER condition -- so it fell through and
+    // drew the lab instead. The shop appeared instantly and no death was seen.
+    const rec = { calls: 0 };
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext(rec),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.frame(1000);
+    g.die();
+    // Early in the sequence the ledger must NOT be up yet.
+    g.frame(1100);
+    expect(g.closeBox.w, "the lab drew during the still beat").toBe(0);
+    // And by the end it must be.
+    g.frame(1000 + 2100);
+    expect(g.closeBox.w, "the lab never appeared").toBeGreaterThan(0);
+  });
+
+  it("the whole sequence draws without error", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.frame(500);
+    g.die();
+    for (let t = 500; t < 3200; t += 33) g.frame(t);
+    expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
+  });
+});
+
+describe("auto-explore refuses while something is in view", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("is greyed out and will not start", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    // Put something right next to the player and light it.
+    const m = g.level.mobs[0];
+    expect(m).toBeDefined();
+    if (!m) return;
+    m.x = g.player.x + 1; m.y = g.player.y;
+    m.alive = true;
+    g.level.sight.visible[m.y * g.level.grid.w + m.x] = 1;
+    g.frame(16);
+
+    const btn = g.buttons.find((b) => b.id === "explore");
+    expect(btn?.enabled, "explore was not greyed out").toBe(false);
+    g.press("explore");
+    expect(g.exploring, "explore started with something in view").toBe(false);
+  });
+});
+
+describe("a damaged cell recovers between fights", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("waiting closes a wound, and spends ATP doing it", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    // Take one turn first: upkeep recomputes maxhp from vitality, so the
+    // starting maxhp is not the one the run actually has.
+    g.press("wait");
+    g.player.hp = Math.max(g.player.maxhp - 6, 1);
+    g.player.atp = g.player.atpMax;
+    const hp0 = g.player.hp;
+    const atp0 = g.player.atp;
+    for (let i = 0; i < 120; i++) g.press("wait");
+    expect(g.player.hp, "no repair happened at all").toBeGreaterThan(hp0);
+    expect(g.player.atp, "repair was free").toBeLessThan(atp0);
+    expect(g.player.hp).toBeLessThanOrEqual(g.player.maxhp);
+  });
+
+  it("a starving cell does not repair itself to death", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.player.hp = 2;
+    g.player.atp = 1;
+    for (let i = 0; i < 40; i++) g.press("wait");
+    expect(g.player.atp, "repair drained the reserve").toBeGreaterThanOrEqual(0);
+    expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
+  });
+});

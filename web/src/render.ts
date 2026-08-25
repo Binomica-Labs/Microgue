@@ -4,6 +4,7 @@
 // screens.ts and take plain data. These could not: they read the level, the
 // plasmid, the effect queue and the view all at once, so they take the Game.
 
+export { r_drawFx } from "./fx_render.js";
 import { BIN_CAP } from "./plasmid.js";
 import { SIZES } from "./behaviour.js";
 import { BARRIERS } from "./barrier.js";
@@ -29,8 +30,9 @@ import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash }
   from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
 import { MAX_STRAIN, levelProgress } from "./strain.js";
+import { t_visibleHostile } from "./turn.js";
 import { NAME_POOL } from "./saves.js";
-import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad }
+import { Effects, easeOutQuad }
   from "./fx.js";
 import { Toasts } from "./toast.js";
 import { WEAPONS } from "./weapons.js";
@@ -362,14 +364,18 @@ export function r_draw(_g: Game): void {
     _g.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
     // Death takes over the screen: the run has to have an ending you can read.
-    if (_g.dead || _g.showLab) {
+    // `!drawingLysis` on the OUTER condition, not just the inner one. While
+    // lysis is drawing the world it calls back into r_draw, which fell through
+    // to the lab screen -- so the shop appeared instantly underneath and the
+    // death sequence was never visible.
+    if ((_g.dead || _g.showLab) && !drawingLysis) {
       // The cell lyses before the ledger appears. The run ending is the only
       // irreversible moment in the game and it should land as one.
       // `drawingLysis` breaks a recursion: r_drawLysis draws the ordinary
       // world by calling r_draw, and r_draw's death branch would call back
       // into r_drawLysis for ever. The frame guard caught it as a stack
       // overflow, which is the error boundary working but not a fix.
-      if (_g.dead && !drawingLysis) {
+      if (_g.dead) {
         const p = phaseAt(_g.now - _g.deathAt);
         if (p.beat !== "done") {
           r_drawLysis(_g, W, H, p);
@@ -419,81 +425,6 @@ export function r_draw(_g: Game): void {
     }
   }
 
-export function r_drawFx(_g: Game, px: number): void {
-    const { ctx } = _g;
-    const now = _g.now;
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-
-    for (const f of _g.fx.all()) {
-      const t = Effects.t(f, now);
-      if (now < f.t0) continue;
-
-      switch (f.kind) {
-        case "flash": {
-          ctx.globalAlpha = (1 - t) * 0.85;
-          ctx.fillStyle = f.colour;
-          ctx.fillRect(f.x * px + px * 0.06, f.y * px + px * 0.06, px * 0.88, px * 0.88);
-          break;
-        }
-        case "text": {
-          // rise and fade
-          ctx.globalAlpha = 1 - easeInQuadLocal(t);
-          ctx.fillStyle = f.colour;
-          ctx.font = `bold ${px * 0.34}px ui-monospace,monospace`;
-          ctx.fillText(f.text, (f.x + 0.5) * px, (f.y + 0.4 - t * 0.8) * px);
-          break;
-        }
-        case "burst": {
-          const e = easeOutCubic(t);
-          ctx.globalAlpha = 1 - t;
-          ctx.fillStyle = f.colour;
-          for (let i = 0; i < f.n; i++) {
-            const j = jitter(f.seed, i);
-            const d = (0.25 + Math.abs(j.x) * 0.7) * e;
-            const r = px * 0.055 * (1 - t * 0.6);
-            ctx.beginPath();
-            ctx.arc((f.x + 0.5 + j.x * d) * px, (f.y + 0.5 + j.y * d) * px, r, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          break;
-        }
-        case "bolt": {
-          // A jagged discharge that draws in, then fades.
-          const grow = easeOutQuad(Math.min(t * 2.2, 1));
-          ctx.globalAlpha = 1 - easeInQuadLocal(t);
-          ctx.strokeStyle = f.colour;
-          ctx.lineWidth = Math.max(px * 0.055, 2);
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          const segs = 7;
-          for (let i = 0; i <= segs; i++) {
-            const k = (i / segs) * grow;
-            const j = jitter(f.seed, i);
-            const bx = (f.from.x + (f.to.x - f.from.x) * k + 0.5 + j.x * 0.13) * px;
-            const by = (f.from.y + (f.to.y - f.from.y) * k + 0.5 + j.y * 0.13) * px;
-            if (i === 0) ctx.moveTo(bx, by); else ctx.lineTo(bx, by);
-          }
-          ctx.stroke();
-          break;
-        }
-        case "ring": {
-          const e = easeOutCubic(t);
-          ctx.globalAlpha = (1 - t) * 0.6;
-          ctx.strokeStyle = f.colour;
-          ctx.lineWidth = Math.max(px * 0.05, 2);
-          ctx.beginPath();
-          ctx.arc((f.x + 0.5) * px, (f.y + 0.5) * px, f.r * px * e, 0, Math.PI * 2);
-          ctx.stroke();
-          break;
-        }
-        case "lunge": case "wipe": break;    // handled elsewhere
-      }
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
 
 export function r_drawScreenFx(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
@@ -643,6 +574,11 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     ctx.fillRect(barX, sy, sw, Math.max(2 * u, 2));
     ctx.fillStyle = _g.genome.strain >= MAX_STRAIN ? "#7fe0a4" : "#cfe04a";
     ctx.fillRect(barX, sy, sw * prog, Math.max(2 * u, 2));
+
+    // Explore is unavailable while anything is in view. Greyed rather than
+    // hidden: a button that vanishes is harder to learn than one that dims.
+    const ex = _g.buttons.find((b) => b.id === "explore");
+    if (ex) ex.enabled = t_visibleHostile(_g) === null;
 
     const ops = _g.genome.operons().filter((op) => op.genes.length > 0).length;
     ctx.font = `${size * 0.86}px ui-monospace,monospace`;
