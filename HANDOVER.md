@@ -322,6 +322,24 @@ Worth knowing: a bare plasmid has 0 power. `attack` floors damage at 1, so a
 new strain can still fight, barely -- but it will not kill much until it
 expresses something.
 
+## Scrolling the parts list destroyed loot
+
+Pressing a row sets `dragBin` immediately, so the scroll branch -- which
+required it to be null -- could never run. Worse, releasing that "scroll"
+outside a slot fell into the DISCARD path, so trying to scroll threw parts
+away. Two fixes:
+
+* A drag whose movement is mostly VERTICAL scrolls and cancels the pending
+  install. Mostly horizontal still carries the part out to the ring.
+* Discard is measured from the last DRAWN row rather than a fixed multiple of
+  the old tile size. The list scrolls and is taller than the grid was, so the
+  old threshold sat inside the list itself.
+
+**The close target is now checked FIRST on the plasmid screen.** An open item
+card is modal and swallowed the tap, so closing took two presses and looked
+broken. It is worth stating as a rule: a screen's close target should win over
+everything on that screen, including anything modal within it.
+
 ## The parts bin is a list, not a grid
 
 Six four-character tiles worked when every label was four characters. Allele

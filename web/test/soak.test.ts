@@ -972,3 +972,82 @@ describe("the parts list shows whole parts", () => {
     expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
   });
 });
+
+describe("the plasmid screen responds", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("a vertical drag on the list scrolls it", async () => {
+    // Pressing a row sets dragBin immediately, so the scroll branch could
+    // never run -- and releasing the "scroll" outside a slot DISCARDED the
+    // part, so trying to scroll destroyed loot.
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    const row = g.binRows[0];
+    expect(row).toBeDefined();
+    if (!row) return;
+    const before = g.genome.bin.length;
+    g.pointerDown(row.box.x + 20, row.box.y + 10);
+    g.pointerMove(row.box.x + 20, row.box.y - 110);
+    g.pointerUp(row.box.x + 20, row.box.y - 110);
+    expect(g.binScroll, "the list did not scroll").toBeGreaterThan(0);
+    expect(g.genome.bin.length, "scrolling discarded a part").toBe(before);
+  });
+
+  it("a downward scroll does not discard either", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    g.binScroll = g.binMaxScroll;
+    g.frame(40);
+    const row = g.binRows[0];
+    if (!row) return;
+    const before = g.genome.bin.length;
+    g.pointerDown(row.box.x + 20, row.box.y + 10);
+    g.pointerMove(row.box.x + 20, row.box.y + 160);
+    g.pointerUp(row.box.x + 20, row.box.y + 160);
+    expect(g.genome.bin.length, "a downward scroll discarded a part").toBe(before);
+  });
+
+  it("the close target works even with an item card open", async () => {
+    // The card is modal and swallowed the tap, so closing took two presses
+    // and looked broken.
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    const row = g.binRows[0];
+    if (!row) return;
+    g.pointerDown(row.box.x + 20, row.box.y + 10);
+    g.pointerUp(row.box.x + 20, row.box.y + 10);      // tap: opens the card
+    g.frame(40);
+
+    const cb = g.closeBox;
+    g.pointerDown(cb.x + cb.w / 2, cb.y + cb.h / 2);
+    g.pointerUp(cb.x + cb.w / 2, cb.y + cb.h / 2);
+    expect(g.showPlasmid, "one press should close it").toBe(false);
+  });
+
+  it("closes on a plain tap of the X", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    const cb = g.closeBox;
+    g.pointerDown(cb.x + cb.w / 2, cb.y + cb.h / 2);
+    g.pointerUp(cb.x + cb.w / 2, cb.y + cb.h / 2);
+    expect(g.showPlasmid).toBe(false);
+  });
+});

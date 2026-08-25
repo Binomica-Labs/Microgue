@@ -37,7 +37,7 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     // A card is modal. Tapping the eat target catabolises the part; anywhere
     // else dismisses. Eating destroys the cassette, so it gets its own target
     // rather than being the same tap that closes the card.
-    if (_g.card !== null) {
+    if (_g.card !== null && !_g.inClose(x, y)) {
       if (_g.cardEat !== null && inBoxOf(_g.cardEat, x, y) && _g.cardIndex >= 0) {
         _g.catabolise(_g.cardIndex);
       }
@@ -86,6 +86,15 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     // Bin cells are checked first: they sit outside the ring, which would
     // otherwise classify as a spin.
     if (_g.showPlasmid) {
+      // The close target is checked FIRST, before anything else on this
+      // screen. An open item card used to swallow the tap, so closing the
+      // screen took two presses and looked broken.
+      if (_g.inClose(x, y)) {
+        _g.card = null;
+        _g.cardIndex = -1;
+        _g.gesture = "dismiss";
+        return;
+      }
       // Hit-test the drawn ROWS, not a grid formula. The list scrolls, so
       // where a part is on screen no longer follows from its index.
       const b = _g.binRows.find((r) => inBoxOf(r.box, x, y))?.index ?? null;
@@ -147,11 +156,21 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
     if (!_g.started) return;
     // Dragging in the parts list scrolls it, unless a part is being dragged
     // out of it -- an install must still win over a scroll.
-    if (_g.showPlasmid && _g.binFrom !== null && _g.dragBin === null) {
+    if (_g.showPlasmid && _g.binFrom !== null) {
       const dy = y - _g.binFrom.y;
-      const rowPx = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * 34;
-      _g.binScroll = Math.min(Math.max(_g.binAnchor - dy / rowPx, 0), _g.binMaxScroll);
-      return;
+      const dx = x - _g.binFrom.x;
+      // A vertical drag scrolls; a horizontal one carries the part out to the
+      // ring. Pressing a row sets `dragBin` immediately, so requiring it to be
+      // null meant the scroll branch could never run at all.
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 6) {
+        _g.dragBin = null;                 // it is a scroll, not an install
+        _g.dragXY = null;
+        _g.gesture = "none";
+        const rowPx = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * 34;
+        _g.binScroll = Math.min(Math.max(_g.binAnchor - dy / rowPx, 0),
+                                _g.binMaxScroll);
+        return;
+      }
     }
     if (_g.showMap && _g.panFrom && _g.view) {
       const dx = x - _g.panFrom.x, dy = y - _g.panFrom.y;
@@ -216,9 +235,13 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
           if (target !== null) {                       // bin -> ring
             const r = _g.genome.install(_g.dragBin, target);
             if (r.ok) { _g.selected = target; _g.save(); } else _g.note(r.err);
-          } else if (y > _g.bin.y + _g.bin.cell * 2.4) {
-            // Dragged below the bin: thrown away. The bin is finite, and a
-            // cassette you will never express is just burden.
+          } else if (_g.binRows.length > 0
+                     && y > (_g.binRows[_g.binRows.length - 1]?.box.y ?? 0)
+                          + (_g.binRows[0]?.box.h ?? 0) * 2.5) {
+            // Dragged well BELOW the whole list: thrown away. Measured from
+            // the last drawn row, not from a fixed multiple of the old tile
+            // size -- the list scrolls and is taller than the grid was, so the
+            // old threshold sat inside it and an ordinary drag destroyed loot.
             const part = _g.genome.bin[_g.dragBin];
             if (part) {
               _g.genome.bin.splice(_g.dragBin, 1);
