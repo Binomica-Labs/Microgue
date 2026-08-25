@@ -26,7 +26,7 @@ const world = (over: Partial<WorldView> = {}): WorldView => {
     level,
     player: { x: level.up.x, y: level.up.y, hp: 20, maxhp: 20, atp: 50, atpMax: 100 },
     drops: [], packets: [], clouds: [], barriers: level.barriers,
-    run: newRun(), floor: 1,
+    run: newRun(), floor: 1, dead: false,
     ...over,
   };
 };
@@ -65,7 +65,7 @@ describe("sacred invariants", () => {
           });
           const v = check({
             plasmid: p, level, player, drops: [], packets, clouds,
-            barriers: level.barriers, run: newRun(), floor: f,
+            barriers: level.barriers, run: newRun(), floor: f, dead: false,
           });
           expect(v.map((x) => `${x.name}: ${x.detail}`),
                  `seed ${String(seed)} floor ${String(f)} turn ${String(t)}`).toEqual([]);
@@ -82,7 +82,7 @@ describe("sacred invariants", () => {
         plasmid: new Plasmid(), level,
         player: { x: level.up.x, y: level.up.y, hp: 20, maxhp: 20, atp: 1, atpMax: 100 },
         drops: [], packets: [], clouds: [], barriers: level.barriers,
-        run: newRun(), floor: f,
+        run: newRun(), floor: f, dead: false,
       });
       expect(v.map((x) => x.name), `floor ${String(f)}`).toEqual([]);
     }
@@ -197,7 +197,7 @@ describe("every failing mutation is atomic", () => {
         plasmid: p, level,
         player: { x: level.up.x, y: level.up.y, hp: 20, maxhp: 20, atp: 1, atpMax: 100 },
         drops: [], packets: [], clouds: [], barriers: level.barriers,
-        run: newRun(), floor: 1,
+        run: newRun(), floor: 1, dead: false,
       });
       expect(v.map((x) => x.name), label).toEqual([]);
     }
@@ -287,7 +287,7 @@ const BREAKERS: Readonly<Record<string, () => WorldView>> = {
     Object.defineProperty(p, "wastedTranscription", { value: () => NaN });
     return world({ plasmid: p });
   },
-  "player is alive and not over-healed": () => {
+  "a living player is alive and not over-healed": () => {
     const w = world();
     return { ...w, player: { ...w.player, hp: 0 } };
   },
@@ -474,7 +474,7 @@ describe("hardening: things the density and stair changes disturbed", () => {
     const broken = {
       plasmid: new Plasmid(), level: {} as never,
       player: { x: 0, y: 0, hp: 1, maxhp: 1, atp: 0, atpMax: 1 },
-      drops: [], packets: [], clouds: [], barriers: [], run: newRun(), floor: 1,
+      drops: [], packets: [], clouds: [], barriers: [], run: newRun(), floor: 1, dead: false,
     };
     expect(() => check(broken)).not.toThrow();
     expect(check(broken).length, "a broken world reported as sound")
@@ -488,7 +488,7 @@ describe("hardening: things the density and stair changes disturbed", () => {
       plasmid: new Plasmid(), level,
       player: { x: level.up.x, y: level.up.y, hp: 20, maxhp: 20, atp: 1, atpMax: 100 },
       drops: [], packets: [], clouds: [], barriers: level.barriers,
-      run: newRun(), floor: 12,
+      run: newRun(), floor: 12, dead: false,
     };
     expect(level.mobs.length, "not actually a dense floor").toBeGreaterThan(30);
     for (let i = 0; i < 50; i++) check(w);

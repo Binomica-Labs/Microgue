@@ -426,6 +426,19 @@ export function drawContainer(
 
 export interface ShopRow { readonly box: Box; readonly offer: Offer }
 
+/** Trim to a measured width, with a real ellipsis. */
+function ellipsise(ctx: CanvasRenderingContext2D, text: string, max: number): string {
+  if (max <= 0) return "";
+  if (ctx.measureText(text).width <= max) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(`${text.slice(0, mid)}\u2026`).width <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${text.slice(0, lo).trimEnd()}\u2026`;
+}
+
 /**
  * The morgue and the order form, on one screen.
  *
@@ -438,13 +451,16 @@ export function drawLab(
   ctx: CanvasRenderingContext2D, W: number, H: number,
   ins: Insets, u: number,
   lab: Lab, last: RunRecord | null, seen: readonly GeneId[],
-  rows: ShopRow[], wrap: Wrap,
+  rows: ShopRow[], wrap: Wrap, toastBand = 0,
 ): Box {
   ctx.fillStyle = "rgba(4,7,6,0.98)";
   ctx.fillRect(0, 0, W, H);
   rows.length = 0;
 
-  let y = drawHeader(ctx, ins, u,
+  // Toasts overlay from the top inset down, and the obituary is the one thing
+  // on this screen that must be readable. Start below them.
+  const below: Insets = { ...ins, top: ins.top + toastBand * u };
+  let y = drawHeader(ctx, below, u,
     last === null ? "THE LAB" : last.won ? "THE COLUMN IS YOURS" : "STRAIN LOST",
     describeLab(lab));
 
@@ -505,7 +521,10 @@ export function drawLab(
     ctx.fillText(offer.name, box.x + 9 * u, box.y + 14 * u);
     ctx.fillStyle = "#8fa89a";
     ctx.font = `${8.5 * u}px ui-monospace,monospace`;
-    ctx.fillText(offer.note.slice(0, 46), box.x + 9 * u, box.y + 25 * u);
+    // Measured, not counted. A fixed character cut ended "from turn one" as
+    // "from tu" -- a truncation that looks like a bug rather than an ellipsis.
+    ctx.fillText(ellipsise(ctx, offer.note, box.w - 70 * u),
+                 box.x + 9 * u, box.y + 25 * u);
 
     ctx.textAlign = "right";
     ctx.fillStyle = offer.owned ? "#5ec98a" : afford ? "#cfe04a" : "#6f8f7c";

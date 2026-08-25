@@ -342,8 +342,12 @@ export function r_draw(_g: Game): void {
     // Death takes over the screen: the run has to have an ending you can read.
     if (_g.dead || _g.showLab) {
       const u = Math.max(Math.min(W, H) / 420, 1);
+      // Reserve room for however many toasts are up, so the obituary is never
+      // hidden behind the very message announcing it.
+      const band = _g.toasts.count() * 30 + (_g.toasts.count() > 0 ? 10 : 0);
       _g.closeBox = drawLab(ctx, W, H, _g.insets(), u, _g.lab, _g.deathRecord,
-                            _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max));
+                            _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max),
+                            band);
       r_drawToasts(_g, W, H);
       return;
     }

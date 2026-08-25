@@ -42,6 +42,8 @@ export interface WorldView {
   readonly barriers: readonly Barrier[];
   readonly run: RunState;
   readonly floor: number;
+  /** True once the strain is lost. A dead world is not an invalid one. */
+  readonly dead: boolean;
 }
 
 export interface Violation {
@@ -158,8 +160,11 @@ export const INVARIANTS: Readonly<Record<string, Check>> = {
   },
 
   // --- the player ----------------------------------------------------------
-  "player is alive and not over-healed": (w) =>
-    w.player.hp > 0 && w.player.hp <= w.player.maxhp ? null
+  "a living player is alive and not over-healed": (w) =>
+    // A LOST strain legitimately sits at zero. Auditing it as a live world
+    // reported the death itself as a violation, which is both wrong and the
+    // first thing a player sees on the death screen.
+    w.dead || (w.player.hp > 0 && w.player.hp <= w.player.maxhp) ? null
       : `hp ${String(w.player.hp)}/${String(w.player.maxhp)}`,
 
   "atp is within its pool": (w) =>

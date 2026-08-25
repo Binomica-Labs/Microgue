@@ -422,3 +422,95 @@ describe("permadeath and the lab", () => {
     expect(b.lab.credit, "the lab lived in a slot file").toBe(777);
   });
 });
+
+describe("the ledger tells the truth about what killed you", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const g0 = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("every damage path records its own cause", async () => {
+    // Five paths reduced hp and exactly ONE set lastAttacker, so hazards,
+    // status effects, toxic intermediates and real kills all reported
+    // "starvation". A run history that lies is worse than none.
+    const { hurt } = await import("../src/turn.js");
+    const g = await g0();
+    g.startRun(0);
+    for (const cause of ["a cloud of exudate", "ATP starvation", "a toxic intermediate"]) {
+      g.player.hp = 50;
+      hurt(g, 3, cause);
+      expect(g.lastAttacker).toBe(cause);
+    }
+  });
+
+  it("hurt clamps and never reports a cause for nothing", async () => {
+    const { hurt } = await import("../src/turn.js");
+    const g = await g0();
+    g.startRun(0);
+    g.lastAttacker = null;
+    for (const n of [0, -5, NaN]) {
+      expect(hurt(g, n, "x")).toBe(0);
+      expect(g.lastAttacker, "no damage means no killer").toBeNull();
+    }
+    g.player.hp = 3;
+    expect(hurt(g, 999, "y")).toBe(999);
+    expect(g.player.hp, "hp must not go negative").toBe(0);
+  });
+
+  it("the death screen does not report the death as a bug", async () => {
+    // The audit ran on a dead strain and flagged hp 0/20 as an invariant
+    // violation -- the first thing shown on the death screen.
+    const g = await g0();
+    g.startRun(0);
+    g.player.hp = 0;
+    g.die();
+    g.audit();
+    const errors = g.toasts.all().filter((t) => t.level === "error");
+    expect(errors.map((t) => t.text)).toEqual([]);
+  });
+});
+
+describe("the death screen is clean", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("dying raises no error toast", async () => {
+    // hp 0 is the CORRECT state for a lost strain. Auditing it as a live world
+    // put "invariant: player is alive" over the obituary, every single death.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    // Killed directly. Setting hp to 0 and waiting does not work: upkeep runs
+    // regeneration BEFORE the death check, so the player heals off zero -- in
+    // real play the check fires immediately after the damage that caused it.
+    g.die();
+    expect(g.dead).toBe(true);
+    const errors = g.toasts.all().filter((t) => t.level === "error");
+    expect(errors.map((t) => t.text)).toEqual([]);
+  });
+
+  it("and the death screen keeps drawing without error", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.die();
+    for (let i = 0; i < 40; i++) g.frame(i * 16);
+    expect(g.toasts.all().filter((t) => t.level === "error")).toEqual([]);
+  });
+});

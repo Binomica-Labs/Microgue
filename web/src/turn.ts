@@ -41,6 +41,22 @@ import type { Part } from "./plasmid.js";
 import type { ResearchRow } from "./screens.js";
 import type { Game } from "./main.js";
 
+/**
+ * Take damage, recording what did it.
+ *
+ * Every path went through a bare `player.hp -= n` and only ONE of the five set
+ * `lastAttacker`, so the ledger reported "starvation" for hazards, status
+ * effects, toxic intermediates and genuine mob kills alike. A run history that
+ * lies about cause of death is worse than none.
+ */
+export function hurt(_g: Game, amount: number, cause: string): number {
+  const dmg = Math.max(Math.round(Number.isFinite(amount) ? amount : 0), 0);
+  if (dmg <= 0) return 0;
+  _g.player.hp = Math.max(_g.player.hp - dmg, 0);
+  _g.lastAttacker = cause;
+  return dmg;
+}
+
 export function t_mobTurn(_g: Game): void {
     const wasNight = isNight(_g.clock);
     _g.clock.turn++;
@@ -68,16 +84,14 @@ export function t_mobTurn(_g: Game): void {
     const arm = _g.genome.armour(_g.dungeon.depth);
     for (const h of stepPackets(_g.packets, _g.level.grid, _g.player,
                                 (x, y) => _g.dungeon.mobAt(x, y) !== undefined)) {
-      const dmg = Math.max(Math.round(h.dmg * arm), 1);
-      _g.player.hp = Math.max(_g.player.hp - dmg, 0);
+      hurt(_g, Math.max(h.dmg * arm, 1), "a tailocin particle");
       if (h.inflicts) applyStatus(_g.player.status, h.inflicts, 5, 1);
       _g.fx.add({ kind: "burst", t0: _g.now, dur: 380, x: _g.player.x,
                     y: _g.player.y, colour: "#c8a0ff", n: 8, seed: _g.now });
       _g.fx.shake(3, 200, _g.now);
     }
     for (const h of stepClouds(_g.clouds, _g.player)) {
-      const dmg = Math.max(Math.round(h.dmg * arm), 1);
-      _g.player.hp = Math.max(_g.player.hp - dmg, 0);
+      hurt(_g, Math.max(h.dmg * arm, 1), "a cloud of exudate");
       if (h.inflicts) applyStatus(_g.player.status, h.inflicts, 3, 1);
     }
 
@@ -120,7 +134,8 @@ export function t_mobTurn(_g: Game): void {
     // The player's own afflictions resolve here too.
     const selfDmg = tickStatus(_g.player.status);
     if (selfDmg > 0) {
-      _g.player.hp = Math.max(_g.player.hp - selfDmg, 0);
+      const worst = _g.player.status[0];
+      hurt(_g, selfDmg, worst ? STATUS[worst.id].name : "an affliction");
       _g.fx.add({ kind: "text", t0: _g.now, dur: 700, x: _g.player.x,
                     y: _g.player.y, text: `-${selfDmg}`, colour: "#c8a0ff" });
     }
@@ -182,8 +197,8 @@ export function t_upkeep(_g: Game): void {
       // membrane potential, and you bleed until you find one.
       const shortfall = cost - gain;
       if (shortfall > 0) {
-        const bleed = Math.max(Math.round(shortfall * 0.5), 1);
-        _g.player.hp = Math.max(_g.player.hp - bleed, 0);
+        const bleed = hurt(_g, Math.max(shortfall * 0.5, 1),
+                           "ATP starvation — nothing on the ring respires here");
         applyStatus(_g.player.status, "starved", 2, 1);
         _g.fx.add({ kind: "text", t0: _g.now, dur: 700, x: _g.player.x,
                       y: _g.player.y, text: `-${bleed}`, colour: "#7fc4e8" });
@@ -195,8 +210,8 @@ export function t_upkeep(_g: Game): void {
     }
     const tox = _g.genome.toxicity(d);
     if (tox > 0) {
-      _g.player.hp = Math.max(_g.player.hp - tox, 0);
       const h = _g.genome.hazards(d)[0];
+      hurt(_g, tox, h ? `${h.name}, a toxic intermediate of its own pathway` : "a toxic intermediate");
       if (h && Math.random() < 0.2) _g.note(`${h.name} — ${tox} damage.`);
     }
     const regen = _g.genome.regen(d);
@@ -631,6 +646,9 @@ export function t_win(_g: Game): void {
   }
 
 export function t_audit(_g: Game): void {
+  // Nothing to validate once the strain is gone: the run is over and hp 0 is
+  // the correct state for a dead one.
+  if (_g.dead) return;
     const v = firstViolation(_g.world());
     if (!v) return;
     _g.toasts.push(`invariant: ${v.name} — ${v.detail}`, "error", _g.now);
@@ -641,6 +659,7 @@ export function t_world(_g: Game): WorldView {
       plasmid: _g.genome, level: _g.level, player: _g.player,
       drops: _g.drops, packets: _g.packets, clouds: _g.clouds,
       barriers: _g.level.barriers, run: _g.run, floor: _g.dungeon.floor,
+      dead: _g.dead,
     };
   }
 

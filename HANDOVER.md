@@ -275,6 +275,40 @@ Schema 6. `strength: "strong"` becomes `id: "j23119"`, `optimised: true`
 becomes the `codon` modifier. A hand-edited save is clamped to what play
 allows: level to MAX_LEVEL, modifiers to what the level permits.
 
+## The ledger has to tell the truth
+
+Five code paths reduced the player's hp and exactly ONE recorded what did it,
+so hazards, status effects, toxic intermediates and genuine mob kills were all
+filed as "starvation". A run history that lies about cause of death is worse
+than having none. Everything now goes through `hurt(game, amount, cause)`, so a
+new damage path cannot forget.
+
+And the AUDIT ran on a dead strain, reporting `hp 0/20` as an invariant
+violation -- which appeared as a red error toast over the obituary, the first
+thing a player sees when they die. A lost strain legitimately sits at zero:
+`WorldView` carries `dead` now and the invariant is scoped to a living player.
+
+The death screen also reserves room for whatever toasts are up, so the
+obituary is never hidden behind the message announcing it.
+
+## The audit must know the run has ended
+
+A lost strain sits at hp 0, which is CORRECT -- and the invariant reported it
+as a violation, so an error toast covered the obituary on every single death.
+`WorldView` carries `dead` now, the hp invariant is exempt when it is set, and
+`t_audit` returns early: there is nothing to hold about a world nobody is
+playing any more.
+
+Two presentation bugs from the same screenshot: the shop truncated notes at a
+fixed 46 characters, ending "from turn one" as "from tu", which reads as a
+crash rather than an ellipsis -- it MEASURES now; and the lab header sat under
+the toast strip.
+
+Worth knowing for tests: setting `hp = 0` and waiting does NOT kill the player.
+`upkeep` runs regeneration before the death check, so the strain heals off
+zero. In real play the check fires immediately after the damage that caused
+it, which is the right order. Call `die()` directly instead.
+
 ## Permadeath and the lab
 
 A run is one strain sent down the column. When it dies it DIES -- no more
