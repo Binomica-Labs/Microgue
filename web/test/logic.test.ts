@@ -8,7 +8,8 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { DEFAULT_SETTINGS, SCHEMA, parseSave } from "../src/save.js";
-import { BIN_CAP, Plasmid, SLOTS, type Part } from "../src/plasmid.js";
+import { BIN_CAP, Plasmid, SLOTS, STARTING_PARTS, type Part }
+  from "../src/plasmid.js";
 import { MAX_LEVEL, MODIFIERS, PROMOTERS, RARITY, RARITY_IDS, TERMINATORS,
          RARITY_RANK, evolutionCost, modifierSlots, partsOfRarity,
          rarityOfTier, rollRarity,
@@ -59,9 +60,11 @@ import { REPLICONS, REPLICON_IDS, availableAt, compatible, copyBurden, dosage,
          incompatibleReason, type RepliconId } from "../src/replicon.js";
 import { MAX_STRAIN, bonusCapacityKb, bonusSlots, strainLevel }
   from "../src/strain.js";
-import { LEDGER_CAP, buy, creditFor, genePrice, newLab, offers, recordRun,
-         repliconPrice, strainPrice } from "../src/lab.js";
+import { LEDGER_CAP, STOCK_CAP, buy, creditFor, genePrice, newLab, offers,
+         recordRun, repliconPrice, strainPrice } from "../src/lab.js";
 import { parseLab } from "../src/lab_save.js";
+import { LYSIS_MS, phaseAt, shards } from "../src/lysis.js";
+import { levelProgress } from "../src/strain.js";
 import { NODE_W, NODE_H, clampView, fitView, frame, litBounds, moduleBoxes,
          toScreen, toWorld, zoomAbout, type View } from "../src/kegg_ui.js";
 
@@ -5014,5 +5017,191 @@ describe("synthesis credit", () => {
       expect(lab.credit).toBe(0);
       expect(lab.ledger).toEqual([]);
     }
+  });
+});
+
+describe("the lysis sequence", () => {
+  it("runs through its beats in order and ends", () => {
+    const beats = [0, 200, 500, 900, 1200, 1600, 1900, 9999].map((ms) => phaseAt(ms).beat);
+    expect(beats[0]).toBe("still");
+    expect(beats[2]).toBe("rupture");
+    expect(beats[4]).toBe("wash");
+    expect(beats[beats.length - 1]).toBe("done");
+    // Once done it stays done, however long the screen is left up.
+    expect(phaseAt(1e9).beat).toBe("done");
+  });
+
+  it("the remains spread and never retract", () => {
+    let last = -1;
+    for (let ms = 0; ms <= LYSIS_MS; ms += 25) {
+      const s = phaseAt(ms).spill;
+      expect(s, `spill went backwards at ${String(ms)}ms`).toBeGreaterThanOrEqual(last);
+      last = s;
+    }
+    expect(last).toBe(1);
+  });
+
+  it("the ledger arrives under the wash, not after it", () => {
+    // Waiting for a full fade to black and only then showing the result makes
+    // the pause feel like a hang.
+    const during = phaseAt(1700);
+    expect(during.wash).toBeGreaterThan(0);
+    expect(during.reveal).toBeGreaterThan(0);
+    expect(phaseAt(LYSIS_MS).reveal).toBe(1);
+  });
+
+  it("every value stays in range for any input", () => {
+    for (const ms of [-500, 0, NaN, Infinity, -Infinity, 1e12]) {
+      const p = phaseAt(ms);
+      for (const [k, v] of Object.entries(p)) {
+        if (typeof v !== "number") continue;
+        expect(Number.isFinite(v), `${k} at ${String(ms)}`).toBe(true);
+        expect(v, `${k} at ${String(ms)}`).toBeGreaterThanOrEqual(0);
+        expect(v, `${k} at ${String(ms)}`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("shards are deterministic and fade out", () => {
+    const a = shards(1234, 0.5);
+    const b = shards(1234, 0.5);
+    expect(a).toEqual(b);
+    expect(shards(1234, 1).every((s) => s.a === 0),
+           "the remains should be gone by the end").toBe(true);
+    for (const s of shards(NaN, NaN)) {
+      expect(Number.isFinite(s.x) && Number.isFinite(s.y)).toBe(true);
+    }
+  });
+
+  it("shards drift downward, because this is sediment", () => {
+    const mean = shards(7, 1).reduce((a, s) => a + s.y, 0) / 18;
+    expect(mean, "the remains should settle, not scatter evenly")
+      .toBeGreaterThan(0);
+  });
+});
+
+describe("the plasmid grows as the strain learns", () => {
+  it("ring positions are earned every other level", () => {
+    expect(bonusSlots(1)).toBe(0);
+    expect(bonusSlots(MAX_STRAIN)).toBeGreaterThan(bonusSlots(4));
+    for (let l = 2; l <= MAX_STRAIN; l++) {
+      expect(bonusSlots(l), `L${String(l)}`).toBeGreaterThanOrEqual(bonusSlots(l - 1));
+    }
+    // and the ring array must be able to hold the biggest combination
+    expect(REPLICONS.bac.slots + bonusSlots(MAX_STRAIN)).toBeLessThanOrEqual(SLOTS + 3);
+  });
+
+  it("progress fills toward the next level and reads full at the cap", () => {
+    // `raw - floor(raw)` is 0 at exactly the cap, which would show a fully
+    // adapted strain as having made no progress at all.
+    expect(levelProgress({ catalogued: 0, deepest: 1 })).toBe(0);
+    expect(levelProgress({ catalogued: bio.MICROBES.length, deepest: MAX_FLOOR }))
+      .toBe(1);
+    for (const p of [{ catalogued: 3, deepest: 3 }, { catalogued: 9, deepest: 12 }]) {
+      const v = levelProgress(p);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("progress and level move together", () => {
+    // Crossing a level boundary must reset the bar, not leave it stuck full.
+    let lastLevel = 1;
+    for (let c = 0; c <= bio.MICROBES.length; c++) {
+      const p = { catalogued: c, deepest: 6 };
+      const l = strainLevel(p);
+      if (l > lastLevel) {
+        expect(levelProgress(p), `bar did not reset at L${String(l)}`)
+          .toBeLessThan(0.6);
+        lastLevel = l;
+      }
+    }
+  });
+
+  it("progress survives absurd input", () => {
+    for (const n of [NaN, -9, 1e9, Infinity]) {
+      const v = levelProgress({ catalogued: n, deepest: n });
+      expect(Number.isFinite(v), String(n)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
+describe("the gene catalogue keeps growing", () => {
+  it("there are enough genes that no two runs look alike", () => {
+    expect(Object.keys(bio.GENES).length).toBeGreaterThan(65);
+  });
+
+  it("every gene is still obtainable and sourced", () => {
+    const droppable = new Set(bio.MICROBES.flatMap((m) => [...m.genes]));
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      if (id === "ori") continue;
+      expect(droppable.has(id), `${id} is carried by nothing`).toBe(true);
+      expect(SOURCES[id], `${id} has no NCBI source`).toBeDefined();
+    }
+  });
+
+  it("every stratum offers a real choice of genes", () => {
+    for (let d = 1; d <= bio.MAX_DEPTH; d++) {
+      const here = new Set(bio.microbesAt(d).flatMap((m) => [...m.genes]));
+      expect(here.size, `D${String(d)}`).toBeGreaterThan(4);
+    }
+  });
+});
+
+describe("nothing ordered is ever lost", () => {
+  it("STARTING_PARTS matches what the vector actually puts in the bin", () => {
+    // If these drift, the stock cap is wrong and the surplus is dropped
+    // silently at inoculation.
+    expect(new Plasmid().bin.length).toBe(STARTING_PARTS);
+  });
+
+  it("the manifest cannot exceed what a strain can carry", () => {
+    const lab = newLab();
+    lab.credit = 1e6;
+    const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+    for (let pass = 0; pass < 3; pass++) for (const o of offers(lab, all)) buy(lab, o);
+    expect(lab.stock.length).toBeLessThanOrEqual(STOCK_CAP);
+  });
+
+  it("every construct in the manifest reaches a fresh strain", () => {
+    // Credit spent on a gene that never arrives is the worst kind of bug:
+    // nothing anywhere said so. 29 of 40 used to vanish.
+    const lab = newLab();
+    lab.credit = 1e6;
+    const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+    for (const o of offers(lab, all)) buy(lab, o);
+    const p = new Plasmid();
+    let arrived = 0;
+    for (const g of lab.stock) {
+      if (p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE }).ok) {
+        arrived++;
+      }
+    }
+    expect(arrived, `${String(lab.stock.length - arrived)} constructs lost`)
+      .toBe(lab.stock.length);
+  });
+
+  it("a full manifest refuses further orders rather than taking the credit", () => {
+    const lab = newLab();
+    lab.credit = 1e6;
+    const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+    for (const o of offers(lab, all)) buy(lab, o);
+    const before = lab.credit;
+    const more = offers(lab, all).filter((o) => o.id.kind === "gene" && !o.owned);
+    for (const o of more) buy(lab, o);
+    expect(lab.credit, "credit was taken for nothing").toBe(before);
+  });
+
+  it("a full manifest says so instead of looking affordable", () => {
+    const lab = newLab();
+    lab.credit = 1e6;
+    const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+    for (const o of offers(lab, all)) buy(lab, o);
+    const gene = offers(lab, all).find(
+      (o) => o.id.kind === "gene" && !lab.stock.includes((o.id as { gene: bio.GeneId }).gene));
+    expect(gene?.owned, "an unbuyable offer looked buyable").toBe(true);
+    expect(gene?.note).toContain("no room");
   });
 });

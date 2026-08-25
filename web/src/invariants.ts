@@ -311,10 +311,14 @@ export const INVARIANTS: Readonly<Record<string, Check>> = {
       ? null : `deepest is ${String(w.run.deepest)}`,
 };
 
+/** Built once. `Object.entries` allocated a 31-entry array on every call, and
+ *  this runs every turn. */
+const ENTRIES: readonly (readonly [string, Check])[] = Object.entries(INVARIANTS);
+
 /** Every violation, named. Empty means the world is sound. */
 export function check(w: WorldView): Violation[] {
   const out: Violation[] = [];
-  for (const [name, fn] of Object.entries(INVARIANTS)) {
+  for (const [name, fn] of ENTRIES) {
     let detail: string | null;
     try {
       detail = fn(w);
@@ -333,7 +337,7 @@ export function check(w: WorldView): Violation[] {
  * only to discard 22 of them was paying full price for a yes-or-no answer.
  */
 export function firstViolation(w: WorldView): Violation | null {
-  for (const [name, fn] of Object.entries(INVARIANTS)) {
+  for (const [name, fn] of ENTRIES) {
     let detail: string | null;
     try {
       detail = fn(w);

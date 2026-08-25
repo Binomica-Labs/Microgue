@@ -133,8 +133,17 @@ class Game {
   /** Set when the strain dies. A dead strain does not act. */
   dead = false;
   deathRecord: RunRecord | null = null;
+  /** Clock time the strain lysed, for the death sequence. */
+  deathAt = 0;
   showLab = false;
   shopRows: ShopRow[] = [];
+  /** First visible row of the order form, and how far it can go. */
+  shopScroll = 0;
+  shopMaxScroll = 0;
+  /** Where a scroll drag began, and the scroll it started from. */
+  shopFrom: { x: number; y: number } | null = null;
+  shopAnchor = 0;
+  shopMoved = 0;
   /** Whatever last hurt the player, for the ledger. */
   lastAttacker: string | null = null;
   /** Persists across every strain. Saved separately from the run. */
@@ -435,6 +444,10 @@ class Game {
   // ------------------------------------------------------------ persist
   save(): void {
     if (this.showSplash || !this.started) return;
+    // A dead strain must never be written back. `die()` deletes the slot and
+    // `mobTurn` called save() on the very next line, recreating it -- so
+    // permadeath was not permanent at all.
+    if (this.dead) return;
     const data = {
       version: SCHEMA,
       depth: this.dungeon.depth,

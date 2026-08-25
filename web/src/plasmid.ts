@@ -23,6 +23,10 @@ import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
 export { SLOTS } from "./transcription.js";
 export const BIN_CAP = 18;
 
+/** Regulatory parts the starting vector puts in the bin. The lab cannot
+ *  order more constructs than the remainder will hold. */
+export const STARTING_PARTS = 7;
+
 export type Strength = "weak" | "medium" | "strong";
 
 export const PROMOTER_POWER: Readonly<Record<Strength, number>> =

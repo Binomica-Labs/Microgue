@@ -452,7 +452,10 @@ export function drawLab(
   ins: Insets, u: number,
   lab: Lab, last: RunRecord | null, seen: readonly GeneId[],
   rows: ShopRow[], wrap: Wrap, toastBand = 0,
-): Box {
+  // Named `scrollTop`, not `scroll`: a bare `scroll` shadows the global
+  // function of that name and resolves to it instead.
+  scrollTop = 0,
+): { close: Box; maxScroll: number } {
   ctx.fillStyle = "rgba(4,7,6,0.98)";
   ctx.fillRect(0, 0, W, H);
   rows.length = 0;
@@ -495,13 +498,25 @@ export function drawLab(
 
   const rowH = 34 * u;
   const floor = H - ins.bottom - 52 * u;
-  for (const offer of offers(lab, seen)) {
-    if (y + rowH > floor) {
-      ctx.fillStyle = "#6f8f7c";
-      ctx.font = `${9 * u}px ui-monospace,monospace`;
-      ctx.fillText("…more available than fits on screen", left, y + 10 * u);
-      break;
-    }
+
+  // Scrolled, not truncated. With 69 genes the form runs to 72 rows and only
+  // about 15 fit -- so most of what a run earned credit for was unreachable.
+  const list = offers(lab, seen);
+  const listTop = y;
+  const visible = Math.max(Math.floor((floor - listTop) / rowH), 1);
+  const maxScroll = Math.max(list.length - visible, 0);
+  // Finiteness first: Math.round(NaN) is NaN and survives min/max, which
+  // would slice(NaN, NaN) and render an empty form.
+  const want = Number.isFinite(scrollTop) ? Math.round(scrollTop) : 0;
+  const from = Math.min(Math.max(want, 0), maxScroll);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, listTop - 4 * u, W, floor - listTop + 4 * u);
+  ctx.clip();
+  y -= 0;
+  for (const offer of list.slice(from, from + visible + 1)) {
+    if (y + rowH > floor + rowH) break;
     const box: Box = { x: left, y, w: wide, h: rowH - 5 * u };
     const afford = !offer.owned && lab.credit >= offer.price;
     rows.push({ box, offer });
@@ -534,9 +549,24 @@ export function drawLab(
     y += rowH;
   }
 
+  ctx.restore();
+
+  // A scrollbar, so it is obvious there is more.
+  if (maxScroll > 0) {
+    const trackH = floor - listTop;
+    const knobH = Math.max(trackH * (visible / list.length), 18 * u);
+    const t = maxScroll === 0 ? 0 : from / maxScroll;
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(W - ins.right - 6 * u, listTop, 3 * u, trackH);
+    ctx.fillStyle = "rgba(207,224,74,0.65)";
+    ctx.fillRect(W - ins.right - 6 * u, listTop + (trackH - knobH) * t, 3 * u, knobH);
+  }
+
   ctx.textAlign = "center";
   ctx.fillStyle = "#6f8f7c";
   ctx.font = `${9.5 * u}px ui-monospace,monospace`;
-  ctx.fillText("close to send the next strain down", W / 2, H - ins.bottom - 18 * u);
-  return drawClose(ctx, W, ins, u);
+  ctx.fillText(maxScroll > 0
+    ? `drag to see all ${String(list.length)} · close to send the next strain down`
+    : "close to send the next strain down", W / 2, H - ins.bottom - 18 * u);
+  return { close: drawClose(ctx, W, ins, u), maxScroll };
 }

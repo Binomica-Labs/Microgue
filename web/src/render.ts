@@ -27,6 +27,8 @@ import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
 import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash }
   from "./screens.js";
+import { phaseAt, shards, type Phase } from "./lysis.js";
+import { MAX_STRAIN, levelProgress } from "./strain.js";
 import { NAME_POOL } from "./saves.js";
 import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad }
   from "./fx.js";
@@ -224,7 +226,7 @@ export function r_draw(_g: Game): void {
                      (tb.maxX - tb.minX + 1) * px, (tb.maxY - tb.minY + 1) * px);
     }
     const under = _g.dungeon.mobAt(_g.cursor.x, _g.cursor.y);
-    // Red means "_g is what I am going to kill". Orange is merely hovered.
+    // Red means "this is what I am going to kill". Orange is merely hovered.
     const isTarget = under !== undefined && under === _g.target;
     ctx.strokeStyle = hc ? "#ff0"
       : isTarget ? "#ff3b30" : under ? "#ff9a7a" : _g.path ? "#ffffff" : "#777777";
@@ -341,13 +343,31 @@ export function r_draw(_g: Game): void {
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
     // Death takes over the screen: the run has to have an ending you can read.
     if (_g.dead || _g.showLab) {
+      // The cell lyses before the ledger appears. The run ending is the only
+      // irreversible moment in the game and it should land as one.
+      // `drawingLysis` breaks a recursion: r_drawLysis draws the ordinary
+      // world by calling r_draw, and r_draw's death branch would call back
+      // into r_drawLysis for ever. The frame guard caught it as a stack
+      // overflow, which is the error boundary working but not a fix.
+      if (_g.dead && !drawingLysis) {
+        const p = phaseAt(_g.now - _g.deathAt);
+        if (p.beat !== "done") {
+          r_drawLysis(_g, W, H, p);
+          r_drawToasts(_g, W, H);
+          if (p.reveal <= 0) return;
+          ctx.globalAlpha = p.reveal;
+        }
+      }
       const u = Math.max(Math.min(W, H) / 420, 1);
       // Reserve room for however many toasts are up, so the obituary is never
       // hidden behind the very message announcing it.
       const band = _g.toasts.count() * 30 + (_g.toasts.count() > 0 ? 10 : 0);
-      _g.closeBox = drawLab(ctx, W, H, _g.insets(), u, _g.lab, _g.deathRecord,
-                            _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max),
-                            band);
+      const lab = drawLab(ctx, W, H, _g.insets(), u, _g.lab, _g.deathRecord,
+                          _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max),
+                          band, _g.shopScroll);
+      _g.closeBox = lab.close;
+      _g.shopMaxScroll = lab.maxScroll;
+      ctx.globalAlpha = 1;
       r_drawToasts(_g, W, H);
       return;
     }
@@ -591,6 +611,19 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
             `atp ${Math.round(_g.player.atp)}  ${bal >= 0 ? "+" : ""}${bal.toFixed(1)}`,
             `${size * 0.86}px ui-monospace,monospace`);
 
+    // Strain progress. A thin line rather than a third gauge: it advances
+    // slowly and over the whole run, so it should not compete with hp and ATP
+    // for attention.
+    const prog = levelProgress({
+      catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
+    });
+    const sy = barTop + lh * 1.15 + gaugeH + 3 * u;
+    const sw = hpW * 2 + 8 * u;
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(barX, sy, sw, Math.max(2 * u, 2));
+    ctx.fillStyle = _g.genome.strain >= MAX_STRAIN ? "#7fe0a4" : "#cfe04a";
+    ctx.fillRect(barX, sy, sw * prog, Math.max(2 * u, 2));
+
     const ops = _g.genome.operons().filter((op) => op.genes.length > 0).length;
     ctx.font = `${size * 0.86}px ui-monospace,monospace`;
     ctx.fillStyle = "#ffffff";
@@ -780,3 +813,65 @@ export function r_drawMapScreen(_g: Game, W: number, H: number): void {
 
     _g.closeBox = drawClose(ctx, W, ins, u);
   }
+
+
+/**
+ * The world at the moment of lysis.
+ *
+ * Draws the ordinary scene with the player replaced by whatever is left of it,
+ * then washes the whole screen as the column takes the remains. The shake is
+ * applied to the canvas rather than the camera so the HUD moves with it -- the
+ * whole cell is coming apart, not just the view.
+ */
+let drawingLysis = false;
+
+export function r_drawLysis(_g: Game, W: number, H: number, p: Phase): void {
+  const { ctx } = _g;
+  ctx.save();
+  drawingLysis = true;
+  if (p.shake > 0) {
+    const px = _g.zoom * TILE;
+    const j = jitter(_g.deathAt, Math.floor(_g.now / 30));
+    ctx.translate(j.x * p.shake * px * 0.5, j.y * p.shake * px * 0.5);
+  }
+  try {
+    r_draw(_g);
+  } finally {
+    drawingLysis = false;
+    ctx.restore();
+  }
+
+  // The world is drawn centred on the player, so the remains are centred too.
+  // No camera lookup needed, and none exists to ask.
+  const px = _g.zoom * TILE;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // The remains, spreading.
+  if (p.spill > 0) {
+    for (const s of shards(_g.deathAt, p.spill)) {
+      if (s.a <= 0) continue;
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = s.a > 0.6 ? "#bfe6ff" : "#7fc4e8";
+      const r = px * (0.09 + 0.05 * s.a);
+      ctx.beginPath();
+      ctx.ellipse(cx + s.x * px, cy + s.y * px, r, r * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // The envelope, opening.
+    ctx.globalAlpha = Math.max(1 - p.spill * 1.4, 0);
+    ctx.strokeStyle = "#d8f0ff";
+    ctx.lineWidth = Math.max(px * 0.06, 1);
+    ctx.beginPath();
+    ctx.arc(cx, cy, px * (0.35 + p.spill * 1.6), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  if (p.wash > 0) {
+    ctx.globalAlpha = p.wash;
+    ctx.fillStyle = "#04120c";
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+}

@@ -58,6 +58,10 @@ export function hurt(_g: Game, amount: number, cause: string): number {
 }
 
 export function t_mobTurn(_g: Game): void {
+  // Every mutating entry point is guarded, not just the obvious ones. Only
+  // `step` and `takeTurn` were, so a dead strain could still descend the
+  // column -- and the run had already been written to the ledger.
+  if (_g.dead) return;
     const wasNight = isNight(_g.clock);
     _g.clock.turn++;
     if (isNight(_g.clock) !== wasNight) {
@@ -285,9 +289,13 @@ export function t_step_(_g: Game, t: number): void {
     // Auto-attack and pursuit both act on a timer so the fight is watchable
     // rather than resolving instantly.
     const busy = _g.showPlasmid || _g.showMap;
-    if (!busy && at && (_g.autoAttack || _g.target) && t - _g.autoAt > 230) {
+    // Only AUTO-attack ticks on its own. A tapped target used to keep
+    // pursuing turn after turn without another input, which is the opposite of
+    // how a turn-based roguelike should feel: one input, one turn. Crawl makes
+    // you press the key each time and that is the whole texture of its combat.
+    if (!busy && at && _g.autoAttack && t - _g.autoAt > 230) {
       _g.autoAt = t;
-      if (!_g.takeTurn() && _g.autoAttack) {
+      if (!_g.takeTurn()) {
         // nothing in range: stop rather than spinning
         _g.autoAttack = false;
         const btn = _g.buttons.find((b) => b.id === "auto");
@@ -341,6 +349,7 @@ export function t_step(_g: Game, x: number, y: number): boolean {
   }
 
 export function t_attack(_g: Game, m: Mob): void {
+  if (_g.dead) return;             // a lost strain does not act
     const dmg = Math.max(Math.round(_g.atk()), 1);
     const ranged = Math.abs(m.x - _g.player.x) > 1 || Math.abs(m.y - _g.player.y) > 1;
     const now = _g.now;
@@ -447,6 +456,7 @@ export function t_die(_g: Game): void {
   writeLab(_g.lab);
 
   _g.dead = true;
+  _g.deathAt = _g.now;
   _g.deathRecord = rec;
   deleteSlot(_g.slot);
 
@@ -458,6 +468,7 @@ export function t_die(_g: Game): void {
 }
 
 export function t_descend(_g: Game): void {
+  if (_g.dead) return;             // a lost strain does not act
     if (!Dungeon.isCleared(_g.level)) {
       _g.note("The way down is choked. Something here has to die first.");
       _g.toasts.push("Clear the floor before descending.", "warn", _g.now);
@@ -470,6 +481,7 @@ export function t_descend(_g: Game): void {
   }
 
 export function t_ascend(_g: Game): void {
+  if (_g.dead) return;             // a lost strain does not act
     const r = _g.dungeon.ascend();
     if ("err" in r) { _g.note(r.err); return; }
     _g.enter(r.level, r.arrive);
@@ -511,6 +523,7 @@ export function t_look(_g: Game): void {
   }
 
 export function t_onTile(_g: Game, x: number, y: number): void {
+  if (_g.dead) return;             // a lost strain does not act
     const room = roomAt(_g.level.rooms, x, y);
     if (room && room !== _g.inRoom) {
       _g.inRoom = room;
@@ -595,6 +608,7 @@ export function t_describeTile(_g: Game, x: number, y: number): void {
   }
 
 export function t_research(_g: Game, row: ResearchRow): void {
+  if (_g.dead) return;             // a lost strain does not act
   if (row.kind === "subclone") {
     if (row.replicon !== undefined) t_subclone(_g, row.replicon);
     return;
@@ -703,6 +717,7 @@ export function t_repath(_g: Game): void {
  * mtrC is not a hundred wasted pickups.
  */
 export function t_catabolise(_g: Game, binIndex: number): void {
+  if (_g.dead) return;             // a lost strain does not act
   const part = _g.genome.bin[binIndex];
   if (part === undefined) return;
   if (part.kind === "gene" && part.id === "ori") {
@@ -738,6 +753,7 @@ export function t_catabolise(_g: Game, binIndex: number): void {
  * than being destroyed -- losing loot to a UI decision would be indefensible.
  */
 export function t_subclone(_g: Game, to: RepliconId): void {
+  if (_g.dead) return;             // a lost strain does not act
   const def = REPLICONS[to];
   if (_g.genome.replicon === to) return;
   if (!availableAt(_g.genome.strain).some((r) => r.id === to)) {

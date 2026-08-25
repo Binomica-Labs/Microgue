@@ -291,6 +291,87 @@ thing a player sees when they die. A lost strain legitimately sits at zero:
 The death screen also reserves room for whatever toasts are up, so the
 obituary is never hidden behind the message announcing it.
 
+## Footguns found by hardening
+
+**Credit spent on constructs that never arrived.** The lab could stock 60 genes;
+the bin holds 18 and the starting vector already uses 7. Ordering more than 11
+silently dropped the surplus at inoculation -- 29 of 40 lost, with nothing
+anywhere saying so. That is the worst shape a bug can take. `STOCK_CAP` is
+derived from `BIN_CAP - STARTING_PARTS`, a full manifest reads as unbuyable
+rather than affordable, and `spec` asserts `STARTING_PARTS` matches what the
+vector actually puts in the bin -- if those two drift the bug comes straight
+back.
+
+**Most of the order form was unreachable.** With 69 genes it runs to 72 rows
+and about 15 fit; it truncated with "more available than fits" and there was no
+scrolling, so most of what a run earned credit for could not be bought. It
+scrolls by drag now, with a scrollbar, and a test walks the whole list
+asserting every offer is reachable.
+
+Two smaller ones: `Math.round(NaN)` survives `min`/`max` and produced
+`slice(NaN, NaN)`, rendering an empty form -- the finiteness guard has to come
+FIRST, which is the third time that exact shape has appeared. And a parameter
+named `scroll` silently resolved to the global function of that name.
+
+## What the refactor damaged, audited properly
+
+Beyond the twelve comments already found, a thorough pass turned up one more
+(`"_g is what I am going to kill"`) and confirmed the rest is sound:
+
+* All 57 methods that existed pre-refactor are still present.
+* No duplicated exports from a bad splice, no orphaned functions, no delegate
+  calling a target that does not exist.
+* No `_g` leaks into any user-visible string.
+
+Performance post-refactor, at 75 mobs on a real floor: expression 2.9us,
+atpBalance 0.2us, operons 0.0us (memoised), the full 31-invariant audit 37us
+per TURN, microbeTurn 31us, FOV 10us, level generation 20ms per floor. No
+regression. The audit is dominated by the body-iteration invariants, which is
+inherent at that mob count and still a rounding error against a 16ms frame.
+
+## One press, one turn
+
+A tapped target used to keep pursuing turn after turn with no further input,
+which is the opposite of how a turn-based roguelike should feel. Only AUTO
+attack ticks on its own now. The primary way to fight is the strike button, and
+pressing it repeatedly IS the texture of the combat -- Crawl makes you press
+the key each time for exactly that reason.
+
+## No second experience track
+
+The question was whether to add an XP bar. There already is one: strain level,
+from cataloguing and depth. A second bar filling from kills would COMPETE with
+the notebook rather than reinforce it, and would reward the one activity the
+column is least about. What was missing was visibility, not a mechanic --
+`levelProgress` exposes the same measure the level comes from, drawn as a thin
+line under the hp and ATP gauges.
+
+Ring positions are now earned every OTHER level rather than every third, so the
+plasmid visibly grows as the lineage learns.
+
+## Permadeath was not permanent
+
+`die()` deleted the slot and `mobTurn` called `save()` on the VERY NEXT LINE,
+writing it straight back. `save()` refuses when `dead` now.
+
+And only `step` and `takeTurn` were guarded against a dead strain, so one could
+still descend the column after its run was already in the ledger. Every
+mutating entry point is guarded: descend, ascend, attack, mobTurn, catabolise,
+subclone, research, onTile.
+
+## Lysis
+
+A cell does not stop, it lyses. `lysis.ts` is pure timing maths -- four beats
+over 1.9s: still, rupture, wash, done -- so the sequence is testable without a
+canvas. The ledger fades in UNDER the wash rather than after it, because
+waiting for a full fade to black and only then showing the result makes the
+pause feel like a hang.
+
+`r_drawLysis` draws the ordinary world by calling `r_draw`, whose death branch
+calls back into `r_drawLysis`. That is infinite recursion, and the frame guard
+caught it as a stack overflow -- the error boundary working, but not a fix.
+`drawingLysis` breaks the cycle and is cleared in a `finally`.
+
 ## The audit must know the run has ended
 
 A lost strain sits at hp 0, which is CORRECT -- and the invariant reported it

@@ -3,6 +3,9 @@
 // Everything here is reached through safety.on(), so a throw in a handler is
 // reported rather than escaping into a console nobody can read on a phone.
 
+import { isVisible } from "./fov.js";
+import { distanceTo } from "./pursuit.js";
+import type { Mob } from "./dungeon.js";
 import * as bio from "./biology.js";
 import { classifyDown, classifyKey } from "./gesture.js";
 import { buttonAt } from "./buttons.js";
@@ -46,12 +49,10 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     // While the lab screen is up, taps buy things. Closing it starts the next
     // strain, so there is no way to accidentally resume a dead one.
     if (_g.dead || _g.showLab) {
-      const hit = _g.shopRows.find((r) => inBoxOf(r.box, x, y));
-      if (hit) { _g.order(hit.offer); _g.gesture = "none"; return; }
-      if (_g.inClose(x, y)) {
-        _g.showLab = false;
-        if (_g.dead) { _g.dead = false; _g.showSplash = true; _g.started = false; }
-      }
+      // Remember where the drag began. A tap orders; a drag scrolls, and the
+      // two are told apart on release by how far the finger moved.
+      _g.shopFrom = { x, y };
+      _g.shopMoved = 0;
       _g.gesture = "none";
       return;
     }
@@ -129,6 +130,16 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
   }
 
 export function i_pointerMove(_g: Game, x: number, y: number): void {
+  // Dragging the order form scrolls it. One row per row-height of travel, so
+  // the list moves with the finger rather than at some invented rate.
+  if ((_g.dead || _g.showLab) && _g.shopFrom !== null) {
+    const dy = y - _g.shopFrom.y;
+    _g.shopMoved = Math.max(_g.shopMoved, Math.abs(dy) + Math.abs(x - _g.shopFrom.x));
+    const rowPx = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * 34;
+    const want = _g.shopAnchor - dy / rowPx;
+    _g.shopScroll = Math.min(Math.max(want, 0), _g.shopMaxScroll);
+    return;
+  }
     if (!_g.started) return;
     if (_g.showMap && _g.panFrom && _g.view) {
       const dx = x - _g.panFrom.x, dy = y - _g.panFrom.y;
@@ -155,6 +166,21 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
   }
 
 export function i_pointerUp(_g: Game, x: number, y: number): void {
+  if (_g.dead || _g.showLab) {
+    const wasDrag = _g.shopMoved > 10;
+    _g.shopFrom = null;
+    _g.shopAnchor = _g.shopScroll;
+    if (wasDrag) return;                    // a scroll is not an order
+    const hit = _g.shopRows.find((r) => inBoxOf(r.box, x, y));
+    if (hit) { _g.order(hit.offer); return; }
+    if (_g.inClose(x, y)) {
+      _g.showLab = false;
+      _g.shopScroll = 0;
+      _g.shopAnchor = 0;
+      if (_g.dead) { _g.dead = false; _g.showSplash = true; _g.started = false; }
+    }
+    return;
+  }
     if (!_g.started) { _g.gesture = "none"; return; }
     switch (_g.gesture) {
       case "button": {
@@ -347,9 +373,31 @@ export function i_bindPinch(_g: Game): void {
     on(_g.canvas, "pointercancel", drop, "pinch cancel", _g.report);
   }
 
+/** The closest living thing you can see, by body distance. */
+function nearestHostile(_g: Game): Mob | null {
+  let best: Mob | null = null;
+  let bd = Infinity;
+  for (const m of _g.level.mobs) {
+    if (!m.alive || !isVisible(_g.level.sight, m.x, m.y)) continue;
+    const d = distanceTo(_g.player, m);
+    if (d < bd) { bd = d; best = m; }
+  }
+  return best;
+}
+
 export function i_press(_g: Game, id: string): void {
     switch (id) {
       case "plasmid": _g.openPlasmid(!_g.showPlasmid); _g.showMap = false; break;
+      case "strike": {
+        // One press, one turn. This is the primary way to fight: Crawl makes
+        // you press the key each time and that repetition IS the texture of
+        // its combat -- you feel every exchange rather than watching one.
+        const near = nearestHostile(_g);
+        if (!near) { _g.note("Nothing in reach."); break; }
+        _g.target = near;
+        _g.takeTurn();
+        break;
+      }
       case "auto": {
         _g.autoAttack = !_g.autoAttack;
         const btn = _g.buttons.find((b) => b.id === "auto");

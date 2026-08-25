@@ -511,6 +511,143 @@ describe("the death screen is clean", () => {
     g.startRun(0);
     g.die();
     for (let i = 0; i < 40; i++) g.frame(i * 16);
-    expect(g.toasts.all().filter((t) => t.level === "error")).toEqual([]);
+    const errs = g.toasts.all().filter((t) => t.level === "error");
+    expect(errs.map((t) => t.text)).toEqual([]);
+  });
+});
+
+describe("death really is permanent", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("no later save can resurrect the slot", async () => {
+    // die() deletes the slot and mobTurn called save() on the very next line,
+    // writing it straight back. Permadeath was not permanent.
+    const { loadSlot } = await import("../src/saves.js");
+    const g = await game();
+    g.startRun(0);
+    g.die();
+    g.save();                     // the exact call that used to undo it
+    for (let i = 0; i < 20; i++) g.frame(i * 16);
+    expect(loadSlot(0), "the dead strain came back").toBeNull();
+  });
+
+  it("the slot stays gone across a fresh Game", async () => {
+    const { loadSlot } = await import("../src/saves.js");
+    const a = await game();
+    a.startRun(0);
+    a.dungeon.floor = 9;
+    a.die();
+    const b = await game();
+    b.startRun(0);
+    expect(loadSlot(0), "a new strain should occupy the slot").not.toBeNull();
+    expect(b.dungeon.floor, "it resumed the dead strain").toBe(1);
+  });
+
+  it("every mutating action refuses once the strain is dead", async () => {
+    const g = await game();
+    g.startRun(0);
+    const floorBefore = g.dungeon.floor;
+    g.die();
+    // Only step and takeTurn used to be guarded, so a dead strain could walk
+    // down the column after its run was already in the ledger.
+    g.step(g.player.x + 1, g.player.y);
+    g.descend();
+    g.ascend();
+    g.press("wait");
+    g.press("descend");
+    expect(g.dungeon.floor, "a dead strain moved").toBe(floorBefore);
+  });
+});
+
+describe("the order form is reachable", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("every offer can be reached by scrolling", async () => {
+    // With 69 genes the form runs past 70 rows and only about 15 fit. It used
+    // to truncate with "more available than fits", so most of what a run
+    // earned credit for was unbuyable.
+    const g = await game();
+    g.startRun(0);
+    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
+    g.lab.credit = 99999;
+    g.showLab = true;
+    g.frame(16);
+    expect(g.shopMaxScroll, "the form does not scroll at all")
+      .toBeGreaterThan(0);
+
+    const total = offers(g.lab, g.known()).length;
+    const seen = new Set<string>();
+    for (let s = 0; s <= g.shopMaxScroll; s++) {
+      g.shopScroll = s;
+      g.frame(100 + s);
+      for (const r of g.shopRows) seen.add(r.offer.name);
+    }
+    expect(seen.size, `${String(total - seen.size)} offers unreachable`).toBe(total);
+  });
+
+  it("scrolling is clamped to the list", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.showLab = true;
+    g.frame(16);
+    for (const s of [-50, 1e6, NaN]) {
+      g.shopScroll = s;
+      expect(() => { g.frame(20); }).not.toThrow();
+      expect(g.shopRows.length, `scroll ${String(s)} emptied the form`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("a drag scrolls and does not buy", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
+    g.lab.credit = 99999;
+    g.showLab = true;
+    g.frame(16);
+    const before = g.lab.stock.length;
+    const row = g.shopRows[0];
+    expect(row).toBeDefined();
+    if (!row) return;
+    g.pointerDown(row.box.x + 5, row.box.y + 5);
+    g.pointerMove(row.box.x + 5, row.box.y - 90);
+    g.pointerUp(row.box.x + 5, row.box.y - 90);
+    expect(g.lab.stock.length, "a scroll bought something").toBe(before);
+    expect(g.shopScroll, "a drag did not scroll").toBeGreaterThan(0);
+  });
+
+  it("a tap on a row still orders", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
+    g.lab.credit = 99999;
+    g.showLab = true;
+    g.frame(16);
+    const row = g.shopRows.find((r) => r.offer.id.kind === "gene");
+    expect(row).toBeDefined();
+    if (!row) return;
+    g.pointerDown(row.box.x + 5, row.box.y + 5);
+    g.pointerUp(row.box.x + 5, row.box.y + 5);
+    expect(g.lab.stock.length, "a tap did not order").toBeGreaterThan(0);
   });
 });

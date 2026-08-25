@@ -41,8 +41,15 @@ export function strainLevel(p: Progress): number {
 }
 
 /** Extra ring positions the strain has earned, on top of the replicon's own. */
+/**
+ * Ring positions the strain has earned.
+ *
+ * One every other level rather than every third: the plasmid visibly grows as
+ * the lineage learns, which is the point. It is the only thing levelling gives
+ * you that you can see on the ring.
+ */
 export const bonusSlots = (level: number): number =>
-  Math.floor(Math.min(Math.max(Number.isFinite(level) ? level : 1, 1), MAX_STRAIN) / 3);
+  Math.floor((Math.min(Math.max(Number.isFinite(level) ? level : 1, 1), MAX_STRAIN) - 1) / 2);
 
 /** Extra kilobases of headroom. A better-adapted strain tolerates more DNA. */
 export const bonusCapacityKb = (level: number): number =>
@@ -66,4 +73,28 @@ export function describeLevel(level: number): string {
   const l = Math.min(Math.max(level, 1), MAX_STRAIN);
   return `strain L${String(l)} · ${String(bonusSlots(l))} bonus slots · `
     + `+${bonusCapacityKb(l).toFixed(1)} kb headroom`;
+}
+
+
+/**
+ * Progress toward the next level, 0..1.
+ *
+ * There is no separate experience track and there should not be: a second bar
+ * that fills from killing things would compete with the notebook rather than
+ * reinforce it. This is the SAME measure the level comes from, exposed so it
+ * can be drawn -- what was missing was visibility, not a mechanic.
+ */
+export function levelProgress(p: Progress): number {
+  const c = Number.isFinite(p.catalogued) ? p.catalogued : 0;
+  const d = Number.isFinite(p.deepest) ? p.deepest : 1;
+  const catalogued = Math.min(Math.max(c, 0), MICROBES.length);
+  const deepest = Math.min(Math.max(d, 1), MAX_FLOOR);
+  const score = (catalogued / MICROBES.length) * 0.55
+    + ((deepest - 1) / (MAX_FLOOR - 1)) * 0.45;
+  // At the cap the bar reads full, not empty: `raw - floor(raw)` is 0 at
+  // exactly 8.0, which would show a fully adapted strain as having made no
+  // progress at all.
+  if (strainLevel(p) >= MAX_STRAIN) return 1;
+  const raw = score * MAX_STRAIN;
+  return Math.min(Math.max(raw - Math.floor(raw), 0), 1);
 }

@@ -18,6 +18,7 @@
 import { GENES, stratum, type GeneId } from "./biology.js";
 import { MAX_FLOOR, strataOf } from "./dungeon.js";
 import { REPLICONS, type RepliconId } from "./replicon.js";
+import { BIN_CAP, STARTING_PARTS } from "./plasmid.js";
 import { MAX_STRAIN } from "./strain.js";
 
 export interface RunRecord {
@@ -149,18 +150,34 @@ export const strainPrice = (level: number): number =>
  * construct for an organism nobody has sequenced, and it keeps the first
  * shop small enough to read.
  */
+/**
+ * How many constructs a strain can actually carry to the column.
+ *
+ * The bin holds BIN_CAP parts and the starting vector already occupies some of
+ * it. Ordering more than this used to be possible and the surplus was SILENTLY
+ * DROPPED at inoculation -- credit spent on genes that never arrived, which is
+ * the worst kind of bug because nothing anywhere said so.
+ */
+export const STOCK_CAP = BIN_CAP - STARTING_PARTS;
+
 export function offers(lab: Lab, seen: readonly GeneId[]): Offer[] {
   const out: Offer[] = [];
   const known = [...new Set(seen)].filter((g) => g !== "ori");
   known.sort((a, b) => GENES[a].tier - GENES[b].tier || a.localeCompare(b));
 
+  const full = lab.stock.length >= STOCK_CAP;
   for (const gene of known) {
+    const have = lab.stock.includes(gene);
     out.push({
       id: { kind: "gene", gene },
       name: GENES[gene].name,
       price: genePrice(gene),
-      note: GENES[gene].product,
-      owned: lab.stock.includes(gene),
+      note: full && !have
+        ? `no room — a strain carries ${String(STOCK_CAP)} constructs`
+        : GENES[gene].product,
+      // A full manifest reads as owned: it cannot be ordered either way, and
+      // showing it as affordable would invite spending on nothing.
+      owned: have || full,
     });
   }
   for (const id of Object.keys(REPLICONS) as RepliconId[]) {
@@ -198,6 +215,10 @@ export function buy(lab: Lab, offer: Offer): BuyResult {
     case "gene":
       if (lab.stock.includes(offer.id.gene)) {
         return { ok: false, err: "already ordered" };
+      }
+      if (lab.stock.length >= STOCK_CAP) {
+        return { ok: false,
+                 err: `a strain carries ${String(STOCK_CAP)} constructs; drop one first` };
       }
       lab.stock.push(offer.id.gene);
       break;
