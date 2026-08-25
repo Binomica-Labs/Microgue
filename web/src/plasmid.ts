@@ -16,7 +16,11 @@
 import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
          type Complex, type GeneId, type Hazard, type Teap } from "./biology.js";
 
-export const SLOTS = 16;
+/** Re-exported from transcription.ts, which owns the ring model. There were
+ *  two of these and they disagreed: the plasmid capped at 16 while the
+ *  transcription model allowed 24, so the largest replicon was silently
+ *  clamped and levelling appeared to do nothing. */
+export { SLOTS } from "./transcription.js";
 export const BIN_CAP = 18;
 
 export type Strength = "weak" | "medium" | "strong";
@@ -65,10 +69,19 @@ const GENERATORS: Partial<Record<GeneId, number>> = {
 /** Cost scales with size and how hard the gene is being driven. */
 const COST_PER_KB = 0.7;
 
+/** ATP burned per unit of transcription that runs off the end of an operon
+ *  without producing anything. Tuned so a bare hairpin is a real tax and a
+ *  tandem terminator is nearly free. */
+const WASTE_PER_UNIT = 1.15;
+
 // The part model lives in transcription.ts and the catalogue in parts.ts, so
 // adding a promoter, a terminator or a gene modifier does not touch this class.
 export type { Part } from "./transcription.js";
-import { modEffect, transcribe, type Part } from "./transcription.js";
+import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
+import { WILD_TYPE, alleleEffect } from "./allele.js";
+import { REPLICONS, dosage, copyBurden, type RepliconId } from "./replicon.js";
+import { TERMINATORS } from "./parts.js";
+import { bonusCapacityKb, bonusSlots } from "./strain.js";
 import { MAX_LEVEL, MODIFIERS, evolutionCost, levelMultiplier, modifierSlots,
          type Context, type ModifierId } from "./parts.js";
 
@@ -102,7 +115,12 @@ export class Plasmid {
     // You start replicable and minimally transcribing, with spare regulatory
     // parts to build a second transcript once you have something to put in it.
     this.slots[0] = { kind: "promoter", id: "j23106" };
-    this.slots[1] = { kind: "gene", id: "ori", level: 1, mods: [] };
+    this.slots[1] = { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE };
+    // A terminator, because a real vector has one. Without it the starting
+    // transcript runs off the end of the origin and burns ATP on nothing --
+    // which is exactly the cost the terminator model is meant to teach, and a
+    // poor thing to open the game with.
+    this.slots[2] = { kind: "terminator", id: "rrnbt1" };
     // A working parts library, not a token. Two weak and two medium promoters
     // plus three terminators is enough to lay down three transcripts before
     // you have looted anything, which is what makes the ring feel like a
@@ -138,6 +156,11 @@ export class Plasmid {
   install(binIndex: number, slot: number): Result {
     const part = this.bin[binIndex];
     if (!part) return { ok: false, err: "no such part" };
+    if (!this.usable(slot)) {
+      return { ok: false,
+               err: `${REPLICONS[this.replicon].name} has only `
+                 + `${String(this.usableSlots)} positions` };
+    }
     const displaced = this.at(slot);
     if (displaced?.kind === "gene" && displaced.id === "ori") {
       return { ok: false, err: "cannot displace the origin" };
@@ -179,18 +202,31 @@ export class Plasmid {
     return this.slots.reduce((a, p) => a + (p?.kind === "gene" ? GENES[p.id].kb : 0), 0);
   }
 
-  capacityKb(): number { return 18; }
+  /** Copy number multiplies product. Sub-linear, because transcription and
+   *  translation saturate long before the DNA does. */
+  dosage(): number { return dosage(REPLICONS[this.replicon].copies); }
 
-  /** Place a part in the first free slot after `from`, or fail. */
+  capacityKb(): number {
+    return REPLICONS[this.replicon].capacityKb + bonusCapacityKb(this.strain);
+  }
+
+  /** Place a part in the first free USABLE slot after `from`, or fail. */
   add(part: Part, from = 0): Result {
     if (part.kind === "gene" && this.has(part.id)) {
       return { ok: false, err: `${GENES[part.id].name} already present` };
     }
     for (let k = 0; k < SLOTS; k++) {
       const i = this.norm(from + k);
+      if (!this.usable(i)) continue;
       if (this.slots[i] === null) { this.slots[i] = part; this.touch(); return { ok: true }; }
     }
     return { ok: false, err: "no free slot on the plasmid" };
+  }
+
+  /** Is this ring position available on the current replicon? Positions past
+   *  `usableSlots` exist in the array but are not yours to fill. */
+  usable(i: number): boolean {
+    return Number.isInteger(i) && i >= 0 && i < this.usableSlots;
   }
 
   put(i: number, part: Part | null): void {
@@ -256,6 +292,18 @@ export class Plasmid {
    *  game each turn; without it every promoter would be constitutive. */
   depth = 1;
   inducers: ReadonlySet<string> = new Set();
+
+  /** Which plasmid this is. Copy number multiplies both expression and burden;
+   *  slots and capacity come from the replicon plus whatever the strain has
+   *  earned. See replicon.ts and strain.ts. */
+  replicon: RepliconId = "pbr322";
+  /** Strain level, set by the game from the notebook and the deepest floor. */
+  strain = 1;
+
+  /** Ring positions actually usable: the replicon's, plus strain bonus. */
+  get usableSlots(): number {
+    return Math.min(REPLICONS[this.replicon].slots + bonusSlots(this.strain), SLOTS);
+  }
   private context(): Context {
     return { stratum: stratum(this.depth), inducers: this.inducers };
   }
@@ -318,11 +366,12 @@ export class Plasmid {
    */
   private ensureOrigin(): void {
     if (this.slots.some((s) => s?.kind === "gene" && s.id === "ori")) return;
-    const free = this.slots.findIndex((s) => s === null);
-    const at = free >= 0 ? free : this.slots.findIndex((s) => s?.kind !== "gene");
+    const free = this.slots.findIndex((s, i) => s === null && this.usable(i));
+    const at = free >= 0 ? free
+      : this.slots.findIndex((s, i) => this.usable(i) && s?.kind !== "gene");
     const i = at >= 0 ? at : 0;
     // Direct assignment: going through put() would recurse into touch().
-    this.slots[i] = { kind: "gene", id: "ori", level: 1, mods: [] };
+    this.slots[i] = { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE };
   }
 
   /** Revision counter, exposed so tests can assert invalidation. */
@@ -362,9 +411,20 @@ export class Plasmid {
     // that silently discarded the whole attenuation model.
     e *= ctx.operon.output * ctx.flow;
     e *= this.synergy(ctx.operon, id);
-    // Modifiers and evolution level, from the part itself.
+    // Modifiers, evolution level and the rolled allele.
     const m = modEffect(slot.mods);
-    e *= m.expression * levelMultiplier(slot.level);
+    const a = alleleEffect(slot.allele);
+    e *= m.expression * a.expression * levelMultiplier(slot.level);
+    e *= this.dosage();                       // gene dosage from copy number
+    // kcat is raw turnover. Km is affinity, and a LOW Km still works when the
+    // substrate has almost run out -- which is the deep column, so it is
+    // weighted by how little supply there is.
+    // Read through the same clamp `expression` uses: reaching for the raw
+    // field here reintroduced exactly the NaN path the audit test guards.
+    const supply = Number.isFinite(this.supply)
+      ? Math.min(Math.max(this.supply, 0), 1) : 1;
+    const scarcity = 1 - supply;
+    e *= a.kcat * (1 + scarcity * (1 / Math.max(a.km, 0.2) - 1) * 0.5);
     return Math.max(e * (1 - this.burden()), 0);
   }
 
@@ -391,9 +451,48 @@ export class Plasmid {
     let c = 0;
     for (const p of this.slots) {
       if (p?.kind !== "gene") continue;
-      c += this.rawExpression(p.id, depth) * GENES[p.id].kb * COST_PER_KB;
+      const mods = modEffect(p.mods);
+      const allele = alleleEffect(p.allele);
+      c += this.rawExpression(p.id, depth) * GENES[p.id].kb * COST_PER_KB
+        * mods.upkeep * allele.upkeep;
     }
-    return c;
+    // Replicating the plasmid is most of what carrying one costs, and a
+    // high-copy origin costs proportionally more.
+    c *= copyBurden(REPLICONS[this.replicon].copies);
+    // Transcription that reads past the last gene of an operon is polymerase
+    // and nucleotide spent on nothing. THIS is why a terminator matters
+    // beyond isolating the next promoter: a leaky one wastes ATP every turn,
+    // for ever, and a tandem one is cheap to run as well as tight.
+    return c + this.wastedTranscription(depth);
+  }
+
+  /**
+   * ATP burned on transcription that produces no protein.
+   *
+   * Flow that survives the last gene in an operon and runs into a gap is real
+   * transcription with nothing downstream to translate. A hairpin leaks 38% of
+   * it; a tandem rrnB T1T2 leaks 2%.
+   */
+  wastedTranscription(depth: number): number {
+    let waste = 0;
+    for (const op of this.operons()) {
+      if (op.output <= 0) continue;
+      const last = op.genes[op.genes.length - 1];
+      const tail = last === undefined ? 1 : last.flow;
+      // What is still running after the final gene, times the promoter output.
+      let leak = tail;
+      for (let k = 1; k <= SLOTS; k++) {
+        const at = this.norm((last?.slot ?? op.promoter) + k);
+        const part = this.slots[at];
+        if (part === undefined || part === null) break;
+        if (part.kind === "promoter") break;
+        if (part.kind === "terminator") leak *= TERMINATORS[part.id].readthrough;
+        if (leak < 0.01) break;
+      }
+      waste += op.output * leak * WASTE_PER_UNIT;
+    }
+    void depth;
+    return waste;
   }
 
   /** ATP produced per action. Scaled by the stratum's energy yield, so the
@@ -408,7 +507,11 @@ export class Plasmid {
   }
 
   private computeAtpGain(depth: number): number {
-    let g = 1.2;                                    // baseline fermentation
+    // Baseline fermentation. Raised from 1.2 when transcriptional waste became
+    // a real cost: the "never dead on arrival" invariant was passing with a
+    // margin of 0.005, which is not a margin. A starting cell should be
+    // clearly viable, not arithmetically viable.
+    let g = 1.6;
     for (const p of this.slots) {
       if (p?.kind !== "gene") continue;
       const rate = GENERATORS[p.id];
@@ -497,7 +600,11 @@ export class Plasmid {
       if (p?.kind === "gene" && genes.includes(p.id)) movable.add(i);
     });
     const usable = (i: number): boolean =>
-      this.slots[this.norm(i)] === null || movable.has(this.norm(i));
+      // A slot past the replicon's last position is not free, it does not
+      // exist. `add` and `install` already refuse those; assemble did not, so
+      // it would happily lay an operon down where nothing could reach it.
+      this.usable(this.norm(i))
+      && (this.slots[this.norm(i)] === null || movable.has(this.norm(i)));
 
     const need = genes.length + 1;
     let start = -1;

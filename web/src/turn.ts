@@ -1,15 +1,18 @@
 // The turn engine: everything that happens because time passed.
 //
 // Split out of main.ts, which had reached 2272 lines and was where every save
-// and state bug in _g project has hidden. These take the Game rather than
+// and state bug in this project has hidden. These take the Game rather than
 // being methods on it, and Game keeps a one-line delegate for each, so no call
-// site and no test had to change -- which is what made a refactor _g size
+// site and no test had to change -- which is what made a refactor this size
 // verifiable rather than hopeful.
 //
 // The parameter is `_g` and not `g` because several bodies declare a local `g`
 // for a gene or a grid, and a mechanical rename to `g` silently pointed at the
 // wrong one.
 
+import { WILD_TYPE, quality, rollAllele } from "./allele.js";
+import { describeLevel, strainLevel } from "./strain.js";
+import { REPLICONS, availableAt, type RepliconId } from "./replicon.js";
 import * as bio from "./biology.js";
 import * as say from "./flavour.js";
 import { BARRIERS, barrierAt, blockedBy, degrade } from "./barrier.js";
@@ -28,10 +31,13 @@ import { microbeTurn } from "./combat.js";
 import { nextAction, type Action } from "./pursuit.js";
 import { stepClouds, stepPackets } from "./projectile.js";
 import { makeRng } from "./rng.js";
-import { recordLocus, recordSighting, resynthesise } from "./run.js";
+import { recordLocus, recordSighting } from "./run.js";
+import { creditFor, recordRun } from "./lab.js";
+import { writeLab } from "./lab_save.js";
+import { deleteSlot } from "./saves.js";
 import { findPath } from "./path.js";
 import { headingOf, turnToward } from "./motion.js";
-import { Plasmid, type Part } from "./plasmid.js";
+import type { Part } from "./plasmid.js";
 import type { ResearchRow } from "./screens.js";
 import type { Game } from "./main.js";
 
@@ -58,7 +64,7 @@ export function t_mobTurn(_g: Game): void {
     });
 
     // Particles fly and gradients decay after the microbes have acted, so a
-    // shot fired _g turn does not also land _g turn.
+    // shot fired this turn does not also land this turn.
     const arm = _g.genome.armour(_g.dungeon.depth);
     for (const h of stepPackets(_g.packets, _g.level.grid, _g.player,
                                 (x, y) => _g.dungeon.mobAt(x, y) !== undefined)) {
@@ -87,6 +93,7 @@ export function t_mobTurn(_g: Game): void {
         _g.fx.shake(2.5, 180, _g.now);
         _g.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
                                    _g.turnSeed + e.mob.y));
+        _g.lastAttacker = e.mob.name;
       } else if (e.kind === "charge") {
         // The wind-up is the warning. Ring the microbe that is about to fire.
         _g.fx.add({ kind: "ring", t0: _g.now, dur: 400, x: e.mob.x, y: e.mob.y,
@@ -125,12 +132,27 @@ export function t_mobTurn(_g: Game): void {
 
 export function t_upkeep(_g: Game): void {
     const d = _g.dungeon.depth;
-    // Conditional and inducible promoters read _g. Without it every promoter
+    // Conditional and inducible promoters read this. Without it every promoter
     // would silently behave as constitutive.
     _g.genome.depth = d;
     _g.genome.inducers = new Set(
       _g.drops.flatMap((dr) => dr.items.flatMap(
         (it) => (it.kind === "substrate" ? [it.id] : []))));
+
+    // Strain level, from what the lineage has actually catalogued. Without
+    // this the whole levelling system sits at 1 for ever and the replicons it
+    // unlocks are unreachable.
+    const level = strainLevel({
+      catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
+    });
+    if (level !== _g.genome.strain) {
+      const before = _g.genome.strain;
+      _g.genome.strain = level;
+      if (level > before) {
+        _g.toasts.push(`Strain advances to L${String(level)}.`, "info", _g.now);
+        _g.note(`The lineage has learned enough to carry more. ${describeLevel(level)}.`);
+      }
+    }
 
     // Toughness tracks the genome, so building a good plasmid is the whole of
     // character progression. Growth heals; shrinking does not kill.
@@ -156,7 +178,7 @@ export function t_upkeep(_g: Game): void {
 
       // "Each layer poses an environmental risk due to lack of means to keep
       // ATP pumps going so lifebar slowly drops until metab genes found."
-      // Without a respiration that works at _g depth you cannot hold the
+      // Without a respiration that works at this depth you cannot hold the
       // membrane potential, and you bleed until you find one.
       const shortfall = cost - gain;
       if (shortfall > 0) {
@@ -271,6 +293,7 @@ export function t_step_(_g: Game, t: number): void {
   }
 
 export function t_step(_g: Game, x: number, y: number): boolean {
+  if (_g.dead) return false;
     const m = _g.dungeon.mobAt(x, y);
     if (m) { _g.attack(m); return false; }
     if (!_g.level.grid.isFloor(x, y)) return false;
@@ -340,7 +363,9 @@ export function t_attack(_g: Game, m: Mob): void {
       const pool = m.genes.filter(
         (g) => !_g.genome.has(g) && !_g.genome.inBin(g));
       const gene = pool[rng.int(Math.max(pool.length, 1))];
-      if (gene !== undefined && rng.next() < 0.8) loot.push({ kind: "cassette", gene });
+      if (gene !== undefined && rng.next() < 0.8) {
+        loot.push({ kind: "cassette", gene, allele: rollAllele(rng, _g.dungeon.depth) });
+      }
       const subs = substratesAt(_g.dungeon.depth);
       const n = 1 + rng.int(2);
       for (let i = 0; i < n; i++) {
@@ -367,7 +392,7 @@ export function t_attack(_g: Game, m: Mob): void {
       const free = m.genes.filter((g) => !_g.genome.has(g) && !_g.genome.inBin(g));
       const direct = free[rng.int(Math.max(free.length, 1))];
       if (direct !== undefined && rng.next() < 0.25
-          && _g.genome.stash({ kind: "gene", id: direct, level: 1, mods: [] }).ok) {
+          && _g.genome.stash({ kind: "gene", id: direct, level: 1, mods: [], allele: WILD_TYPE }).ok) {
         recordLocus(_g.run, direct);
         _g.note(say.hgtLine(direct, m.name));
         _g.fx.add({ kind: "bolt", t0: _g.now + 120, dur: 380, colour: "#a0ffd0",
@@ -379,32 +404,43 @@ export function t_attack(_g: Game, m: Mob): void {
     _g.save();
   }
 
+/**
+ * The strain dies. Permanently.
+ *
+ * There is no resynthesising it in place and carrying on -- that made death a
+ * setback rather than an ending, and an ending is what gives a run its shape.
+ * What survives is what a lab keeps: the sequence data, the notebook, and the
+ * credit to order constructs for whatever goes down next.
+ */
 export function t_die(_g: Game): void {
-    const carried = [..._g.genome.carried()];
-    const kept = resynthesise(carried);
-    _g.run.deaths += 1;
-    _g.run.deepest = Math.max(_g.run.deepest, _g.dungeon.depth);
+  const carried = [..._g.genome.carried()].filter((g) => g !== "ori");
+  const best = _g.genome.slots.reduce((m, p) =>
+    p?.kind === "gene" ? Math.max(m, quality(p.allele)) : m, 1);
 
-    _g.toasts.push(
-      `Lysed at D${_g.dungeon.depth}. ${kept.length}/${carried.length - 1} loci ` +
-      `survived resynthesis.`, "warn", _g.now);
+  const outcome = {
+    floor: _g.dungeon.floor,
+    turns: _g.clock.turn,
+    catalogued: _g.run.bestiary.length,
+    bossesCleared: Math.floor((_g.dungeon.floor - 1) / 3),
+    genesCarried: carried.length,
+    bestAllele: best,
+    killedBy: _g.lastAttacker ?? "starvation",
+    won: _g.won,
+  };
+  const credit = creditFor(outcome);
+  const rec = recordRun(_g.lab, outcome, credit);
+  writeLab(_g.lab);
 
-    _g.dungeon = new Dungeon(96, 96, (Date.now() & 0xffff) ^ _g.run.deaths);
-    _g.genome = new Plasmid();
-    for (const g of kept) _g.genome.stash({ kind: "gene", id: g, level: 1, mods: [] });
-    _g.player.hp = _g.player.maxhp;
-    _g.player.atp = _g.player.atpMax;
-    _g.player.status.length = 0;
-    _g.target = null;
-    _g.autoAttack = false;
-    _g.packets.length = 0;
-    _g.clouds.length = 0;
-    _g.drops.length = 0;
-    _g.enter(_g.dungeon.current(), _g.dungeon.current().up);
-    _g.note(`Resynthesised. Deepest so far: D${_g.run.deepest}.`);
-    _g.audit();
-    _g.save();
-  }
+  _g.dead = true;
+  _g.deathRecord = rec;
+  deleteSlot(_g.slot);
+
+  _g.toasts.push(`The strain is lost. +${String(credit)} synthesis credit.`,
+                 "warn", _g.now);
+  _g.note(`Lysed on F${String(outcome.floor)} after ${String(outcome.turns)} turns. `
+    + `${String(carried.length)} loci sequenced, ${String(outcome.catalogued)} organisms `
+    + `recorded. The lab banks ${String(credit)} credit.`);
+}
 
 export function t_descend(_g: Game): void {
     if (!Dungeon.isCleared(_g.level)) {
@@ -481,7 +517,8 @@ export function t_onTile(_g: Game, x: number, y: number): void {
 
 export function t_take(_g: Game, it: Item): boolean {
     if (it.kind === "cassette") {
-      const r = _g.genome.stash({ kind: "gene", id: it.gene, level: 1, mods: [] });
+      const r = _g.genome.stash({ kind: "gene", id: it.gene, level: 1, mods: [],
+                                  allele: it.allele });
       if (!r.ok) { _g.toasts.push(r.err, "warn", _g.now); return false; }
       recordLocus(_g.run, it.gene);
       _g.note(say.pickupLine(it, 0, null));
@@ -543,6 +580,10 @@ export function t_describeTile(_g: Game, x: number, y: number): void {
   }
 
 export function t_research(_g: Game, row: ResearchRow): void {
+  if (row.kind === "subclone") {
+    if (row.replicon !== undefined) t_subclone(_g, row.replicon);
+    return;
+  }
     if (row.kind === "evolve") {
       // Selecting is always allowed; paying is not.
       _g.researchPick = row.gene;
@@ -628,3 +669,89 @@ export function t_repath(_g: Game): void {
     _g.path = findPath(_g.level.grid, { x: _g.player.x, y: _g.player.y },
                          _g.cursor, { diagonal: _g.settings.diagonal });
   }
+
+
+/**
+ * Catabolise a cassette: eat the DNA.
+ *
+ * This is not a game convenience. Extracellular DNA is a real nutrient --
+ * competent bacteria take it up for phosphate, nitrogen and carbon as readily
+ * as for the information in it, and in sediments eDNA is a significant part of
+ * the phosphorus budget. A long gene is simply more nucleotide.
+ *
+ * It is also the loot sink the hunt needs: a junk roll of a gene you already
+ * carry is worth something, so screening a hundred cassettes for one good
+ * mtrC is not a hundred wasted pickups.
+ */
+export function t_catabolise(_g: Game, binIndex: number): void {
+  const part = _g.genome.bin[binIndex];
+  if (part === undefined) return;
+  if (part.kind === "gene" && part.id === "ori") {
+    _g.toasts.push("Not the origin.", "warn", _g.now);
+    return;
+  }
+
+  const kb = part.kind === "gene" ? bio.GENES[part.id].kb
+    : part.kind === "promoter" ? 0.1 : 0.06;
+  // A better allele is more intact DNA and yields more, which keeps the choice
+  // honest: eating a good roll costs you the good roll.
+  const grade = part.kind === "gene" ? quality(part.allele) : 1;
+  const hp = Math.max(Math.round(kb * 2.4 * grade), 1);
+  const atp = Math.max(Math.round(kb * 5.5 * grade), 1);
+
+  _g.genome.bin.splice(binIndex, 1);
+  _g.player.hp = Math.min(_g.player.hp + hp, _g.player.maxhp);
+  _g.player.atp = Math.min(_g.player.atp + atp, _g.player.atpMax);
+  _g.fx.add({ kind: "ring", t0: _g.now, dur: 460, x: _g.player.x, y: _g.player.y,
+              colour: "#a0ffd0", r: 1.8 });
+  _g.note(`You digest the cassette. ${kb.toFixed(1)} kb of nucleotide, `
+    + `recovered as phosphate and base. +${String(hp)} hp, +${String(atp)} ATP.`);
+  _g.save();
+}
+
+
+/**
+ * Move the whole plasmid onto a different replicon.
+ *
+ * Subcloning: you are lifting every part off one backbone and ligating it onto
+ * another. It costs ATP and a turn, it fails if the new replicon cannot hold
+ * what you are carrying, and parts that no longer fit go to the bin rather
+ * than being destroyed -- losing loot to a UI decision would be indefensible.
+ */
+export function t_subclone(_g: Game, to: RepliconId): void {
+  const def = REPLICONS[to];
+  if (_g.genome.replicon === to) return;
+  if (!availableAt(_g.genome.strain).some((r) => r.id === to)) {
+    _g.toasts.push(`${def.name} needs strain L${String(def.unlock)}.`, "warn", _g.now);
+    return;
+  }
+  const cost = 30 + def.copies;
+  if (_g.player.atp < cost) {
+    _g.toasts.push(`Subcloning needs ${String(cost)} ATP.`, "warn", _g.now);
+    return;
+  }
+
+  const before = _g.genome.replicon;
+  _g.genome.replicon = to;
+  _g.player.atp = Math.max(_g.player.atp - cost, 0);
+
+  // Anything past the new replicon's last position comes off the backbone. It
+  // goes to the bin if there is room, and only then is it lost.
+  let displaced = 0, lost = 0;
+  for (let i = _g.genome.slots.length - 1; i >= 0; i--) {
+    if (_g.genome.usable(i)) continue;
+    const part = _g.genome.slots[i];
+    if (part === undefined || part === null) continue;
+    _g.genome.put(i, null);
+    displaced++;
+    if (!_g.genome.stash(part).ok) lost++;
+  }
+
+  _g.note(`Subcloned from ${REPLICONS[before].name} onto ${def.name}. ${def.note}`);
+  if (displaced > 0) {
+    _g.note(`${String(displaced)} part${displaced === 1 ? "" : "s"} would not fit `
+      + `and came off the backbone${lost > 0 ? `; ${String(lost)} had nowhere to go` : ""}.`);
+  }
+  _g.mobTurn();
+  _g.save();
+}

@@ -6,6 +6,9 @@
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
+import { REPLICONS, type RepliconId } from "./replicon.js";
+import { PREFIXES, SUFFIXES, WILD_TYPE, type Allele, type PrefixId,
+         type SuffixId } from "./allele.js";
 import { MAX_LEVEL, MODIFIERS, PROMOTERS, TERMINATORS, modifierSlots,
          type ModifierId, type PromoterId, type TerminatorId } from "./parts.js";
 
@@ -27,7 +30,7 @@ export interface Settings {
 /** Bump when the shape changes incompatibly. A save from an older schema is
  *  discarded rather than half-loaded: `version` was being written and never
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
-export const SCHEMA = 8;
+export const SCHEMA = 10;
 
 export interface SaveData {
   readonly version: number;
@@ -46,6 +49,8 @@ export interface SaveData {
   readonly heldMods: readonly ModifierId[];
   /** Turn count, so the diel cycle resumes rather than restarting at dawn. */
   readonly turn: number;
+  /** Which plasmid the strain is carrying. */
+  readonly replicon: RepliconId;
   /** Clock turn each visited floor was last stocked, so the pump does not
    *  reset on reload and a stripped floor stays stripped. */
   readonly stocked: readonly [number, number][];
@@ -77,6 +82,23 @@ const LEGACY_PROMOTER: Readonly<Record<string, PromoterId>> = {
   weak: "j23114", medium: "j23106", strong: "j23119",
 };
 
+/** A saved allele, clamped to what a roll can actually produce. A hand-edited
+ *  save must not out-perform anything reachable in play. */
+function parseAllele(v: unknown): Allele {
+  if (!isRecord(v)) return WILD_TYPE;
+  const band = (x: unknown): number =>
+    Math.min(Math.max(num(x, 1), 0.4), 2.2);
+  const pre = v["prefix"];
+  const suf = v["suffix"];
+  return {
+    kcat: band(v["kcat"]), km: band(v["km"]), stability: band(v["stability"]),
+    prefix: typeof pre === "string"
+      && Object.prototype.hasOwnProperty.call(PREFIXES, pre) ? pre as PrefixId : null,
+    suffix: typeof suf === "string"
+      && Object.prototype.hasOwnProperty.call(SUFFIXES, suf) ? suf as SuffixId : null,
+  };
+}
+
 function parsePart(v: unknown): Part | null {
   if (!isRecord(v)) return null;
   const kind = v["kind"];
@@ -106,7 +128,8 @@ function parsePart(v: unknown): Part | null {
     // Never keep more modifiers than the level allows, or a hand-edited save
     // would out-perform anything reachable in play.
     return { kind: "gene", id: v["id"], level,
-             mods: mods.slice(0, modifierSlots(level)) };
+             mods: mods.slice(0, modifierSlots(level)),
+             allele: parseAllele(v["allele"]) };
   }
   return null;
 }
@@ -197,6 +220,9 @@ export function parseSave(raw: unknown): SaveData | null {
       ? (raw["heldMods"] as unknown[]).filter(isModifierId).slice(0, 40)
       : [],
     turn: Math.min(Math.max(Math.round(num(raw["turn"], 0)), 0), 1e7),
+    replicon: typeof raw["replicon"] === "string"
+      && Object.prototype.hasOwnProperty.call(REPLICONS, raw["replicon"])
+      ? raw["replicon"] as RepliconId : "pbr322",
     stocked: Array.isArray(raw["stocked"])
       ? (raw["stocked"] as unknown[]).flatMap((e): [number, number][] =>
           Array.isArray(e) && e.length === 2

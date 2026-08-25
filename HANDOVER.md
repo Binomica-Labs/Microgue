@@ -275,6 +275,152 @@ Schema 6. `strength: "strong"` becomes `id: "j23119"`, `optimised: true`
 becomes the `codon` modifier. A hand-edited save is clamped to what play
 allows: level to MAX_LEVEL, modifiers to what the level permits.
 
+## Permadeath and the lab
+
+A run is one strain sent down the column. When it dies it DIES -- no more
+resynthesising in place and carrying on, which made death a setback rather than
+an ending. What survives is what a lab actually keeps: the sequence data, the
+notebook, and the standing order with the synthesis company.
+
+That framing is not decoration. Modern molecular biology is largely "order the
+construct" -- nobody isolates a gene from an organism any more. So SYNTHESIS
+CREDIT earned by one strain buys constructs for the next, and the
+meta-progression is the laboratory getting better funded rather than the
+microbe getting mysteriously stronger.
+
+Measured curve:
+
+    died on F2, nothing recorded        22
+    died on F6, 4 organisms            134
+    died on F12, 10 organisms          318
+    died on F21, 17 organisms          566
+    reached the bottom                1088
+
+    psbA 72   mtrC 148   mcrA 207   pUC19 285   BAC 505   strain L2 140
+
+Depth dominates because depth is the game, but it cannot be the ONLY term or
+the optimal play is to dive blindly past everything -- so cataloguing, clearing
+strata and the quality of the alleles recovered all pay. `spec` asserts each of
+those contributes.
+
+**The lab is saved SEPARATELY from the run**, in its own key. A run save belongs
+to a slot and dies with the strain; putting the lab there would mean deleting a
+save, or dying, took the whole meta-progression with it. There is a test that
+deletes every slot and checks the credit survived.
+
+The ledger records every attempt -- how deep, how long, what killed it -- and
+the deepest floor ever reached is on the splash screen, which is the first
+thing you see every time. Crawl keeps morgue files for the same reason: the
+record of the attempts IS the long game.
+
+## Built is not wired
+
+Three systems shipped at v0.59 with none of them connected to the loop:
+`genome.strain` was never assigned, `strainLevel()` was never called, and there
+was no way to change replicon at all -- so the entire build space was inert and
+every plasmid was pBR322 for ever. The tests passed because they exercised the
+modules directly.
+
+The lesson is the test shape, not the wiring: `test/soak.test.ts` now has a
+"reachable from play" block that goes through the real `Game` for each new
+system. A module test proves the maths; only a Game test proves the feature
+exists.
+
+Two related things that fell out of the same pass:
+
+* `assemble` did not respect `usableSlots`, so it would lay an operon down past
+  the replicon's last position where nothing could reach it. `add` and
+  `install` already refused those.
+* The v0.55 refactor's mechanical `this.` -> `_g.` rename had rewritten twelve
+  COMMENTS into nonsense ("promoters read _g"). Repaired.
+
+## Replicons, not attack/defence/utility plasmids
+
+The request was for separate attack / defence / utility plasmids. Bacteria do
+carry several plasmids at once -- but they are divided by REPLICON, not by
+function, and that distinction generates better builds because it comes with
+two real constraints:
+
+**Copy number.** A pUC origin sits at hundreds of copies and a BAC at one.
+Copy number multiplies expression AND burden. Measured, all with one gene and
+a tandem terminator: pUC19 gives 1.83 expression at 3.40 ATP; a BAC gives 0.52
+at 0.42. Every replicon stays net positive, so none is simply correct.
+
+**Incompatibility.** Two plasmids sharing replication control partition against
+each other. Inc groups are why a strain carries four plasmids and not five of
+the same kind, and they are what will make "which plasmids" a decision when
+multiple simultaneous plasmids land -- the system is built for it, the UI is
+not there yet.
+
+Dosage and burden are NORMALISED to pBR322. The whole economy was tuned against
+one implicit plasmid; making that the centre meant introducing replicons
+re-balanced nothing.
+
+**`SLOTS` was defined twice and the two disagreed** -- 16 in plasmid.ts, 24 in
+transcription.ts -- so the largest replicon was silently clamped and levelling
+appeared to do nothing.
+
+## Strain level
+
+Not experience points. A strain advances by CATALOGUING: breadth in the
+notebook and depth in the column, both required. It buys replicon access and
+headroom, never raw power -- `spec` asserts expression is untouched by level.
+The notebook was a score; it is the progression now.
+
+## Terminators cost ATP
+
+Transcription that runs past the last gene of an operon is polymerase and
+nucleotide spent on nothing. A bare hairpin wastes 0.62 ATP a turn for ever; a
+tandem rrnB T1T2 wastes 0.02; no terminator at all wastes 1.48. That is what
+makes the choice matter every turn rather than only when something sits
+downstream.
+
+The starting vector now ships WITH a terminator, because a real vector has one
+and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
+Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
+invariant was passing with a margin of 0.005, which is not a margin.
+
+## Alleles: the loot roll
+
+Two copies of the same gene are not the same enzyme. Homologues differ in
+turnover, in affinity and in how long they survive; that is ordinary sequence
+variation, and it is why directed evolution works. So a cassette is a BASE (the
+gene) plus a rolled ALLELE, and hunting a better roll of a gene you already
+carry is screening a library -- which is what a microbiologist does.
+
+The rolled parameters are the ones an enzymologist measures:
+
+    kcat       turnover. Raw output.
+    km         affinity. LOW is good, and a low-Km enzyme still works when the
+               substrate has nearly run out -- so it is weighted by SCARCITY,
+               which makes affinity the deep-column stat.
+    stability  resists denaturation.
+
+Affixes are real provenance with real trades: thermostable enzymes are slower,
+psychrophilic ones fragile, chimeras fold badly, resurrected ancestors are
+stable and promiscuous and worse at any one reaction. `spec` asserts every
+affix has both an upside and a downside -- it caught FOUR that were pure wins.
+
+**Tuning notes, because the first two attempts were wrong.** `1/km` is
+asymmetric: 0.55 reads as 1.8 while 1.45 reads as 0.69, so using it raw made
+every roll look good and nothing came out common. And an affix chance of
+`0.16 + d*0.045` filled both slots a quarter of the time at depth, making a
+third of deep drops top-tier. Measured now: 95.7% of surface psbA finds are
+common; a legendary mtrC is 3.2% at D8.
+
+## DNA is food
+
+`t_catabolise` eats a cassette for hp and ATP. Extracellular DNA is a genuine
+nutrient -- competent bacteria take it up for phosphate, nitrogen and carbon as
+readily as for the information, and in sediments eDNA is a real part of the
+phosphorus budget. Yield scales with kb and with the roll, so eating a good
+allele costs you the good allele.
+
+It is also the sink the hunt needs: a junk roll of a gene you already carry is
+worth something, so screening a hundred cassettes is not a hundred wasted
+pickups. The eat target is its OWN box on the item card, because catabolising
+is destructive and must not be the same tap that dismisses the card.
+
 ## The column feeds from the top
 
 `production.ts`. A Winogradsky column is fed by phototrophs in the photic zone;

@@ -1,3 +1,4 @@
+import { WILD_TYPE } from "../src/allele.js";
 import { drawItemCard } from "../src/plasmid_ui.js";
 import type { Part } from "../src/plasmid.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,7 +143,7 @@ describe("the real render path", () => {
       g.startRun(0);
       // Give it something to work on, including a held modifier.
       g.genome.put(4, { kind: "promoter", id: "j23119" });
-      g.genome.put(5, { kind: "gene", id: "mtrC", level: 2, mods: ["codon"] });
+      g.genome.put(5, { kind: "gene", id: "mtrC", level: 2, mods: ["codon"], allele: WILD_TYPE });
       g.mods.push("rbs", "chaperone");
       g.press("research");
       expect(() => { g.frame(16); }).not.toThrow();
@@ -163,10 +164,10 @@ describe("the real render path", () => {
   it("the item card draws for every kind of part", async () => {
     const g = await makeGame();
     g.startRun(0);
-    g.genome.put(5, { kind: "gene", id: "mcrA", level: 3, mods: ["codon", "rbs"] });
+    g.genome.put(5, { kind: "gene", id: "mcrA", level: 3, mods: ["codon", "rbs"], allele: WILD_TYPE });
     const parts: Part[] = [
-      { kind: "gene", id: "mcrA", level: 3, mods: ["codon", "rbs"] },
-      { kind: "gene", id: "psbA", level: 1, mods: [] },
+      { kind: "gene", id: "mcrA", level: 3, mods: ["codon", "rbs"], allele: WILD_TYPE },
+      { kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE },
       { kind: "promoter", id: "plac" },
       { kind: "terminator", id: "rrnbt1t2" },
     ];

@@ -23,6 +23,8 @@ import { covers, tilesOf } from "./footprint.js";
 import type { Plasmid } from "./plasmid.js";
 import { BIN_CAP, SLOTS } from "./plasmid.js";
 import { MAX_LEVEL, modifierSlots } from "./parts.js";
+import { REPLICONS } from "./replicon.js";
+import { MAX_STRAIN } from "./strain.js";
 import type { Barrier } from "./barrier.js";
 import type { Drop } from "./items.js";
 import type { Packet, Cloud } from "./projectile.js";
@@ -117,6 +119,42 @@ export const INVARIANTS: Readonly<Record<string, Check>> = {
       if (e > 100) return `${p.id} expresses at ${String(e)}, which is absurd`;
     }
     return null;
+  },
+
+  "the replicon is real and unlocked": (w) => {
+    const r = w.plasmid.replicon;
+    if (!Object.prototype.hasOwnProperty.call(REPLICONS, r)) {
+      return `unknown replicon ${r}`;
+    }
+    if (REPLICONS[r].unlock > w.plasmid.strain) {
+      return `carrying ${REPLICONS[r].name}, which needs strain `
+        + `L${String(REPLICONS[r].unlock)} and the strain is L${String(w.plasmid.strain)}`;
+    }
+    return null;
+  },
+
+  "strain level is within its band": (w) =>
+    Number.isInteger(w.plasmid.strain) && w.plasmid.strain >= 1
+      && w.plasmid.strain <= MAX_STRAIN
+      ? null : `strain is ${String(w.plasmid.strain)}`,
+
+  "nothing occupies a slot the replicon does not have": (w) => {
+    // Subcloning onto a smaller backbone must clear what will not fit. A part
+    // stranded past the last usable position is invisible and untouchable.
+    for (let i = 0; i < w.plasmid.slots.length; i++) {
+      if (w.plasmid.usable(i)) continue;
+      if (w.plasmid.slots[i] !== null && w.plasmid.slots[i] !== undefined) {
+        return `a part sits at position ${String(i)}, past the `
+          + `${String(w.plasmid.usableSlots)} the replicon provides`;
+      }
+    }
+    return null;
+  },
+
+  "wasted transcription is finite and non-negative": (w) => {
+    const waste = w.plasmid.wastedTranscription(w.level.depth);
+    return Number.isFinite(waste) && waste >= 0
+      ? null : `wasted transcription is ${String(waste)}`;
   },
 
   // --- the player ----------------------------------------------------------

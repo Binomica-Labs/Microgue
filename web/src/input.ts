@@ -31,7 +31,30 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       return;
     }
     // A card is modal within the plasmid screen: one tap anywhere dismisses it.
-    if (_g.card !== null) { _g.card = null; _g.gesture = "none"; return; }
+    // A card is modal. Tapping the eat target catabolises the part; anywhere
+    // else dismisses. Eating destroys the cassette, so it gets its own target
+    // rather than being the same tap that closes the card.
+    if (_g.card !== null) {
+      if (_g.cardEat !== null && inBoxOf(_g.cardEat, x, y) && _g.cardIndex >= 0) {
+        _g.catabolise(_g.cardIndex);
+      }
+      _g.card = null;
+      _g.cardIndex = -1;
+      _g.gesture = "none";
+      return;
+    }
+    // While the lab screen is up, taps buy things. Closing it starts the next
+    // strain, so there is no way to accidentally resume a dead one.
+    if (_g.dead || _g.showLab) {
+      const hit = _g.shopRows.find((r) => inBoxOf(r.box, x, y));
+      if (hit) { _g.order(hit.offer); _g.gesture = "none"; return; }
+      if (_g.inClose(x, y)) {
+        _g.showLab = false;
+        if (_g.dead) { _g.dead = false; _g.showSplash = true; _g.started = false; }
+      }
+      _g.gesture = "none";
+      return;
+    }
     if (_g.showResearch) {
       if (_g.inClose(x, y)) { _g.showResearch = false; _g.gesture = "none"; return; }
       const hit = _g.researchRows.find((r) => inBoxOf(r.box, x, y));
@@ -145,6 +168,8 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
           // A tap that never moved is an inspect, not a failed drag.
           if (_g.panMoved < 8 && target === null) {
             _g.card = _g.genome.bin[_g.dragBin] ?? null;
+          _g.cardIndex = _g.dragBin;
+          _g.cardIndex = _g.dragBin;
             _g.dragBin = null;
             _g.dragXY = null;
             _g.gesture = "none";

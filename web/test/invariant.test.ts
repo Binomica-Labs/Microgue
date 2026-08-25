@@ -1,3 +1,4 @@
+import { WILD_TYPE } from "../src/allele.js";
 import { describe, expect, it } from "vitest";
 import * as bio from "../src/biology.js";
 import { Dungeon, MAX_FLOOR } from "../src/dungeon.js";
@@ -106,25 +107,27 @@ describe("every failing mutation is atomic", () => {
   const cases: [string, () => Plasmid, (p: Plasmid) => { ok: boolean }][] = [
     ["stash a duplicate", () => {
       const p = new Plasmid();
-      p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
+      p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
       return p;
-    }, (p) => p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] })],
+    }, (p) => p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE })],
 
     ["stash into a full bin", () => {
       const p = new Plasmid();
       while (p.stash({ kind: "terminator", id: "rrnbt1" }).ok) { /* fill */ }
       return p;
-    }, (p) => p.stash({ kind: "gene", id: "psbA", level: 1, mods: [] })],
+    }, (p) => p.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE })],
 
     ["add to a full ring", () => {
       const p = new Plasmid();
-      for (let i = 0; i < 16; i++) p.put(i, { kind: "terminator", id: "rrnbt1" });
+      // Only the USABLE positions: filling past the replicon's last slot puts
+      // parts where the plasmid cannot reach them, which is itself a violation.
+      for (let i = 0; i < p.usableSlots; i++) p.put(i, { kind: "terminator", id: "rrnbt1" });
       return p;
-    }, (p) => p.add({ kind: "gene", id: "psbA", level: 1, mods: [] })],
+    }, (p) => p.add({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE })],
 
     ["install onto the origin", () => {
       const p = new Plasmid();
-      p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] });
+      p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
       return p;
     }, (p) => p.install(p.bin.findIndex((x) => x.kind === "gene"),
                         p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori"))],
@@ -138,7 +141,7 @@ describe("every failing mutation is atomic", () => {
 
     ["uninstall into a full bin", () => {
       const p = new Plasmid();
-      p.put(9, { kind: "gene", id: "mtrC", level: 1, mods: [] });
+      p.put(9, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
       while (p.stash({ kind: "terminator", id: "rrnbt1" }).ok) { /* fill */ }
       return p;
     }, (p) => p.uninstall(9)],
@@ -154,7 +157,7 @@ describe("every failing mutation is atomic", () => {
     ["assemble with no spare promoter", () => {
       const p = new Plasmid();
       for (const g of ["sat", "aprA", "dsrA"] as bio.GeneId[]) {
-        p.stash({ kind: "gene", id: g, level: 1, mods: [] });
+        p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
       }
       while (p.bin.some((x) => x.kind === "promoter")) {
         p.bin.splice(p.bin.findIndex((x) => x.kind === "promoter"), 1);
@@ -165,9 +168,11 @@ describe("every failing mutation is atomic", () => {
     ["assemble with no contiguous room", () => {
       const p = new Plasmid();
       for (const g of ["sat", "aprA", "dsrA"] as bio.GeneId[]) {
-        p.stash({ kind: "gene", id: g, level: 1, mods: [] });
+        p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
       }
-      for (let i = 0; i < 16; i++) if (p.at(i) === null) p.put(i, { kind: "terminator", id: "rrnbt1" });
+      for (let i = 0; i < p.usableSlots; i++) {
+        if (p.at(i) === null) p.put(i, { kind: "terminator", id: "rrnbt1" });
+      }
       return p;
     }, (p) => p.assemble(["sat", "aprA", "dsrA"])],
   ];
@@ -201,7 +206,7 @@ describe("every failing mutation is atomic", () => {
   it("a successful mutation always changes something", () => {
     const p = new Plasmid();
     const before = snap(p);
-    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [] }).ok).toBe(true);
+    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(true);
     expect(snap(p), "success must not be a no-op").not.toBe(before);
   });
 });
@@ -230,8 +235,8 @@ const BREAKERS: Readonly<Record<string, () => WorldView>> = {
   },
   "no gene is carried twice": () => {
     const p = new Plasmid();
-    p.slots[5] = { kind: "gene", id: "mtrC", level: 1, mods: [] };
-    p.bin.push({ kind: "gene", id: "mtrC", level: 1, mods: [] });
+    p.slots[5] = { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE };
+    p.bin.push({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     return world({ plasmid: p });
   },
   "expression supply is a fraction": () => {
@@ -242,21 +247,44 @@ const BREAKERS: Readonly<Record<string, () => WorldView>> = {
   "no gene carries more modifiers than its level allows": () => {
     const p = new Plasmid();
     p.slots[5] = { kind: "gene", id: "mtrC", level: 1,
-                   mods: ["codon", "rbs", "chaperone"] };
+                   mods: ["codon", "rbs", "chaperone"], allele: WILD_TYPE };
     return world({ plasmid: p });
   },
   "no gene is evolved past the cap": () => {
     const p = new Plasmid();
-    p.slots[5] = { kind: "gene", id: "mtrC", level: 99, mods: [] };
+    p.slots[5] = { kind: "gene", id: "mtrC", level: 99, mods: [], allele: WILD_TYPE };
     return world({ plasmid: p });
   },
   "expression is finite and non-negative everywhere": () => {
     const p = new Plasmid();
     p.put(4, { kind: "promoter", id: "j23119" });
-    p.slots[5] = { kind: "gene", id: "mtrC", level: 1, mods: [] };
+    p.slots[5] = { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE };
     // Reach past the clamp: the invariant is the last line of defence.
     Object.defineProperty(p, "supply", { value: NaN, writable: true });
     (p as unknown as { rawExpression: unknown }).rawExpression = () => NaN;
+    return world({ plasmid: p });
+  },
+  "the replicon is real and unlocked": () => {
+    const p = new Plasmid();
+    p.strain = 1;
+    p.replicon = "bac";          // needs L7
+    return world({ plasmid: p });
+  },
+  "strain level is within its band": () => {
+    const p = new Plasmid();
+    p.strain = 99;
+    return world({ plasmid: p });
+  },
+  "nothing occupies a slot the replicon does not have": () => {
+    const p = new Plasmid();
+    p.replicon = "puc";          // 10 slots
+    p.strain = 3;
+    p.slots[20] = { kind: "terminator", id: "rrnbt1" };
+    return world({ plasmid: p });
+  },
+  "wasted transcription is finite and non-negative": () => {
+    const p = new Plasmid();
+    Object.defineProperty(p, "wastedTranscription", { value: () => NaN });
     return world({ plasmid: p });
   },
   "player is alive and not over-healed": () => {

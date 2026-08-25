@@ -25,7 +25,8 @@ import { traceWalls } from "./walls.js";
 import { timeName } from "./cycle.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
-import { drawContainer, drawNotes, drawResearch, drawSplash } from "./screens.js";
+import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash }
+  from "./screens.js";
 import { NAME_POOL } from "./saves.js";
 import { Effects, easeInQuad as easeInQuadLocal, easeOutCubic, easeOutQuad }
   from "./fx.js";
@@ -44,12 +45,12 @@ export function r_draw(_g: Game): void {
 
     // Before any world state is touched. This guard used to sit below
     // `_g.level.stratum`, so with no run started draw() threw on its fourth
-    // line -- and because the toast renderer lives at the bottom of _g same
+    // line -- and because the toast renderer lives at the bottom of this same
     // function, the error it queued was never drawn either. Black screen, no
-    // diagnostic, which is precisely the failure _g was meant to prevent.
+    // diagnostic, which is precisely the failure this was meant to prevent.
     if (_g.showSplash || !_g.started) {
       _g.closeBox = drawSplash(ctx, W, H, _g.insets(),
-        Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, NAME_POOL);
+        Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, NAME_POOL, _g.lab);
       _g.drawToasts(W, H);
       return;
     }
@@ -76,7 +77,7 @@ export function r_draw(_g: Game): void {
     // as organic rather than tiled. All tiles go into a single path and fill
     // together under nonzero winding, so shared edges leave no seam.
     // One Path2D, used for both the fill and the motif clip. Tracing twice a
-    // frame cost 29 us; _g halves it and the geometry is identical by
+    // frame cost 29 us; this halves it and the geometry is identical by
     // construction rather than by hoping the two calls match.
     const wallPath = new Path2D();
     traceWalls(wallPath, _g.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
@@ -338,13 +339,22 @@ export function r_draw(_g: Game): void {
     }
     _g.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    // Death takes over the screen: the run has to have an ending you can read.
+    if (_g.dead || _g.showLab) {
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      _g.closeBox = drawLab(ctx, W, H, _g.insets(), u, _g.lab, _g.deathRecord,
+                            _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max));
+      r_drawToasts(_g, W, H);
+      return;
+    }
     if (_g.showResearch) {
       const u = Math.max(Math.min(W, H) / 420, 1);
       _g.closeBox = drawResearch(ctx, W, H, _g.insets(), u,
         _g.genome.slots.flatMap((p) =>
           p?.kind === "gene" && p.id !== "ori"
             ? [{ id: p.id, level: p.level, mods: p.mods }] : []),
-        _g.mods, _g.player.atp, _g.researchPick, _g.researchRows);
+        _g.mods, _g.player.atp, _g.researchPick, _g.researchRows,
+        _g.genome.strain, _g.genome.replicon);
       _g.drawToasts(W, H);
       return;
     }
@@ -680,7 +690,7 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
                  _g.bin.x, _g.bin.y - 6 * u);
     drawBin(ctx, _g.bin, _g.genome.bin, u, _g.dragBin);
     const binRows = Math.floor(_g.genome.bin.length / 6) + 1;
-    // Deferred: the card belongs on top of everything else on _g screen.
+    // Deferred: the card belongs on top of everything else on this screen.
     const card = _g.card;
 
     // Active complexes and hazards, which is the payoff for arranging well.
@@ -722,8 +732,10 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     // button press dismiss the screen in the same gesture that opened it.
     _g.closeBox = drawClose(ctx, W, ins, u);
     if (card) {
-      drawItemCard(ctx, W, H, u, card, _g.genome, _g.dungeon.depth,
-                   (s, max) => _g.wrap(s, max));
+      _g.cardEat = drawItemCard(ctx, W, H, u, card, _g.genome, _g.dungeon.depth,
+                                (s, max) => _g.wrap(s, max),
+                                _g.cardIndex >= 0
+                                  && !(card.kind === "gene" && card.id === "ori"));
     }
   }
 
@@ -735,7 +747,7 @@ export function r_drawMapScreen(_g: Game, W: number, H: number): void {
     ctx.fillRect(0, 0, W, H);
 
     // Frame what you have unlocked. The whole diagram put your own metabolism
-    // in a corner of a mostly dark chart; _g centres it and leaves the rest
+    // in a corner of a mostly dark chart; this centres it and leaves the rest
     // to be found by panning.
     if (!_g.view) {
       const vh = H - ins.top - ins.bottom - 60 * u;

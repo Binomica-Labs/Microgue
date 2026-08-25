@@ -12,16 +12,23 @@
 // and seals it -- and it makes gene ORDER matter beyond simple polarity.
 
 import type { GeneId } from "./biology.js";
+import { alleleEffect, type Allele } from "./allele.js";
 import { MODIFIERS, PROMOTERS, TERMINATORS, levelMultiplier,
          type Context, type ModifierId, type PromoterId, type TerminatorId }
   from "./parts.js";
 
 export type Part =
-  | { kind: "gene"; id: GeneId; level: number; mods: ModifierId[] }
+  | { kind: "gene"; id: GeneId; level: number; mods: ModifierId[];
+      /** The rolled variant. Two copies of a gene are not the same enzyme. */
+      allele: Allele }
   | { kind: "promoter"; id: PromoterId }
   | { kind: "terminator"; id: TerminatorId };
 
-export const SLOTS = 16;
+/** Ring positions in the array. The REPLICON decides how many of them you may
+ *  actually use -- this is the ceiling, sized for the largest replicon plus
+ *  everything a strain can earn. A BAC has 22 positions and was being silently
+ *  clamped to 16. */
+export const SLOTS = 24;
 
 /** Polarity: expression decays with distance from the promoter. */
 const POLARITY = 0.82;
@@ -130,5 +137,6 @@ export function expressionAt(
     }
   }
   const m = modEffect(part.mods);
-  return total * m.expression * levelMultiplier(part.level);
+  const a = alleleEffect(part.allele);
+  return total * m.expression * a.expression * levelMultiplier(part.level);
 }

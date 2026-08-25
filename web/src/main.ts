@@ -7,7 +7,8 @@ import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
          i_pointerMove, i_pointerUp, i_press } from "./input.js";
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,
          t_look, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
-         t_take, t_takeTurn, t_upkeep, t_win, t_world } from "./turn.js";
+         t_take, t_takeTurn, t_upkeep, t_win, t_world, t_catabolise,
+         t_subclone } from "./turn.js";
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { ATP_MAX, Plasmid } from "./plasmid.js";
@@ -36,6 +37,12 @@ import { ROOM_STYLE, type Room } from "./rooms.js";
 import { type WorldView } from "./invariants.js";
 import { installGlobalHandlers, on } from "./safety.js";
 import { capacityAt, describeStock, restockAmount } from "./production.js";
+import { WILD_TYPE,rollAllele } from "./allele.js";
+import type { RepliconId } from "./replicon.js";
+import { newLab, type Lab, type RunRecord } from "./lab.js";
+import { readLab, writeLab } from "./lab_save.js";
+import { buy, type Offer } from "./lab.js";
+import type { ShopRow } from "./screens.js";
 import { exportAnnotation, newRun, 
          type RunState } from "./run.js";
 import { SOURCES, cached, fetchAll } from "./ncbi.js";
@@ -123,6 +130,15 @@ class Game {
   /** Modifiers held but not yet attached to a gene. */
   mods: ModifierId[] = [];
   won = false;
+  /** Set when the strain dies. A dead strain does not act. */
+  dead = false;
+  deathRecord: RunRecord | null = null;
+  showLab = false;
+  shopRows: ShopRow[] = [];
+  /** Whatever last hurt the player, for the ledger. */
+  lastAttacker: string | null = null;
+  /** Persists across every strain. Saved separately from the run. */
+  lab: Lab = newLab();
   showResearch = false;
   /** @internal: public because input routing lives in input.ts */
   researchRows: ResearchRow[] = [];
@@ -131,6 +147,9 @@ class Game {
   /** A part being inspected. Null when no card is open. */
   /** @internal: public because input routing lives in input.ts */
   card: Part | null = null;
+  /** Bin index of the part on the card, and its eat target, if any. */
+  cardIndex = -1;
+  cardEat: Box | null = null;
   clock: Clock = newClock();
   openDrop: Drop | null = null;
   dropBoxes: Box[] = [];
@@ -153,6 +172,7 @@ class Game {
     this.ctx = ctx;
     // The splash decides what to load, so boot does not.
     migrateLegacy();
+    this.lab = readLab();
     try {
       if (localStorage.getItem("microgue:updated") === "1") {
         localStorage.removeItem("microgue:updated");
@@ -228,7 +248,7 @@ class Game {
             const genes = bio.microbesAt(s.depth).flatMap((p) => [...p.genes]);
             const g = genes[lootRng.int(Math.max(genes.length, 1))];
             if (g !== undefined && !this.genome.has(g) && !this.genome.inBin(g)) {
-              items.push({ kind: "cassette", gene: g });
+              items.push({ kind: "cassette", gene: g, allele: rollAllele(lootRng, s.depth) });
             }
           }
           addDrop(this.drops, t.x, t.y, items);
@@ -330,6 +350,31 @@ class Game {
   /** The bottom of the column, with the last thing on it dead. */
   win(): void { t_win(this); }
 
+  /** Eat a cassette from the bin: DNA is food as well as information. */
+  catabolise(i: number): void { t_catabolise(this, i); }
+
+  /** Move the whole plasmid onto a different backbone. */
+  subclone(to: RepliconId): void { t_subclone(this, to); }
+
+  /** Order a construct with banked credit. */
+  order(offer: Offer): void {
+    const r = buy(this.lab, offer);
+    if (!r.ok) { this.toasts.push(r.err, "warn", this.now); return; }
+    writeLab(this.lab);
+    this.toasts.push(`Ordered ${offer.name}. ${String(this.lab.credit)} credit left.`,
+                     "info", this.now);
+  }
+
+  /** Every gene the lab has ever seen, which is what it may order. */
+  known(): bio.GeneId[] {
+    const out = new Set<bio.GeneId>(this.lab.stock);
+    for (const id of this.run.library) out.add(id);
+    for (const m of bio.MICROBES) {
+      if (this.run.bestiary.includes(m.id)) for (const g of m.genes) out.add(g);
+    }
+    return [...out];
+  }
+
 
   /** The run ends. The lineage keeps the loci it has had longest and starts
    *  again at the surface -- "resynthesized with some of the genes you
@@ -408,6 +453,7 @@ class Game {
       }),
       heldMods: [...this.mods],
       turn: this.clock.turn,
+      replicon: this.genome.replicon,
       stocked: this.dungeon.visitedLevels()
         .map((l): [number, number] => [l.floor, l.stockedAt]),
       won: this.won,
@@ -433,6 +479,7 @@ class Game {
     this.player.atp = s.atp;
     this.mods = [...s.heldMods];
     this.clock.turn = s.turn;
+    this.genome.replicon = s.replicon;
     for (const [floor, at] of s.stocked) this.dungeon.level(floor).stockedAt = at;
     this.won = s.won;
     this.run = {
@@ -443,6 +490,7 @@ class Game {
 
   load(): boolean {
     migrateLegacy();
+    this.lab = readLab();
     const s = readSave(SAVE_KEY);
     if (s === null) return false;
     this.applySave(s);
@@ -590,6 +638,12 @@ class Game {
 
   startRun(slot: number): void {
     this.slot = slot;
+    // The lab outlives every strain, so it is read here rather than from the
+    // slot file: dying, or deleting a save, must not cost the meta-progression.
+    this.lab = readLab();
+    this.dead = false;
+    this.deathRecord = null;
+    this.lastAttacker = null;
     const existing = loadSlot(slot);
     const info = listSlots()[slot];
     this.runName = info?.name ?? NAME_POOL[slot % NAME_POOL.length] ?? "unnamed";
@@ -601,11 +655,25 @@ class Game {
       this.dungeon = new Dungeon(96, 96, (Date.now() & 0xffff) + slot);
       this.genome = new Plasmid();
       this.run = newRun();          // a new culture has seen nothing
+
+      // Everything the lab has ordered is on the new strain from turn one.
+      // This is what the previous strain died for.
+      this.genome.replicon = this.lab.startReplicon;
+      this.genome.strain = this.lab.startStrain;
+      for (const g of this.lab.stock) {
+        this.genome.stash({ kind: "gene", id: g, level: 1, mods: [],
+                            allele: WILD_TYPE });
+      }
+
       this.player.hp = this.player.maxhp;
       this.player.atp = this.player.atpMax;
       this.player.status.length = 0;
       this.enter(this.dungeon.current(), this.dungeon.current().up);
-      this.note(`Culture ${this.runName} inoculated.`);
+      this.note(`Culture ${this.runName} inoculated.`
+        + (this.lab.stock.length > 0
+          ? ` ${String(this.lab.stock.length)} synthesised construct`
+            + `${this.lab.stock.length === 1 ? "" : "s"} in the bin.`
+          : ""));
     }
     this.started = true;
     this.showSplash = false;

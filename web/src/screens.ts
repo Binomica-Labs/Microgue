@@ -10,6 +10,10 @@ import { SLOTS as SAVE_SLOTS, listSlots } from "./saves.js";
 import { MAX_LEVEL, MODIFIERS, RARITY, evolutionCost, levelMultiplier,
          modifierSlots, type ModifierId } from "./parts.js";
 import { GENES, type GeneId } from "./biology.js";
+import { availableAt, type RepliconId } from "./replicon.js";
+import { describeLevel } from "./strain.js";
+import { describeLab, offers, type Lab, type Offer, type RunRecord }
+  from "./lab.js";
 import { SUBSTRATES, itemColour, itemName, itemNote, type Drop }
   from "./items.js";
 import { BUILD, VERSION } from "./version.js";
@@ -20,6 +24,7 @@ export type Wrap = (text: string, max: number) => string[];
 export function drawSplash(
   ctx: CanvasRenderingContext2D, W: number, H: number,
   ins: Insets, u: number, slotBoxes: Box[], names: readonly string[],
+  lab: Lab | null = null,
 ): Box {
   ctx.fillStyle = "#050d0a";
   ctx.fillRect(0, 0, W, H);
@@ -88,6 +93,12 @@ export function drawSplash(
   }
 
   ctx.textAlign = "center";
+  // The record, where it belongs: the first thing you see, every time.
+  if (lab !== null && lab.ledger.length > 0) {
+    ctx.fillStyle = "#cfe04a";
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.fillText(describeLab(lab), W / 2, H - ins.bottom - 38 * u);
+  }
   ctx.fillStyle = "#6f8f7c";
   ctx.font = `${10 * u}px ui-monospace,monospace`;
   ctx.fillText("tap a culture to begin", W / 2, H - ins.bottom - 20 * u);
@@ -156,9 +167,10 @@ export function drawNotes(
 /** One tappable row in the research screen. */
 export interface ResearchRow {
   readonly box: Box;
-  readonly kind: "evolve" | "attach";
+  readonly kind: "evolve" | "attach" | "subclone";
   readonly gene: GeneId;
   readonly mod?: ModifierId;
+  readonly replicon?: RepliconId;
   readonly cost: number;
   readonly afford: boolean;
 }
@@ -179,13 +191,56 @@ export function drawResearch(
   atp: number,
   selected: GeneId | null,
   rows: ResearchRow[],
+  strain: number,
+  current: RepliconId,
 ): Box {
   ctx.fillStyle = "rgba(4,7,6,0.97)";
   ctx.fillRect(0, 0, W, H);
   rows.length = 0;
 
-  let y = drawHeader(ctx, ins, u, "DIRECTED EVOLUTION",
-    `${String(Math.floor(atp))} ATP available · ${String(held.length)} modifiers held`);
+  let y = drawHeader(ctx, ins, u, "THE BENCH",
+    `${String(Math.floor(atp))} ATP · ${String(held.length)} modifiers held · `
+    + describeLevel(strain));
+
+  // Replicons first: which backbone you are on shapes everything below it.
+  const wideTop = W - ins.left - ins.right - 28 * u;
+  const options = availableAt(strain);
+  ctx.fillStyle = "#8fa89a";
+  ctx.font = `${10 * u}px ui-monospace,monospace`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("backbone — subcloning costs ATP and a turn", ins.left + 14 * u, y);
+  y += 14 * u;
+
+  const cw = Math.max((wideTop - 6 * u * 2) / 3, 60);
+  options.forEach((r, i) => {
+    const c = i % 3, rr = Math.floor(i / 3);
+    const bx = ins.left + 14 * u + c * (cw + 6 * u);
+    const by = y + rr * 34 * u;
+    const cost = 30 + r.copies;
+    const on = r.id === current;
+    rows.push({ box: { x: bx, y: by, w: cw, h: 30 * u }, kind: "subclone",
+                gene: "ori", replicon: r.id, cost,
+                afford: !on && atp >= cost });
+    ctx.fillStyle = on ? "rgba(90,200,140,0.28)" : "rgba(16,22,18,0.9)";
+    ctx.strokeStyle = on ? "#5ec98a" : atp >= cost ? "rgba(207,224,74,0.6)"
+      : "rgba(255,255,255,0.14)";
+    ctx.lineWidth = Math.max(1.2 * u, 1);
+    ctx.beginPath();
+    ctx.roundRect(bx, by, cw, 30 * u, 5 * u);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(r.name, bx + cw / 2, by + 12 * u);
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${8 * u}px ui-monospace,monospace`;
+    ctx.fillText(`${String(r.copies)}x · ${String(r.slots)} slots`,
+                 bx + cw / 2, by + 24 * u);
+  });
+  y += Math.ceil(options.length / 3) * 34 * u + 10 * u;
+  ctx.textAlign = "left";
 
   if (genes.length === 0) {
     ctx.fillStyle = "#6f8f7c";
@@ -367,4 +422,102 @@ export function drawContainer(
       wrap(itemNote(first), panelW - 28 * u).slice(0, 2)
         .forEach((l, i) => { ctx.fillText(l, px0 + 14 * u, y + i * 12 * u); });
     }
+}
+
+export interface ShopRow { readonly box: Box; readonly offer: Offer }
+
+/**
+ * The morgue and the order form, on one screen.
+ *
+ * Shown when a strain dies. It has to do two jobs at once: give the run an
+ * ending you can read, and immediately show what that run bought -- because
+ * the moment after a death is exactly when "what do I get for that" is the
+ * only question the player has.
+ */
+export function drawLab(
+  ctx: CanvasRenderingContext2D, W: number, H: number,
+  ins: Insets, u: number,
+  lab: Lab, last: RunRecord | null, seen: readonly GeneId[],
+  rows: ShopRow[], wrap: Wrap,
+): Box {
+  ctx.fillStyle = "rgba(4,7,6,0.98)";
+  ctx.fillRect(0, 0, W, H);
+  rows.length = 0;
+
+  let y = drawHeader(ctx, ins, u,
+    last === null ? "THE LAB" : last.won ? "THE COLUMN IS YOURS" : "STRAIN LOST",
+    describeLab(lab));
+
+  const left = ins.left + 14 * u;
+  const wide = W - ins.left - ins.right - 28 * u;
+
+  // The obituary.
+  if (last !== null) {
+    ctx.fillStyle = last.won ? "#7fe0a4" : "#e0a37a";
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    for (const line of wrap(
+      `Strain ${String(last.n)} reached F${String(last.floor)}, the `
+      + `${last.stratum}, in ${String(last.turns)} turns. `
+      + `${String(last.catalogued)} organisms recorded. `
+      + (last.won ? "It got to the bottom." : `Killed by ${last.killedBy}.`),
+      wide)) {
+      ctx.fillText(line, left, y);
+      y += 15 * u;
+    }
+    ctx.fillStyle = "#cfe04a";
+    ctx.fillText(`+${String(last.credit)} synthesis credit`, left, y + 4 * u);
+    y += 26 * u;
+  }
+
+  // The order form.
+  ctx.fillStyle = "#8fa89a";
+  ctx.font = `${10 * u}px ui-monospace,monospace`;
+  ctx.fillText("order constructs for the next strain:", left, y);
+  y += 16 * u;
+
+  const rowH = 34 * u;
+  const floor = H - ins.bottom - 52 * u;
+  for (const offer of offers(lab, seen)) {
+    if (y + rowH > floor) {
+      ctx.fillStyle = "#6f8f7c";
+      ctx.font = `${9 * u}px ui-monospace,monospace`;
+      ctx.fillText("…more available than fits on screen", left, y + 10 * u);
+      break;
+    }
+    const box: Box = { x: left, y, w: wide, h: rowH - 5 * u };
+    const afford = !offer.owned && lab.credit >= offer.price;
+    rows.push({ box, offer });
+
+    ctx.fillStyle = offer.owned ? "rgba(90,200,140,0.16)" : "rgba(16,22,18,0.9)";
+    ctx.strokeStyle = offer.owned ? "#5ec98a"
+      : afford ? "rgba(207,224,74,0.65)" : "rgba(255,255,255,0.13)";
+    ctx.lineWidth = Math.max(1.2 * u, 1);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = offer.owned ? "#7fe0a4" : afford ? "#ffffff" : "#7f8f87";
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.fillText(offer.name, box.x + 9 * u, box.y + 14 * u);
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+    ctx.fillText(offer.note.slice(0, 46), box.x + 9 * u, box.y + 25 * u);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = offer.owned ? "#5ec98a" : afford ? "#cfe04a" : "#6f8f7c";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.fillText(offer.owned ? "ordered" : String(offer.price),
+                 box.x + box.w - 9 * u, box.y + 19 * u);
+    y += rowH;
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#6f8f7c";
+  ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+  ctx.fillText("close to send the next strain down", W / 2, H - ins.bottom - 18 * u);
+  return drawClose(ctx, W, ins, u);
 }

@@ -1,6 +1,7 @@
+import { WILD_TYPE } from "../src/allele.js";
 import { describe, expect, it } from "vitest";
 import * as bio from "../src/biology.js";
-import { Plasmid } from "../src/plasmid.js";
+import { Plasmid, SLOTS } from "../src/plasmid.js";
 import * as motion from "../src/motion.js";
 import * as fov from "../src/fov.js";
 import * as cycle from "../src/cycle.js";
@@ -90,7 +91,7 @@ describe("no pure function returns a non-finite number", () => {
   it("biology and the plasmid survive any depth", () => {
     const p = new Plasmid();
     p.put(4, { kind: "promoter", id: "j23119" });
-    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"], allele: WILD_TYPE });
     for (const n of NASTY) {
       const s = String(n);
       finite(`energyYield(${s})`, bio.energyYield(n));
@@ -109,7 +110,7 @@ describe("no pure function returns a non-finite number", () => {
     // `supply` is public and assigned from an ATP division every turn.
     const p = new Plasmid();
     p.put(4, { kind: "promoter", id: "j23119" });
-    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"] });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"], allele: WILD_TYPE });
     for (const n of NASTY) {
       p.supply = n;
       finite(`expression, supply=${String(n)}`, p.expression("mtrC", 4));
@@ -134,13 +135,13 @@ describe("the origin is an invariant, not a hope", () => {
   // and `applySave` writes the whole ring through it.
   it("survives wiping every slot", () => {
     const p = new Plasmid();
-    for (let i = 0; i < 16; i++) p.put(i, null);
+    for (let i = 0; i < SLOTS; i++) p.put(i, null);
     expect(p.has("ori")).toBe(true);
   });
 
   it("survives a ring with no room left", () => {
     const p = new Plasmid();
-    for (let i = 0; i < 16; i++) p.put(i, { kind: "terminator", id: "rrnbt1" });
+    for (let i = 0; i < SLOTS; i++) p.put(i, { kind: "terminator", id: "rrnbt1" });
     expect(p.has("ori")).toBe(true);
   });
 
@@ -153,31 +154,31 @@ describe("the origin is an invariant, not a hope", () => {
       p.stash({ kind: "terminator", id: "rrnbt1" });
     }
     expect(p.has("ori")).toBe(true);
-    expect(p.slots).toHaveLength(16);
+    expect(p.slots).toHaveLength(SLOTS);
     expect(p.bin.length).toBeLessThanOrEqual(18);
   });
 
   it("a restored origin actually restores expression", () => {
     const p = new Plasmid();
-    for (let i = 0; i < 16; i++) p.put(i, null);
+    for (let i = 0; i < SLOTS; i++) p.put(i, null);
     p.put(4, { kind: "promoter", id: "j23119" });
-    p.put(5, { kind: "gene", id: "cbbL", level: 1, mods: ["codon"] });
+    p.put(5, { kind: "gene", id: "cbbL", level: 1, mods: ["codon"], allele: WILD_TYPE });
     expect(p.expression("cbbL", 1)).toBeGreaterThan(0);
   });
 });
 
 describe("hostile saves", () => {
   const HOSTILE: unknown[] = [
-    null, undefined, 0, "", [], {}, { version: 8 },
-    { version: 8, depth: {}, floor: [], seed: "x", px: {}, py: null, hp: [],
+    null, undefined, 0, "", [], {}, { version: 10 },
+    { version: 10, depth: {}, floor: [], seed: "x", px: {}, py: null, hp: [],
       atp: "z", ring: {}, bin: 7, run: [], settings: 3 },
-    { version: 8, depth: 1, floor: 1, seed: 1, px: 1, py: 1, hp: 1, atp: 1,
+    { version: 10, depth: 1, floor: 1, seed: 1, px: 1, py: 1, hp: 1, atp: 1,
       ring: new Array<unknown>(10000).fill({ kind: "gene", id: "mtrC" }),
       bin: new Array<unknown>(10000).fill({ kind: "terminator", id: "rrnbt1" }),
       run: { deepest: 1e9, deaths: -1e9,
              bestiary: new Array<unknown>(9999).fill("geobacter"),
              library: new Array<unknown>(9999).fill("mtrC") }, settings: {} },
-    { version: 8, depth: NaN, floor: NaN, seed: NaN, px: NaN, py: NaN, hp: NaN,
+    { version: 10, depth: NaN, floor: NaN, seed: NaN, px: NaN, py: NaN, hp: NaN,
       atp: NaN, ring: [], bin: [], run: {}, settings: {} },
   ];
 
@@ -190,7 +191,7 @@ describe("hostile saves", () => {
           expect(Number.isFinite(v), `save#${String(i)}.${k}`).toBe(true);
         }
       }
-      expect(s.ring, `save#${String(i)} ring`).toHaveLength(16);
+      expect(s.ring, `save#${String(i)} ring`).toHaveLength(SLOTS);
       expect(s.bin.length, `save#${String(i)} bin`).toBeLessThanOrEqual(18);
       expect(s.run.bestiary.length).toBeLessThanOrEqual(bio.MICROBES.length);
       expect(s.run.deepest).toBeLessThanOrEqual(bio.MAX_DEPTH);
@@ -324,13 +325,13 @@ describe("barriers", () => {
 
   it("expressing the enzyme is what opens it, not carrying it", () => {
     const p = new Plasmid();
-    p.stash({ kind: "gene", id: "dspB", level: 1, mods: ["codon"] });   // in the bin only
+    p.stash({ kind: "gene", id: "dspB", level: 1, mods: ["codon"], allele: WILD_TYPE });   // in the bin only
     const b = { x: 0, y: 0, id: "biofilm" as const, work: 0 };
     const can = (g: bio.GeneId): boolean => p.expression(g, 2) > 0;
     expect(degrade(b, can).kind, "a stashed gene must not open it").toBe("blocked");
 
     p.put(4, { kind: "promoter", id: "j23119" });
-    p.put(5, { kind: "gene", id: "dspB", level: 1, mods: ["codon"] });
+    p.put(5, { kind: "gene", id: "dspB", level: 1, mods: ["codon"], allele: WILD_TYPE });
     expect(degrade(b, can).kind).not.toBe("blocked");
   });
 

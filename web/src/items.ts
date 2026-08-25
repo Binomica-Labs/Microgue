@@ -12,6 +12,7 @@
 // cell -- which opens as a container rather than being hoovered up blind.
 
 import { GENES, type GeneId } from "./biology.js";
+import { alleleName, alleleRarity, type Allele } from "./allele.js";
 import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, partsOfRarity, rollRarity,
          type ModifierId, type PromoterId, type Rarity, type TerminatorId }
   from "./parts.js";
@@ -49,7 +50,7 @@ export const SUBSTRATES: Readonly<Record<SubstrateId, SubstrateDef>> = {
 };
 
 export type Item =
-  | { kind: "cassette"; gene: GeneId }
+  | { kind: "cassette"; gene: GeneId; allele: Allele }
   | { kind: "substrate"; id: SubstrateId }
   // Regulatory parts. These are the rare drops: a conditional promoter or a
   // tandem terminator changes what your plasmid can BE, not just what it does.
@@ -60,7 +61,9 @@ export type Item =
 /** Rarity of an item, for colouring and for messages. `common` for anything
  *  that has no tier of its own. */
 export function rarityOf(it: Item): Rarity {
-  return it.kind === "cassette" || it.kind === "substrate" ? "common" : it.rarity;
+  // A cassette's rarity is its ROLL, not its base. Same gene, different find.
+  if (it.kind === "cassette") return alleleRarity(it.gene, it.allele);
+  return it.kind === "substrate" ? "common" : it.rarity;
 }
 
 /**
@@ -98,7 +101,7 @@ export interface Drop {
 
 export function itemName(it: Item): string {
   switch (it.kind) {
-    case "cassette":    return GENES[it.gene].name;
+    case "cassette":    return alleleName(it.gene, it.allele);
     case "substrate":   return SUBSTRATES[it.id].name;
     case "promoter":    return PROMOTERS[it.id].name;
     case "terminator":  return TERMINATORS[it.id].name;
@@ -107,7 +110,7 @@ export function itemName(it: Item): string {
 }
 
 export function itemColour(it: Item): string {
-  if (it.kind === "cassette") return "#a0ffd0";
+  if (it.kind === "cassette") return RARITY[alleleRarity(it.gene, it.allele)].colour;
   if (it.kind === "substrate") return SUBSTRATES[it.id].colour;
   return RARITY[it.rarity].colour;      // rarity is the signal that matters
 }

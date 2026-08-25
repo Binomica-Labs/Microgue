@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  Recorded at v0.55. The equivalence with the PRE-refactor build was proven
  *  separately, by running the same tracer against both trees outside vitest:
  *  42220 calls, identical. This constant is the in-suite anchor. */
-const GOLDEN = "b7e823c520c934e6";
+const GOLDEN = "ba8b303fd43a06be";
 
 const trace: string[] = [];
 
@@ -145,7 +145,7 @@ describe("golden render trace", () => {
     // nothing else. Widen `play()` before trusting it further.
     await play();
     const text = trace.join("\n");
-    for (const marker of ["FIELD NOTEBOOK", "PARTS BIN", "DIRECTED EVOLUTION"]) {
+    for (const marker of ["FIELD NOTEBOOK", "PARTS BIN", "THE BENCH"]) {
       expect(text, `${marker} never drawn -- the scenario missed a screen`)
         .toContain(marker);
     }

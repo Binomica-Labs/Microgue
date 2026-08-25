@@ -4,10 +4,12 @@
 // inventory workable with a thumb: slot index is just an angle, so the target
 // is as large as the ring is wide.
 
+import type { Box } from "./chrome.js";
 import { GENES, type Pathway } from "./biology.js";
 import { SLOTS, type Part, type Plasmid } from "./plasmid.js";
-import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, rarityOfTier,
-         type Rarity } from "./parts.js";
+import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, type Rarity } from "./parts.js";
+import { PREFIXES, SUFFIXES, alleleName, alleleRarity, alleleReadout }
+  from "./allele.js";
 
 export const PATHWAY_COLOUR: Readonly<Record<Pathway, string>> = {
   photo: "#5ec98a", carbon: "#8fd4c2", nitrogen: "#cfe04a", sulfur: "#e0c25a",
@@ -70,7 +72,8 @@ export function binCell(g: BinGeom, i: number): { x: number; y: number } {
 /** The rarity of anything that can sit in the bin. Genes take theirs from
  *  their tier, so the ladder is one thing rather than two. */
 export function partRarity(p: Part): Rarity {
-  if (p.kind === "gene") return rarityOfTier(GENES[p.id].tier);
+  // A gene's rarity is its ROLL, not its base: same gene, different find.
+  if (p.kind === "gene") return alleleRarity(p.id, p.allele);
   if (p.kind === "promoter") return PROMOTERS[p.id].rarity;
   return TERMINATORS[p.id].rarity;
 }
@@ -266,13 +269,15 @@ export function drawItemCard(
   ctx: CanvasRenderingContext2D, W: number, H: number, u: number,
   part: Part, plasmid: Plasmid, depth: number,
   wrap: (s: string, max: number) => string[],
-): void {
+  edible = false,
+): Box | null {
   const tier = RARITY[partRarity(part)];
   const pad = 14 * u;
   const cardW = Math.min(W - 40 * u, 340 * u);
 
   // Build the body first so the card can be sized to it.
-  const title = partLabel(part);
+  const title = part.kind === "gene" && part.id !== "ori"
+    ? alleleName(part.id, part.allele) : partLabel(part);
   const lines: { text: string; colour: string; size: number }[] = [];
   const add = (text: string, colour = "#c8d6ce", size = 10): void => {
     for (const l of wrap(text, cardW - pad * 2)) lines.push({ text: l, colour, size });
@@ -281,6 +286,18 @@ export function drawItemCard(
   if (part.kind === "gene") {
     const gene = GENES[part.id];
     add(gene.product, "#ffffff", 11);
+    // The roll, before anything else: this is what distinguishes this copy
+    // from every other copy of the same gene.
+    if (part.id !== "ori") {
+      for (const line of alleleReadout(part.allele)) add(line, "#cfe04a", 9.5);
+      for (const af of [part.allele.prefix, part.allele.suffix]) {
+        if (af === null) continue;
+        const def = af in PREFIXES
+          ? PREFIXES[af as keyof typeof PREFIXES]
+          : SUFFIXES[af as keyof typeof SUFFIXES];
+        add(def.note, "#9fb0d8", 9);
+      }
+    }
     add(`${gene.kb.toFixed(1)} kb · tier ${String(gene.tier)} · ${gene.pathway}`, "#8fa89a", 9.5);
     const e = plasmid.expression(part.id, depth);
     add(e > 0
@@ -310,7 +327,7 @@ export function drawItemCard(
   }
 
   const bodyH = lines.reduce((a, l) => a + l.size * u * 1.45, 0);
-  const cardH = bodyH + 54 * u;
+  const cardH = bodyH + (edible ? 88 : 54) * u;
   const x = (W - cardW) / 2;
   const y = Math.max((H - cardH) / 2, 20 * u);
 
@@ -344,4 +361,24 @@ export function drawItemCard(
     }
     ly += l.size * u * 1.45;
   }
+
+  // The eat target. Deliberately its own box: catabolising destroys the
+  // cassette, so it must not be the same tap that dismisses the card.
+  if (!edible) return null;
+  const bw = cardW - pad * 2;
+  const box: Box = { x: x + pad, y: y + cardH - 34 * u, w: bw, h: 26 * u };
+  ctx.fillStyle = "rgba(160,255,208,0.14)";
+  ctx.strokeStyle = "#a0ffd0";
+  ctx.lineWidth = Math.max(1.2 * u, 1);
+  ctx.beginPath();
+  ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#a0ffd0";
+  ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("catabolise \u2014 DNA is food as well as information",
+               box.x + box.w / 2, box.y + box.h / 2);
+  return box;
 }
