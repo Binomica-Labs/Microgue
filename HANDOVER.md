@@ -646,6 +646,41 @@ Two related things that fell out of the same pass:
 * The v0.55 refactor's mechanical `this.` -> `_g.` rename had rewritten twelve
   COMMENTS into nonsense ("promoters read _g"). Repaired.
 
+## Each replicon is a RULE, not a stat block
+
+The first version was five points on ONE line -- more copies, fewer slots --
+so every backbone sat on the same trade and there was never a reason to prefer
+one over its neighbour. Each carries a signature now, and every signature is
+something the real plasmid does:
+
+    pSC101   partitioned   immune to hazards: intermediates never accumulate
+    pBR322   plain         the baseline everything else is measured against
+    pUC19    runaway       copy number tracks your ATP
+    RSF1010  mobilisable   half its genes pass to the next strain
+    BAC      roomy         size costs nothing, however much DNA you load
+
+**pUC is the interesting one.** Its copy control is genuinely broken, so it
+replicates as hard as the energy budget allows: 7 copies when starved, 133 when
+flush, and the running cost falls as it collapses. That is a self-limiting
+oscillation and it is exactly what a runaway plasmid does to its host. The
+swing has to be an order of magnitude in COPIES to be felt at all, because
+dosage is compressed (copies^0.28).
+
+**RSF1010 is the one that changes how you play.** A mobilisable plasmid
+transfers out of a dying cell, so half its loci reach the next strain -- the
+only thing that survives a death besides credit. Carrying it is choosing
+insurance over output.
+
+Two bugs from wiring this up:
+
+* The ATP figures are memoised on DEPTH alone, so a runaway backbone's cost
+  never recomputed when its copy number changed -- it reported the cost of
+  whatever energy it first saw. The setter clears the memo, and QUANTISES to
+  20 steps first so a continuously drifting value does not clear it every turn.
+  Measured at 0.5us per turn.
+* `hazards` and `burden` had to be checked before their own arithmetic, not
+  after, or `partitioned` and `roomy` would have been decoration.
+
 ## Replicons, not attack/defence/utility plasmids
 
 The request was for separate attack / defence / utility plasmids. Bacteria do
@@ -691,6 +726,24 @@ The starting vector now ships WITH a terminator, because a real vector has one
 and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
 Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
 invariant was passing with a margin of 0.005, which is not a margin.
+
+## The ring is the replicon's, not the array's
+
+Reported as "I cannot move a promoter once it is installed". The ring drew all
+24 ARRAY positions while pBR322 owns 16, so eight phantom wedges sat on screen.
+Tapping one selected an "empty slot" that could never hold anything, and since
+they are interleaved with the real ones, moving a part felt like it silently
+did nothing.
+
+`RingGeom.used` carries the count now, and `slotAt`, `slotCentre` and the draw
+loop all divide by it. `spec` checks every drawn wedge round-trips to its own
+index at ring sizes 10, 12, 14, 16, 22 and 24, and that every wedge on screen
+is a position the plasmid actually has.
+
+This is the fourth bug from the same root -- the array is sized for the largest
+replicon and the ring is a fraction of it. The others were `rotate`, `norm`,
+and `assemble`. Anything that divides a circle into slots must divide by
+`usableSlots`.
 
 ## Install is a button, not a drag
 

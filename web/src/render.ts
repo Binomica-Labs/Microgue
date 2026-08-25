@@ -634,6 +634,10 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
 
     const avail = Math.min(W - ins.left - ins.right, H * 0.46);
     _g.ring = {
+      // The ring is the REPLICON's, not the array's. Drawing all 24 on a
+      // 16-slot backbone put eight phantom wedges on screen that could be
+      // tapped, selected and dropped into, and did nothing when you did.
+      used: _g.genome.usableSlots,
       cx: W / 2,
       cy: ins.top + avail * 0.55 + 20 * u,
       rOuter: avail * 0.42,

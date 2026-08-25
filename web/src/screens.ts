@@ -216,10 +216,10 @@ export function drawResearch(
   options.forEach((r, i) => {
     const c = i % 3, rr = Math.floor(i / 3);
     const bx = ins.left + 14 * u + c * (cw + 6 * u);
-    const by = y + rr * 34 * u;
+    const by = y + rr * 38 * u;
     const cost = 30 + r.copies;
     const on = r.id === current;
-    rows.push({ box: { x: bx, y: by, w: cw, h: 30 * u }, kind: "subclone",
+    rows.push({ box: { x: bx, y: by, w: cw, h: 34 * u }, kind: "subclone",
                 gene: "ori", replicon: r.id, cost,
                 afford: !on && atp >= cost });
     ctx.fillStyle = on ? "rgba(90,200,140,0.28)" : "rgba(16,22,18,0.9)";
@@ -227,19 +227,24 @@ export function drawResearch(
       : "rgba(255,255,255,0.14)";
     ctx.lineWidth = Math.max(1.2 * u, 1);
     ctx.beginPath();
-    ctx.roundRect(bx, by, cw, 30 * u, 5 * u);
+    ctx.roundRect(bx, by, cw, 34 * u, 5 * u);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#ffffff";
     ctx.font = `${9.5 * u}px ui-monospace,monospace`;
     ctx.textAlign = "center";
     ctx.fillText(r.name, bx + cw / 2, by + 12 * u);
-    ctx.fillStyle = "#8fa89a";
-    ctx.font = `${8 * u}px ui-monospace,monospace`;
+    // The RULE, not the stat block. Which backbone you carry is a choice
+    // between five different behaviours, and the numbers alone never said so.
+    ctx.fillStyle = on ? "#7fe0a4" : "#8fa89a";
+    ctx.font = `${7.5 * u}px ui-monospace,monospace`;
+    ctx.fillText(ellipsise(ctx, r.rule, cw - 8 * u), bx + cw / 2, by + 21 * u);
+    ctx.fillStyle = "#6f8f7c";
+    ctx.font = `${7 * u}px ui-monospace,monospace`;
     ctx.fillText(`${String(r.copies)}x · ${String(r.slots)} slots`,
-                 bx + cw / 2, by + 24 * u);
+                 bx + cw / 2, by + 28 * u);
   });
-  y += Math.ceil(options.length / 3) * 34 * u + 10 * u;
+  y += Math.ceil(options.length / 3) * 38 * u + 10 * u;
   ctx.textAlign = "left";
 
   if (genes.length === 0) {

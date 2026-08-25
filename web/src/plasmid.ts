@@ -83,7 +83,8 @@ const WASTE_PER_UNIT = 1.15;
 export type { Part } from "./transcription.js";
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
-import { REPLICONS, dosage, copyBurden, type RepliconId } from "./replicon.js";
+import { REPLICONS, dosage, copyBurden, effectiveCopies,
+         type RepliconId } from "./replicon.js";
 import { TERMINATORS } from "./parts.js";
 import { bonusCapacityKb, bonusSlots } from "./strain.js";
 import { MAX_LEVEL, MODIFIERS, evolutionCost, levelMultiplier, modifierSlots,
@@ -263,7 +264,31 @@ export class Plasmid {
 
   /** Copy number multiplies product. Sub-linear, because transcription and
    *  translation saturate long before the DNA does. */
-  dosage(): number { return dosage(REPLICONS[this.replicon].copies); }
+  /**
+   * The ATP fraction, 0..1, set by the game each turn. A runaway replicon
+   * reads it; nothing else does.
+   */
+  private _energy = 1;
+  get energy(): number { return this._energy; }
+  set energy(v: number) {
+    const e = Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 1;
+    // Quantised, then it invalidates the memo. The ATP figures are cached on
+    // depth alone, so a runaway backbone's cost never recomputed when its copy
+    // number changed -- it reported the cost of whatever energy it first saw.
+    // Quantising keeps a continuously drifting value from clearing the cache
+    // every single turn.
+    const q = Math.round(e * 20) / 20;
+    if (q === this._energy) return;
+    this._energy = q;
+    if (REPLICONS[this.replicon].signature === "runaway") this.memoAtp.clear();
+  }
+
+  /** Copies actually present, which a runaway backbone varies with energy. */
+  copies(): number {
+    return effectiveCopies(REPLICONS[this.replicon], this.energy);
+  }
+
+  dosage(): number { return dosage(this.copies()); }
 
   capacityKb(): number {
     return REPLICONS[this.replicon].capacityKb + bonusCapacityKb(this.strain);
@@ -402,6 +427,9 @@ export class Plasmid {
   }
 
   burden(): number {
+    // A single-copy backbone pays nothing for size: one copy is one copy
+    // however long it is, which is exactly why a BAC carries 300 kb.
+    if (REPLICONS[this.replicon].signature === "roomy") return 0;
     const frac = this.used() / this.capacityKb();
     if (frac <= BURDEN_KNEE) return 0;
     const over = (frac - BURDEN_KNEE) / (1 - BURDEN_KNEE);
@@ -424,6 +452,7 @@ export class Plasmid {
    *  there is a test asserting every public mutator calls it. */
   private rev = 0;
   private memoOperons: { rev: number; value: Operon[] } | null = null;
+  /** @internal: the energy setter clears this from outside the accessor. */
   private memoAtp = new Map<string, number>();
 
   private touch(): void {
@@ -537,7 +566,7 @@ export class Plasmid {
     }
     // Replicating the plasmid is most of what carrying one costs, and a
     // high-copy origin costs proportionally more.
-    c *= copyBurden(REPLICONS[this.replicon].copies);
+    c *= copyBurden(this.copies());
     // Transcription that reads past the last gene of an operon is polymerase
     // and nucleotide spent on nothing. THIS is why a terminator matters
     // beyond isolating the next promoter: a leaky one wastes ATP every turn,
@@ -740,6 +769,9 @@ export class Plasmid {
 
   /** Half-built pathways. The intermediate accumulates and it is cytotoxic. */
   hazards(depth: number): Hazard[] {
+    // An actively partitioned replicon is the stable one: intermediates do
+    // not accumulate because nothing is ever mis-segregated mid-pathway.
+    if (REPLICONS[this.replicon].signature === "partitioned") return [];
     return HAZARDS.filter((h) =>
       this.expression(h.present, depth) > 0 && this.expression(h.missing, depth) <= 0);
   }

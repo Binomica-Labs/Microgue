@@ -167,6 +167,11 @@ export function t_upkeep(_g: Game): void {
     // Conditional and inducible promoters read this. Without it every promoter
     // would silently behave as constitutive.
     _g.genome.depth = d;
+    // A runaway replicon reads this. Without it pUC sits at a quarter of
+    // its nominal copy number for ever, which is the wrong end of its
+    // own trade.
+    _g.genome.energy = _g.player.atpMax > 0
+      ? _g.player.atp / _g.player.atpMax : 1;
     _g.genome.inducers = new Set(
       _g.drops.flatMap((dr) => dr.items.flatMap(
         (it) => (it.kind === "substrate" ? [it.id] : []))));

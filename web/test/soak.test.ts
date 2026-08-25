@@ -1243,3 +1243,132 @@ describe("installing and catabolising from the card", () => {
     expect(g.cardBoxes.eat, "the origin was edible").toBeNull();
   });
 });
+
+
+describe("an installed part can be moved", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("dragging a promoter to another position moves it", async () => {
+    const { slotCentre } = await import("../src/plasmid_ui.js");
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    const from = g.genome.slots.findIndex((s) => s?.kind === "promoter");
+    expect(from).toBeGreaterThanOrEqual(0);
+    const to = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
+    expect(to).toBeGreaterThanOrEqual(0);
+
+    const a = slotCentre(g.ring, from);
+    const b = slotCentre(g.ring, to);
+    g.pointerDown(a.x, a.y);
+    g.pointerMove(b.x, b.y);
+    g.pointerUp(b.x, b.y);
+    expect(g.genome.at(to)?.kind, "the promoter did not move").toBe("promoter");
+    expect(g.genome.at(from)).toBeNull();
+  });
+
+  it("every drawn wedge is a position the plasmid actually has", async () => {
+    // The ring drew all 24 array positions while pBR322 owns 16, so eight
+    // phantom wedges were on screen. Tapping one selected an "empty slot" that
+    // could never hold anything -- which is what made an installed promoter
+    // look immovable.
+    const { slotAt, slotCentre } = await import("../src/plasmid_ui.js");
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    expect(g.ring.used, "the ring is not the replicon's")
+      .toBe(g.genome.usableSlots);
+    for (let i = 0; i < g.ring.used; i++) {
+      const c = slotCentre(g.ring, i);
+      expect(slotAt(g.ring, c.x, c.y), `wedge ${String(i)}`).toBe(i);
+      expect(g.genome.usable(i), `wedge ${String(i)} is not a real position`)
+        .toBe(true);
+    }
+  });
+
+  it("the ring resizes when the backbone does", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
+    g.run.deepest = 24;
+    g.press("wait");
+    g.player.atpMax = 900; g.player.atp = 800;
+    g.subclone("puc");                       // 10 slots
+    g.openPlasmid(true);
+    g.frame(40);
+    expect(g.ring.used).toBe(g.genome.usableSlots);
+    expect(g.ring.used).toBeLessThan(16);
+  });
+});
+
+describe("a mobilisable plasmid survives its host", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("half its genes reach the next strain", async () => {
+    // Real: IncQ plasmids transfer themselves into another cell, which is how
+    // resistance crosses species. It is the one way anything survives a death.
+    const g = await game();
+    g.startRun(0);
+    g.genome.replicon = "rsf1010";
+    for (const id of ["mtrC", "omcS", "cymA", "dsrA"] as bio.GeneId[]) {
+      const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
+      if (free >= 0) {
+        g.genome.put(free, { kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+      }
+    }
+    g.die();
+    expect(g.lab.stock.length, "nothing was mobilised").toBeGreaterThan(0);
+    expect(g.lab.stock.length, "everything survived, which is not the deal")
+      .toBeLessThan(4);
+  });
+
+  it("a plain backbone loses everything", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.genome.replicon = "pbr322";
+    const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
+    if (free >= 0) {
+      g.genome.put(free, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.die();
+    expect(g.lab.stock).toEqual([]);
+  });
+
+  it("mobilisation cannot overfill the manifest", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.genome.replicon = "rsf1010";
+    const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((x) => x !== "ori");
+    for (const id of all.slice(0, 20)) {
+      const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
+      if (free < 0) break;
+      g.genome.put(free, { kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.die();
+    const { STOCK_CAP } = await import("../src/lab.js");
+    expect(g.lab.stock.length).toBeLessThanOrEqual(STOCK_CAP);
+    expect(new Set(g.lab.stock).size, "duplicates got in").toBe(g.lab.stock.length);
+  });
+});

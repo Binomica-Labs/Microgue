@@ -57,7 +57,8 @@ import { partRarity } from "../src/plasmid_ui.js";
 import { RESTOCK_TURNS, capacityAt, describeStock, meanLight, rateAt,
          restockAmount } from "../src/production.js";
 import { REPLICONS, REPLICON_IDS, availableAt, compatible, copyBurden, dosage,
-         incompatibleReason, type RepliconId } from "../src/replicon.js";
+         effectiveCopies, incompatibleReason, type RepliconId }
+  from "../src/replicon.js";
 import { MAX_STRAIN, bonusCapacityKb, bonusSlots, strainLevel }
   from "../src/strain.js";
 import { LEDGER_CAP, STOCK_CAP, buy, creditFor, genePrice, newLab, offers,
@@ -498,19 +499,38 @@ describe("plasmid operons", () => {
 });
 
 describe("plasmid ring geometry", () => {
-  const g = { cx: 200, cy: 300, rInner: 80, rOuter: 130, rot: 0 };
+  const g = { cx: 200, cy: 300, rInner: 80, rOuter: 130, rot: 0, used: SLOTS };
 
-  it("maps a slot centre back to its own index", () => {
-    for (let i = 0; i < SLOTS; i++) {
-      const c = slotCentre(g, i);
-      expect(slotAt(g, c.x, c.y), `slot ${i}`).toBe(i);
+  it("maps a slot centre back to its own index, at every ring size", () => {
+    // The ring is the REPLICON's, not the array's. Drawing 24 wedges on a
+    // 16-slot backbone put eight phantom positions on screen -- tapping one
+    // selected an "empty slot" that could never hold anything, which is why
+    // an installed promoter appeared immovable.
+    for (const used of [10, 12, 14, 16, 22, SLOTS]) {
+      const ring = { ...g, used };
+      for (let i = 0; i < used; i++) {
+        const c = slotCentre(ring, i);
+        expect(slotAt(ring, c.x, c.y), `slot ${i} of ${used}`).toBe(i);
+      }
     }
   });
-  it("survives rotation", () => {
-    const r = { ...g, rot: 1.3 };
-    for (let i = 0; i < SLOTS; i++) {
-      const c = slotCentre(r, i);
-      expect(slotAt(r, c.x, c.y)).toBe(i);
+  it("survives rotation at every ring size", () => {
+    for (const used of [10, 16, 22]) {
+      const r = { ...g, used, rot: 1.3 };
+      for (let i = 0; i < used; i++) {
+        const c = slotCentre(r, i);
+        expect(slotAt(r, c.x, c.y), `slot ${i} of ${used}`).toBe(i);
+      }
+    }
+  });
+  it("never returns a position the ring does not have", () => {
+    const r = { ...g, used: 12 };
+    for (let a = 0; a < 360; a += 3) {
+      const rad = (a * Math.PI) / 180;
+      const p = { x: r.cx + Math.cos(rad) * 105, y: r.cy + Math.sin(rad) * 105 };
+      const s = slotAt(r, p.x, p.y);
+      expect(s, `angle ${a}`).not.toBeNull();
+      if (s !== null) expect(s).toBeLessThan(12);
     }
   });
   it("rejects points inside and outside the band", () => {
@@ -5628,5 +5648,116 @@ describe("the flight recorder", () => {
     t.push(2, "move", "last");
     const d = t.dump();
     expect(d.indexOf("first")).toBeLessThan(d.indexOf("last"));
+  });
+});
+
+describe("every replicon does something no other does", () => {
+  const heavy = ["mtrC", "omcS", "cymA", "mtrB", "dsrA", "nifD", "cdhA",
+                 "hynL", "uvrA"] as bio.GeneId[];
+  const build = (rep: RepliconId, genes: bio.GeneId[] = heavy) => {
+    const p = new Plasmid();
+    p.replicon = rep; p.strain = MAX_STRAIN;
+    let s = 4;
+    p.put(s++, { kind: "promoter", id: "j23119" });
+    for (const g of genes) p.put(s++, { kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    p.put(s, { kind: "terminator", id: "rrnbt1t2" });
+    return p;
+  };
+
+  it("each carries a distinct signature and a rule that says so", () => {
+    // Five points on one line -- more copies, fewer slots -- is a stat block,
+    // not a decision. Every backbone has to be a different KIND of thing.
+    const sigs = REPLICON_IDS.map((id) => REPLICONS[id].signature);
+    expect(new Set(sigs).size, "two replicons share a signature")
+      .toBe(REPLICON_IDS.length);
+    for (const id of REPLICON_IDS) {
+      expect(REPLICONS[id].rule.length, `${id} has no rule`).toBeGreaterThan(20);
+    }
+  });
+
+  it("runaway: copy number tracks the energy available", () => {
+    const p = build("puc", ["mtrC"]);
+    p.energy = 0;
+    const starved = { copies: p.copies(), expr: p.expression("mtrC", 4) };
+    p.energy = 1;
+    const flush = { copies: p.copies(), expr: p.expression("mtrC", 4) };
+    expect(flush.copies / starved.copies, "the swing is not worth taking")
+      .toBeGreaterThan(8);
+    expect(flush.expr).toBeGreaterThan(starved.expr * 1.8);
+    // And it eats what it needs to run: that is the self-limiting part.
+    p.energy = 1;
+    const rich = p.atpBalance(4);
+    p.energy = 0;
+    expect(p.atpBalance(4), "running away should cost more, not less")
+      .toBeGreaterThan(rich);
+  });
+
+  it("nothing but pUC varies with energy", () => {
+    for (const id of REPLICON_IDS) {
+      if (id === "puc") continue;
+      const p = build(id, ["mtrC"]);
+      p.energy = 0;
+      const a = p.copies();
+      p.energy = 1;
+      expect(p.copies(), `${id} drifted with energy`).toBe(a);
+    }
+  });
+
+  it("roomy: a single-copy backbone pays nothing for size", () => {
+    const bac = build("bac");
+    const bnl = build("pbr322");
+    // Load both past capacity.
+    expect(bac.used()).toBeGreaterThan(0);
+    expect(bac.burden(), "a BAC was charged for its size").toBe(0);
+    const over = new Plasmid();
+    over.replicon = "bac";
+    over.strain = MAX_STRAIN;
+    for (let i = 0; i < over.usableSlots; i++) {
+      if (over.at(i) === null) {
+        over.put(i, { kind: "gene", id: "cdhA", level: 1, mods: [], allele: WILD_TYPE });
+      }
+    }
+    expect(over.burden(), "even an over-stuffed BAC pays nothing").toBe(0);
+    void bnl;
+  });
+
+  it("partitioned: pSC101 never accumulates an intermediate", () => {
+    // A hazard needs a present gene and a missing partner, so build one.
+    const mk = (rep: RepliconId) => {
+      const p = new Plasmid();
+      p.replicon = rep; p.strain = MAX_STRAIN;
+      p.put(4, { kind: "promoter", id: "j23119" });
+      p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: [], allele: WILD_TYPE });
+      p.put(6, { kind: "terminator", id: "rrnbt1" });
+      return p;
+    };
+    expect(mk("psc101").hazards(7)).toEqual([]);
+    expect(mk("psc101").toxicity(7)).toBe(0);
+  });
+
+  it("the signatures are not all just 'more expression'", () => {
+    // If every rule collapsed to a number the choice would be a stat block
+    // again. Each must win on a DIFFERENT axis.
+    const e = (id: RepliconId): number => {
+      const p = build(id, ["mtrC"]);
+      p.energy = 1;
+      return p.expression("mtrC", 4);
+    };
+    const best = REPLICON_IDS.reduce((a, b) => (e(a) > e(b) ? a : b));
+    expect(best, "pUC should win on raw output").toBe("puc");
+    // ...and lose on room, and on what survives.
+    expect(REPLICONS.puc.slots).toBeLessThan(REPLICONS.bac.slots);
+    expect(REPLICONS.puc.capacityKb).toBeLessThan(REPLICONS.rsf1010.capacityKb);
+    expect(REPLICONS.bac.slots).toBeGreaterThan(REPLICONS.pbr322.slots);
+  });
+
+  it("effectiveCopies survives absurd energy", () => {
+    for (const n of [NaN, -5, Infinity]) {
+      for (const id of REPLICON_IDS) {
+        const c = effectiveCopies(REPLICONS[id], n);
+        expect(Number.isFinite(c), `${id} at ${String(n)}`).toBe(true);
+        expect(c).toBeGreaterThanOrEqual(1);
+      }
+    }
   });
 });

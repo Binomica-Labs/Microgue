@@ -85,7 +85,7 @@ class Game {
   log: { text: string; t: number }[] = [];
   showPlasmid = false;
   buttons: Button[] = makeButtons();
-  ring: RingGeom = { cx: 0, cy: 0, rInner: 0, rOuter: 0, rot: 0 };
+  ring: RingGeom = { cx: 0, cy: 0, rInner: 0, rOuter: 0, rot: 0, used: 16 };
   // A pointer gesture is classified once on down and acted on once on up.
   // Deciding per-event is what let a button press open the plasmid on down and
   // a stray dismiss check close it again on up, in the same tap.

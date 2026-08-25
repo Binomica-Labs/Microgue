@@ -18,6 +18,11 @@ export const PATHWAY_COLOUR: Readonly<Record<Pathway, string>> = {
 };
 
 export interface RingGeom {
+  /** How many positions this ring actually has. The ARRAY is sized for the
+   *  largest replicon; the ring is however much of it this one owns, and
+   *  drawing all 24 on a 16-slot backbone put eight phantom wedges on screen
+   *  that could be tapped, selected and dropped into and did nothing. */
+  used: number;
   cx: number; cy: number; rInner: number; rOuter: number; rot: number;
 }
 
@@ -28,11 +33,13 @@ export function slotAt(g: RingGeom, x: number, y: number): number | null {
   if (d < g.rInner || d > g.rOuter) return null;
   const a = Math.atan2(dy, dx) + Math.PI / 2 - g.rot;
   const t = ((a / (Math.PI * 2)) % 1 + 1) % 1;
-  return Math.floor(t * SLOTS) % SLOTS;
+  const n = Math.max(Math.min(g.used, SLOTS), 1);
+  return Math.floor(t * n) % n;
 }
 
 export function slotCentre(g: RingGeom, i: number): { x: number; y: number } {
-  const a = ((i + 0.5) / SLOTS) * Math.PI * 2 - Math.PI / 2 + g.rot;
+  const n = Math.max(Math.min(g.used, SLOTS), 1);
+  const a = ((i + 0.5) / n) * Math.PI * 2 - Math.PI / 2 + g.rot;
   const r = (g.rInner + g.rOuter) / 2;
   return { x: g.cx + Math.cos(a) * r, y: g.cy + Math.sin(a) * r };
 }
@@ -269,7 +276,7 @@ export function drawRing(
 ): void {
   const mid = (g.rInner + g.rOuter) / 2;
   const band = g.rOuter - g.rInner;
-  const step = (Math.PI * 2) / SLOTS;
+  const step = (Math.PI * 2) / Math.max(Math.min(g.used, SLOTS), 1);
 
   // Operon arcs, drawn under the slots so a transcript reads as one sweep.
   for (const op of p.operons()) {
@@ -283,7 +290,7 @@ export function drawRing(
     ctx.stroke();
   }
 
-  for (let i = 0; i < SLOTS; i++) {
+  for (let i = 0; i < Math.max(Math.min(g.used, SLOTS), 1); i++) {
     const a0 = (i / SLOTS) * Math.PI * 2 - Math.PI / 2 + g.rot;
     const part = p.at(i);
     const dragging = o.dragFrom === i;

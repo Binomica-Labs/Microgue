@@ -7,7 +7,7 @@
 import * as bio from "./biology.js";
 import { MODIFIERS } from "./parts.js";
 import { REPLICONS, availableAt, type RepliconId } from "./replicon.js";
-import { creditFor, recordRun } from "./lab.js";
+import { STOCK_CAP, creditFor, recordRun } from "./lab.js";
 import { writeLab } from "./lab_save.js";
 import { deleteSlot } from "./saves.js";
 import { quality } from "./allele.js";
@@ -42,6 +42,22 @@ export function t_die(_g: Game): void {
   // death rather than with whatever happened just before it.
   _g.trace.push(_g.clock.turn, "death",
                 `F${String(_g.dungeon.floor)} by ${outcome.killedBy}`);
+
+  // A mobilisable replicon transfers itself out of a dying cell. Half of what
+  // it carried reaches the next strain -- which is how resistance genuinely
+  // crosses between organisms, and the one way anything survives a death.
+  if (REPLICONS[_g.genome.replicon].signature === "mobilisable") {
+    const aboard = [..._g.genome.carried()].filter((g) => g !== "ori");
+    const rescued = aboard.filter((_, i) => i % 2 === 0).slice(0, STOCK_CAP);
+    const room = Math.max(STOCK_CAP - _g.lab.stock.length, 0);
+    const taken = rescued.filter((g) => !_g.lab.stock.includes(g)).slice(0, room);
+    if (taken.length > 0) {
+      _g.lab.stock.push(...taken);
+      _g.note(`The plasmid mobilises out of the dying cell. `
+        + `${String(taken.length)} locus${taken.length === 1 ? "" : "es"} `
+        + "reaches the next strain.");
+    }
+  }
 
   const credit = creditFor(outcome, _g.lab.deepestEver);
   const rec = recordRun(_g.lab, outcome, credit, _g.trace.epitaph(8));
@@ -135,7 +151,8 @@ export function t_subclone(_g: Game, to: RepliconId): void {
     if (!_g.genome.stash(part).ok) lost++;
   }
 
-  _g.note(`Subcloned from ${REPLICONS[before].name} onto ${def.name}. ${def.note}`);
+  _g.note(`Subcloned from ${REPLICONS[before].name} onto ${def.name}. `
+    + `${def.rule}. ${def.note}`);
   if (displaced > 0) {
     _g.note(`${String(displaced)} part${displaced === 1 ? "" : "s"} would not fit `
       + `and came off the backbone${lost > 0 ? `; ${String(lost)} had nowhere to go` : ""}.`);
