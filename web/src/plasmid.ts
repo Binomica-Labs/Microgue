@@ -188,9 +188,58 @@ export class Plasmid {
     return { ok: true };
   }
 
-  private norm(i: number): number { return ((i % SLOTS) + SLOTS) % SLOTS; }
+  /**
+   * Wrap a ring index.
+   *
+   * Modulo the USABLE slots, not the array length. The array is sized for the
+   * largest replicon; the ring is however much of it this replicon owns, and a
+   * plasmid is a circle that closes THERE. Wrapping modulo the array meant an
+   * operon starting near the end ran into positions the replicon does not
+   * have -- which is how `assemble` stranded parts at 16 on a 16-slot
+   * backbone, and why transcription never actually wrapped.
+   */
+  private norm(i: number): number {
+    const used = this.usableSlots;
+    const k = Number.isFinite(i) ? Math.round(i) : 0;
+    return ((k % used) + used) % used;
+  }
 
-  at(i: number): Part | null { return this.slots[this.norm(i)] ?? null; }
+  /**
+   * Empty a position regardless of whether the replicon still owns it.
+   *
+   * `put` refuses unusable positions, which is right everywhere except when
+   * MOVING to a smaller backbone -- the one operation whose whole job is to
+   * clear the positions that have just stopped existing. Without this,
+   * subcloning down could not unstrand what it had just stranded.
+   */
+  vacate(i: number): Part | null {
+    const k = this.exact(i);
+    if (k < 0 || k >= SLOTS) return null;
+    const was = this.slots[k] ?? null;
+    if (was === null) return null;
+    this.slots[k] = null;
+    this.touch();
+    return was;
+  }
+
+  /**
+   * An explicit index, NOT wrapped.
+   *
+   * `norm` is for walking ring neighbours, where wrapping is the whole point.
+   * Applying it to a caller-supplied index is different and dangerous: with a
+   * 16-slot replicon it silently maps 20 onto 4, so loading a save whose array
+   * runs to 23 would overwrite the first eight positions.
+   */
+  private exact(i: number): number {
+    return Number.isFinite(i) ? Math.round(i) : -1;
+  }
+
+  /** The part at an exact position. Out of range reads as empty rather than
+   *  wrapping onto something else. */
+  at(i: number): Part | null {
+    const k = this.exact(i);
+    return k >= 0 && k < SLOTS ? this.slots[k] ?? null : null;
+  }
 
   has(id: GeneId): boolean {
     return this.slots.some((p) => p?.kind === "gene" && p.id === id);
@@ -200,7 +249,13 @@ export class Plasmid {
     return this.slots.flatMap((p) => (p?.kind === "gene" ? [p.id] : []));
   }
 
-  free(): number { return this.slots.filter((p) => p === null).length; }
+  /** Empty positions the replicon actually has. Counting the whole array
+   *  reported free space that nothing could be put in. */
+  free(): number {
+    let n = 0;
+    for (let i = 0; i < this.usableSlots; i++) if (this.slots[i] === null) n++;
+    return n;
+  }
 
   used(): number {
     return this.slots.reduce((a, p) => a + (p?.kind === "gene" ? GENES[p.id].kb : 0), 0);
@@ -219,7 +274,7 @@ export class Plasmid {
     if (part.kind === "gene" && this.has(part.id)) {
       return { ok: false, err: `${GENES[part.id].name} already present` };
     }
-    for (let k = 0; k < SLOTS; k++) {
+    for (let k = 0; k < this.usableSlots; k++) {
       const i = this.norm(from + k);
       if (!this.usable(i)) continue;
       if (this.slots[i] === null) { this.slots[i] = part; this.touch(); return { ok: true }; }
@@ -234,13 +289,17 @@ export class Plasmid {
   }
 
   put(i: number, part: Part | null): void {
-    this.slots[this.norm(i)] = part;
+    // Refuse a position the replicon does not have. Allowing it is precisely
+    // how parts ended up stranded past the end of the ring.
+    const k = this.exact(i);
+    if (!this.usable(k)) return;
+    this.slots[k] = part;
     this.touch();
   }
 
   /** Swap two slots -- the drag-and-drop primitive. */
   swap(a: number, b: number): Result {
-    const ia = this.norm(a), ib = this.norm(b);
+    const ia = this.exact(a), ib = this.exact(b);
     // Same reason as rotate: a position past the replicon's last is not a
     // place a part may go.
     if (!this.usable(ia) || !this.usable(ib)) {
@@ -260,7 +319,9 @@ export class Plasmid {
     if (p?.kind === "gene" && p.id === "ori") {
       return { ok: false, err: "cannot excise the origin" };
     }
-    this.slots[this.norm(i)] = null;
+    const k = this.exact(i);
+    if (k < 0 || k >= SLOTS) return { ok: false, err: "no such position" };
+    this.slots[k] = null;
     this.touch();
     return { ok: true };
   }
@@ -299,7 +360,7 @@ export class Plasmid {
    */
   private computeOperons(): Operon[] {
     const ctx = this.context();
-    return transcribe(this.slots, ctx).map((t) => ({
+    return transcribe(this.slots, ctx, this.usableSlots).map((t) => ({
       promoter: t.promoter,
       output: t.output,
       genes: t.readings.map((r) => ({ slot: r.slot, id: r.id, rank: r.rank, flow: r.flow })),
@@ -626,7 +687,7 @@ export class Plasmid {
 
     const need = genes.length + 1;
     let start = -1;
-    for (let i = 0; i < SLOTS; i++) {
+    for (let i = 0; i < this.usableSlots; i++) {
       let ok = true;
       for (let k = 0; k < need; k++) if (!usable(i + k)) { ok = false; break; }
       if (ok) { start = i; break; }
@@ -653,8 +714,10 @@ export class Plasmid {
     if (!promoter) return { ok: false, err: "no spare promoter in the bin" };
     this.bin.splice(pi, 1);
 
-    this.put(start, promoter);
-    parts.forEach((p, k) => { this.put(start + 1 + k, p); });
+    // Wrapped explicitly. `put` no longer wraps for us, and the run really can
+    // cross the end of the ring -- that is what a circular plasmid is.
+    this.put(this.norm(start), promoter);
+    parts.forEach((p, k) => { this.put(this.norm(start + 1 + k), p); });
 
     // Cap it if a terminator is spare and the next slot is free.
     const tail = this.norm(start + need);

@@ -336,6 +336,36 @@ layout pinned to the top and ran into the log. It now shrinks gap first, then
 size, with 44px as the floor -- below that it stops being a touch target. The
 layout test caught this the moment the explore button was added.
 
+## The ring closes at the replicon, not at the array
+
+Reported twice from play: "a part sits at position 16, past the 16 the
+replicon provides". `rotate` was one cause; the root cause was deeper.
+
+`norm()` wrapped modulo the ARRAY (24, sized for the largest replicon) while
+the ring is however much of it this replicon owns. A plasmid is a circle and it
+closes at `usableSlots`. So `assemble` could pick a start near the end, wrap
+past 15, and lay an operon down where nothing could reach it -- and
+transcription never actually wrapped at all, which was silently wrong.
+
+Three distinctions now, and they matter:
+
+* `norm()` wraps modulo the USABLE slots. For walking ring neighbours.
+* `exact()` does NOT wrap. For a caller-supplied index -- applying `norm` to
+  one silently maps 20 onto 4, so loading a save whose array runs to 23 would
+  have overwritten the first eight positions.
+* `put` REFUSES a position the replicon does not have, and `vacate` is the one
+  operation that may clear one: subcloning to a smaller backbone exists to
+  empty the positions that just stopped existing, and `put` refusing them left
+  it unable to unstrand what it had stranded.
+
+`free()` counts usable positions only. It counted the whole array, reporting
+free space nothing could be put in.
+
+**Targeted tests missed this twice.** `spec` now fuzzes every public mutator in
+random order across 400 sequences on every replicon and reports WHICH operation
+stranded a part. That is what found it; a bounds check was never the problem, a
+wrap was.
+
 ## Spinning the ring stranded parts
 
 Reported from play: "a part sits at position 16, past the 16 the replicon

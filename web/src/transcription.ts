@@ -73,8 +73,13 @@ export function modEffect(mods: readonly ModifierId[]): {
  * Stops when flow falls below a floor, when it meets another promoter, or
  * after a full lap, so a ring of terminators cannot loop forever.
  */
-export function transcribe(slots: readonly (Part | null)[], ctx: Context): Transcript[] {
-  const n = slots.length;
+export function transcribe(
+  slots: readonly (Part | null)[], ctx: Context, used = slots.length,
+): Transcript[] {
+  // The ring closes at the replicon's last position, not at the end of the
+  // array. Wrapping modulo the array read into slots the replicon does not
+  // have, so the plasmid never actually behaved as a circle.
+  const n = Math.min(Math.max(Math.round(used), 1), slots.length);
   const norm = (i: number): number => ((i % n) + n) % n;
   const out: Transcript[] = [];
   const FLOOR = 0.01;

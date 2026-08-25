@@ -1401,7 +1401,11 @@ describe("edge cases across modules", () => {
 
   it("a completely full ring reports no free slots and refuses installs", () => {
     const p = new Plasmid();
-    for (let i = 0; i < SLOTS; i++) if (p.at(i) === null) p.put(i, { kind: "terminator", id: "rrnbt1" });
+    // Fill the RING, not the array: positions past the replicon's last are not
+    // free space, they do not exist.
+    for (let i = 0; i < p.usableSlots; i++) {
+      if (p.at(i) === null) p.put(i, { kind: "terminator", id: "rrnbt1" });
+    }
     expect(p.free()).toBe(0);
     expect(p.add({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(false);
   });

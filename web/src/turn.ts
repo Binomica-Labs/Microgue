@@ -798,9 +798,8 @@ export function t_subclone(_g: Game, to: RepliconId): void {
   let displaced = 0, lost = 0;
   for (let i = _g.genome.slots.length - 1; i >= 0; i--) {
     if (_g.genome.usable(i)) continue;
-    const part = _g.genome.slots[i];
-    if (part === undefined || part === null) continue;
-    _g.genome.put(i, null);
+    const part = _g.genome.vacate(i);
+    if (part === null) continue;
     displaced++;
     if (!_g.genome.stash(part).ok) lost++;
   }

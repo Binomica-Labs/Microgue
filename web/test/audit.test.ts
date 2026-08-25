@@ -1,7 +1,9 @@
 import { WILD_TYPE } from "../src/allele.js";
 import { describe, expect, it } from "vitest";
 import * as bio from "../src/biology.js";
-import { Plasmid, SLOTS } from "../src/plasmid.js";
+import { Plasmid, SLOTS, type Part } from "../src/plasmid.js";
+import { REPLICON_IDS } from "../src/replicon.js";
+import { MAX_STRAIN } from "../src/strain.js";
 import * as motion from "../src/motion.js";
 import * as fov from "../src/fov.js";
 import * as cycle from "../src/cycle.js";
@@ -421,5 +423,83 @@ describe("the path budget scales with the level", () => {
       expect(findPath(g, { x: 1, y: 1 }, { x: n - 2, y: n - 2 }),
              `${String(n)}x${String(n)}`).not.toBeNull();
     }
+  });
+});
+
+describe("no sequence of operations can strand a part", () => {
+  // The reported bug twice over: a part at position 16 on a 16-slot replicon,
+  // reachable by ordinary play. Targeted tests missed it both times because
+  // the culprit was a WRAP, not a bounds check -- so this fuzzes every public
+  // mutator in random order and reports which one broke it.
+  const genes = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+
+  const strandedAt = (p: Plasmid): number => {
+    for (let i = 0; i < SLOTS; i++) {
+      // The RAW array: at() does not wrap any more, and the invariant reads
+      // slots directly.
+      if (!p.usable(i) && p.slots[i] !== null && p.slots[i] !== undefined) return i;
+    }
+    return -1;
+  };
+
+  it("across four hundred randomised sequences, on every replicon", () => {
+    const blame = new Map<string, number>();
+    for (let seed = 0; seed < 400; seed++) {
+      const p = new Plasmid();
+      p.replicon = REPLICON_IDS[seed % REPLICON_IDS.length] ?? "pbr322";
+      p.strain = 1 + (seed % MAX_STRAIN);
+      const rng = makeRng(seed);
+      const names = ["stash", "install", "uninstall", "add", "swap",
+                     "remove", "rotate", "assemble", "optimise"];
+      for (let step = 0; step < 60; step++) {
+        const op = rng.int(9);
+        const g = genes[rng.int(genes.length)];
+        if (!g) continue;
+        switch (op) {
+          case 0: p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE }); break;
+          case 1: p.install(rng.int(Math.max(p.bin.length, 1)), rng.int(SLOTS)); break;
+          case 2: p.uninstall(rng.int(SLOTS)); break;
+          case 3: p.add({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE },
+                        rng.int(SLOTS)); break;
+          case 4: p.swap(rng.int(SLOTS), rng.int(SLOTS)); break;
+          case 5: p.remove(rng.int(SLOTS)); break;
+          case 6: p.rotate(rng.int(40) - 20); break;
+          case 7: p.assemble([genes[rng.int(genes.length)] as bio.GeneId]); break;
+          case 8: p.optimise(g); break;
+        }
+        if (strandedAt(p) >= 0) {
+          const n = names[op] ?? "?";
+          blame.set(n, (blame.get(n) ?? 0) + 1);
+          break;
+        }
+      }
+    }
+    expect([...blame.entries()], "these operations stranded a part").toEqual([]);
+  });
+
+  it("and the origin survives all of it", () => {
+    for (let seed = 0; seed < 120; seed++) {
+      const p = new Plasmid();
+      p.replicon = REPLICON_IDS[seed % REPLICON_IDS.length] ?? "pbr322";
+      const rng = makeRng(seed + 900);
+      for (let step = 0; step < 40; step++) {
+        p.rotate(rng.int(30) - 15);
+        p.remove(rng.int(SLOTS));
+        p.swap(rng.int(SLOTS), rng.int(SLOTS));
+      }
+      expect(p.has("ori"), `seed ${String(seed)} lost the origin`).toBe(true);
+    }
+  });
+
+  it("an explicit index never wraps onto another position", () => {
+    // With a 16-slot replicon, wrapping mapped 20 onto 4 -- so loading a save
+    // whose array runs to 23 would have overwritten the first eight positions.
+    const p = new Plasmid();
+    p.replicon = "pbr322";
+    const marker: Part = { kind: "terminator", id: "hairpin" };
+    p.put(4, marker);
+    p.put(20, { kind: "terminator", id: "trpa" });
+    expect(p.at(4), "an out-of-ring put landed on slot 4").toEqual(marker);
+    expect(p.at(20), "an out-of-ring read wrapped").toBeNull();
   });
 });

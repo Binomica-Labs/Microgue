@@ -1,6 +1,7 @@
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 
+import { strainLevel } from "./strain.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
          r_drawPlasmid, r_drawScreenFx, r_drawToasts } from "./render.js";
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
@@ -490,6 +491,14 @@ class Game {
     this.dungeon = new Dungeon(96, 96, s.seed);
     this.dungeon.floor = s.floor;
     this.genome = new Plasmid();
+    // The replicon FIRST. `put` refuses positions the replicon does not have,
+    // and the saved array runs to the largest replicon's length -- so writing
+    // the ring before knowing which backbone it belongs to drops everything
+    // past the default's sixteenth position.
+    this.genome.replicon = s.replicon;
+    this.genome.strain = strainLevel({
+      catalogued: s.run.bestiary.length, deepest: s.run.deepest,
+    });
     s.ring.forEach((p, i) => { this.genome.put(i, p); });
     this.genome.bin.length = 0;
     for (const p of s.bin) this.genome.bin.push({ ...p });
@@ -499,7 +508,6 @@ class Game {
     this.player.atp = s.atp;
     this.mods = [...s.heldMods];
     this.clock.turn = s.turn;
-    this.genome.replicon = s.replicon;
     for (const [floor, at] of s.stocked) this.dungeon.level(floor).stockedAt = at;
     this.won = s.won;
     this.run = {
