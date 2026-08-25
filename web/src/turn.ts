@@ -36,6 +36,7 @@ import { creditFor, recordRun } from "./lab.js";
 import { writeLab } from "./lab_save.js";
 import { deleteSlot } from "./saves.js";
 import { findPath } from "./path.js";
+import { nextExplore, unexplored } from "./explore.js";
 import { headingOf, turnToward } from "./motion.js";
 import type { Part } from "./plasmid.js";
 import type { ResearchRow } from "./screens.js";
@@ -309,7 +310,22 @@ export function t_step_(_g: Game, t: number): void {
     if (_g.walk && at && !_g.showPlasmid) {
       _g.walk.i++;
       const n = _g.walk.nodes[_g.walk.i];
-      if (!n || _g.dungeon.mobAt(n.x, n.y) || !_g.step(n.x, n.y)) _g.walk = null;
+      const blocker = n ? _g.dungeon.mobAt(n.x, n.y) : null;
+
+      // Travel that ends in a blow. Arriving next to the thing you tapped
+      // spends the last step ON it, then stops -- one input, one approach, one
+      // strike, and you decide what happens next.
+      if (blocker && blocker === _g.strikeAfterTravel) {
+        _g.attack(blocker);
+        _g.walk = null;
+        _g.strikeAfterTravel = null;
+        _g.exploring = false;
+      } else if (!n || blocker || !_g.step(n.x, n.y)) {
+        _g.walk = null;
+        _g.strikeAfterTravel = null;
+      }
+    } else if (_g.exploring && at && !_g.walk && !_g.showPlasmid) {
+      t_exploreStep(_g);
     }
 
     _g.draw();
@@ -510,8 +526,15 @@ export function t_look(_g: Game): void {
     for (const uid of [..._g.spotted]) if (!nowVisible.has(uid)) _g.spotted.delete(uid);
     for (const mob of arrivals) _g.spotted.add(mob.uid);
 
-    if (arrivals.length > 0 && _g.walk) {
+    if (arrivals.length > 0 && (_g.walk || _g.exploring)) {
+      // Total stop. Clearing only the walk left `exploring` set, so the next
+      // tick immediately picked a new frontier and walked on past the thing
+      // that had just appeared.
       _g.walk = null;
+      _g.exploring = false;
+      _g.strikeAfterTravel = null;
+      const btn = _g.buttons.find((b) => b.id === "explore");
+      if (btn) btn.active = false;
       _g.path = null;
       const names = [...new Set(arrivals.map((a) => a.name))];
       const what = names.length === 1
@@ -789,4 +812,42 @@ export function t_subclone(_g: Game, to: RepliconId): void {
   }
   _g.mobTurn();
   _g.save();
+}
+
+
+/**
+ * One leg of auto-explore.
+ *
+ * Called when the walk queue has emptied and nothing interrupted, so this
+ * either finds the next frontier or declares the level done. The interrupt
+ * itself lives in `look()`: anything coming into view clears `walk`, and
+ * clearing `exploring` alongside it is what makes the stop total.
+ */
+export function t_exploreStep(_g: Game): void {
+  if (_g.dead || !_g.exploring) return;
+  const r = nextExplore(_g.level.grid, _g.level.sight, _g.player);
+  if (r.kind === "done") {
+    _g.exploring = false;
+    const left = unexplored(_g.level.grid, _g.level.sight);
+    _g.note(left < 0.02
+      ? "The floor is fully mapped."
+      : `${r.why} ${String(Math.round(left * 100))}% of the floor is still dark.`);
+    const btn = _g.buttons.find((b) => b.id === "explore");
+    if (btn) btn.active = false;
+    return;
+  }
+  _g.walk = { nodes: [...r.path], i: 0 };
+}
+
+/** Start or stop exploring. */
+export function t_explore(_g: Game): void {
+  if (_g.dead) return;
+  _g.exploring = !_g.exploring;
+  const btn = _g.buttons.find((b) => b.id === "explore");
+  if (btn) btn.active = _g.exploring;
+  if (!_g.exploring) { _g.walk = null; _g.note("Exploration halted."); return; }
+  _g.target = null;
+  _g.autoAttack = false;
+  _g.strikeAfterTravel = null;
+  t_exploreStep(_g);
 }

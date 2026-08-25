@@ -241,6 +241,11 @@ export class Plasmid {
   /** Swap two slots -- the drag-and-drop primitive. */
   swap(a: number, b: number): Result {
     const ia = this.norm(a), ib = this.norm(b);
+    // Same reason as rotate: a position past the replicon's last is not a
+    // place a part may go.
+    if (!this.usable(ia) || !this.usable(ib)) {
+      return { ok: false, err: "no such position on this plasmid" };
+    }
     // Moving the origin is fine; only excising it is refused (see remove).
     const pa = this.slots[ia] ?? null;
     const pb = this.slots[ib] ?? null;
@@ -262,11 +267,20 @@ export class Plasmid {
 
   /** Rotate the whole ring. Purely cosmetic for the player, but it means the
    *  drag target under a thumb can always be brought to a comfortable spot. */
+  /**
+   * Spin the ring.
+   *
+   * Only the USABLE positions rotate. The array is sized for the largest
+   * replicon, so spinning all of it pushed parts into positions the current
+   * replicon does not have -- reachable by simply dragging the ring, which is
+   * the most ordinary thing a player does on that screen.
+   */
   rotate(by: number): void {
-    const n = this.norm(by);
+    const used = this.usableSlots;
+    const n = ((Math.round(Number.isFinite(by) ? by : 0) % used) + used) % used;
     if (n === 0) return;
     const copy = this.slots.slice();
-    for (let i = 0; i < SLOTS; i++) this.slots[this.norm(i + n)] = copy[i] ?? null;
+    for (let i = 0; i < used; i++) this.slots[(i + n) % used] = copy[i] ?? null;
     this.touch();
   }
 

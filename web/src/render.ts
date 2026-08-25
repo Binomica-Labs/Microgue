@@ -321,13 +321,33 @@ export function r_draw(_g: Game): void {
       }
     }
     // The fog. Unseen is black, remembered is dimmed, lit is untouched.
+    //
+    // Drawn as horizontal RUNS with pixel-rounded edges, not per tile. A
+    // per-tile rect padded by +1 overlapped its neighbour, and two passes of a
+    // 62% black composite to 86% -- which is exactly the grid of dark lines
+    // that showed up across every remembered area.
     if (!hc) {
+      const DIM = "rgba(2,4,4,0.82)";
+      const DARK = "#010303";
       for (let y = y0; y <= y1; y++) {
+        let runStart = -1;
+        let runStyle = "";
+        const flush = (endX: number): void => {
+          if (runStart < 0) return;
+          const x1p = Math.round((endX + 1) * px);
+          const x0p = Math.round(runStart * px);
+          ctx.fillStyle = runStyle;
+          ctx.fillRect(x0p, Math.round(y * px), x1p - x0p,
+                       Math.round((y + 1) * px) - Math.round(y * px));
+          runStart = -1;
+        };
         for (let x = x0; x <= x1; x++) {
-          if (isVisible(sight, x, y)) continue;
-          ctx.fillStyle = isSeen(sight, x, y) ? "rgba(2,4,4,0.62)" : "#020404";
-          ctx.fillRect(x * px, y * px, px + 1, px + 1);
+          const style = isVisible(sight, x, y) ? ""
+            : isSeen(sight, x, y) ? DIM : DARK;
+          if (style !== runStyle) { flush(x - 1); runStyle = style; }
+          if (style !== "" && runStart < 0) runStart = x;
         }
+        flush(x1);
       }
     }
     _g.drawFx(px);

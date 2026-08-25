@@ -16,8 +16,11 @@ export function makeButtons(): Button[] {
   return [
     b("plasmid", "\u25CE", "plasmid"),
     b("map", "\u229E", "pathway map"),
-    b("auto", "\u2694", "auto-attack"),
+    // Distinct glyphs: two identical crossed-swords buttons sat next to
+    // each other and nothing told them apart.
+    b("auto", "\u21BB", "auto-attack"),
     b("strike", "\u2694", "strike the nearest thing"),
+    b("explore", "\u2732", "auto-explore"),
     b("wait", "\u23F8", "wait a turn"),
     b("research", "\u2697", "directed evolution"),
     b("notes", "\u270E", "field notebook"),
@@ -38,15 +41,26 @@ export function layoutButtons(
   bs: Button[], W: number, H: number,
   ins: { top: number; right: number; bottom: number }, u: number, reserve: number,
 ): void {
-  const size = Math.max(Math.round(46 * u), 44);
-  const gap = Math.round(9 * u);
+  // Shrink to fit rather than overflow. The column grew past what a 720x1600
+  // screen holds at the preferred size, and pinning to the top just ran it
+  // into the log. 44px is the floor: below that it stops being a touch target.
+  const usableTop = ins.top + Math.round(9 * u);
+  const usableBottom = H - ins.bottom - reserve - Math.round(9 * u);
+  const room = usableBottom - usableTop;
+
+  let size = Math.max(Math.round(46 * u), 44);
+  let gap = Math.round(9 * u);
+  for (let i = 0; i < 24; i++) {
+    if (bs.length * size + (bs.length - 1) * gap <= room) break;
+    if (gap > 2) { gap -= 1; continue; }
+    if (size <= 44) break;
+    size -= 1;
+  }
+
   const stack = bs.length * size + (bs.length - 1) * gap;
-  const usableTop = ins.top + gap;
-  const usableBottom = H - ins.bottom - reserve - gap;
-  const x = W - ins.right - gap - size;
-  let y = usableTop + Math.max((usableBottom - usableTop - stack) / 2, 0);
-  // If the stack cannot fit, pin it to the top and let it run to the reserve.
-  if (stack > usableBottom - usableTop) y = usableTop;
+  const x = W - ins.right - Math.round(9 * u) - size;
+  let y = usableTop + Math.max((room - stack) / 2, 0);
+  if (stack > room) y = usableTop;
 
   for (const btn of bs) {
     btn.x = x;

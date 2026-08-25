@@ -65,6 +65,7 @@ import { LEDGER_CAP, STOCK_CAP, buy, creditFor, genePrice, newLab, offers,
 import { parseLab } from "../src/lab_save.js";
 import { LYSIS_MS, phaseAt, shards } from "../src/lysis.js";
 import { levelProgress } from "../src/strain.js";
+import { frontier, nextExplore, unexplored } from "../src/explore.js";
 import { NODE_W, NODE_H, clampView, fitView, frame, litBounds, moduleBoxes,
          toScreen, toWorld, zoomAbout, type View } from "../src/kegg_ui.js";
 
@@ -1340,15 +1341,50 @@ describe("edge cases across modules", () => {
     expect(findPath(g, { x: 1, y: 1 }, { x: 7, y: 7 })).toBeNull();
   });
 
-  it("rotating the ring by absurd amounts is a no-op modulo SLOTS", () => {
+  it("rotating by absurd amounts is a no-op modulo the USABLE slots", () => {
+    // Modulo usableSlots, not SLOTS: the array is sized for the largest
+    // replicon and only the positions this one owns take part.
     const p = new Plasmid();
     p.put(4, { kind: "promoter", id: "j23106" });
     p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
-    const before = p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null));
-    p.rotate(SLOTS * 1000);
-    expect(p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null))).toEqual(before);
-    p.rotate(-SLOTS * 3);
-    expect(p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null))).toEqual(before);
+    const snap = () => p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null));
+    const before = snap();
+    p.rotate(p.usableSlots * 1000);
+    expect(snap()).toEqual(before);
+    p.rotate(-p.usableSlots * 3);
+    expect(snap()).toEqual(before);
+    for (const n of [NaN, Infinity, 1e12]) {
+      expect(() => { p.rotate(n); }).not.toThrow();
+    }
+  });
+
+  it("spinning the ring never strands a part past the replicon", () => {
+    // Rotating all 24 array positions while the replicon owned 16 pushed parts
+    // where nothing could reach them -- from simply dragging the ring, which
+    // is the most ordinary thing a player does on that screen.
+    for (const rep of REPLICON_IDS) {
+      const p = new Plasmid();
+      p.replicon = rep;
+      p.strain = 1;
+      for (let i = 0; i < 60; i++) {
+        p.rotate(i * 7 - 30);
+        for (let s = 0; s < SLOTS; s++) {
+          if (!p.usable(s)) {
+            expect(p.at(s), `${rep}: part stranded at ${String(s)}`).toBeNull();
+          }
+        }
+      }
+      expect(p.has("ori"), `${rep}: origin lost while spinning`).toBe(true);
+    }
+  });
+
+  it("a swap outside the replicon is refused rather than stranding a part", () => {
+    const p = new Plasmid();
+    p.replicon = "puc";           // 10 slots
+    p.strain = 1;
+    expect(p.swap(1, 20).ok).toBe(false);
+    expect(p.at(20)).toBeNull();
+    expect(p.swap(1, 2).ok).toBe(true);
   });
 
   it("swapping a slot with itself changes nothing", () => {
@@ -5203,5 +5239,78 @@ describe("nothing ordered is ever lost", () => {
       (o) => o.id.kind === "gene" && !lab.stock.includes((o.id as { gene: bio.GeneId }).gene));
     expect(gene?.owned, "an unbuyable offer looked buyable").toBe(true);
     expect(gene?.note).toContain("no room");
+  });
+});
+
+describe("auto-explore targets the frontier", () => {
+  const level = () => {
+    const d = new Dungeon(96, 96, 19);
+    const L = d.level(1);
+    computeFov(L.sight, L.grid, L.up.x, L.up.y, 9);
+    return L;
+  };
+
+  it("goes to known floor beside the unknown, not into the unknown", () => {
+    // You cannot path INTO the dark: as far as the pathfinder knows it might
+    // be solid. The frontier -- seen floor next to unseen -- is what reveals it.
+    const L = level();
+    const f = frontier(L.grid, L.sight, L.up);
+    expect(f).not.toBeNull();
+    if (!f) return;
+    expect(isSeen(L.sight, f.x, f.y), "target must be somewhere you have been")
+      .toBe(true);
+    expect(L.grid.isFloor(f.x, f.y)).toBe(true);
+    const touchesDark = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+      .some(([dx, dy]) => !isSeen(L.sight, f.x + (dx ?? 0), f.y + (dy ?? 0)));
+    expect(touchesDark, "target is not on the frontier at all").toBe(true);
+  });
+
+  it("returns a walkable path, or says it is finished", () => {
+    const L = level();
+    const r = nextExplore(L.grid, L.sight, L.up);
+    expect(r.kind).toBe("go");
+    if (r.kind !== "go") return;
+    expect(r.path.length).toBeGreaterThan(1);
+    expect(r.path[0]).toEqual({ x: L.up.x, y: L.up.y });
+    for (const n of r.path) expect(L.grid.isFloor(n.x, n.y)).toBe(true);
+  });
+
+  it("exploring the whole level terminates and reveals nearly all of it", () => {
+    // The real risk with a loop like this is that it never finishes: a
+    // frontier it cannot path to would be picked for ever.
+    const L = level();
+    let at = { x: L.up.x, y: L.up.y };
+    let legs = 0;
+    for (; legs < 400; legs++) {
+      const r = nextExplore(L.grid, L.sight, at);
+      if (r.kind === "done") break;
+      const last = r.path[r.path.length - 1];
+      if (!last) break;
+      at = last;
+      computeFov(L.sight, L.grid, at.x, at.y, 9);
+    }
+    expect(legs, "auto-explore never terminated").toBeLessThan(400);
+    expect(unexplored(L.grid, L.sight), "left too much of the floor dark")
+      .toBeLessThan(0.15);
+  });
+
+  it("a fully explored level reports done, not an empty path", () => {
+    const L = level();
+    L.sight.seen.fill(1);
+    const r = nextExplore(L.grid, L.sight, L.up);
+    expect(r.kind).toBe("done");
+    expect(frontier(L.grid, L.sight, L.up)).toBeNull();
+    expect(unexplored(L.grid, L.sight)).toBe(0);
+  });
+
+  it("a sealed pocket does not strand the search", () => {
+    // The nearest frontier is sometimes behind a wall. Giving up on the first
+    // failed path would stop exploring next to an open doorway.
+    const g = new mg.Grid(40, 40, mg.FLOOR);
+    for (let y = 0; y < 40; y++) g.set(20, y, mg.WALL);
+    const sight = makeSight(40, 40);
+    computeFov(sight, g, 5, 5, 8);
+    const r = nextExplore(g, sight, { x: 5, y: 5 });
+    expect(r.kind).toBe("go");
   });
 });

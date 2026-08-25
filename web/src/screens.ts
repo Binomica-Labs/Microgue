@@ -400,9 +400,11 @@ export function drawContainer(
       ctx.roundRect(bx, by, cell, cell, cell * 0.2);
       ctx.fill();
       ctx.fillStyle = "#0f1512";
-      ctx.font = `${Math.max(cell * 0.19, 9)}px ui-monospace,monospace`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
+      // Fitted to the tile. Allele names run to "psbA of fast folding" now, and
+      // a fixed size overflowed the tile and printed across its neighbours.
+      fitInto(ctx, itemName(it), cell - 6 * u, Math.max(cell * 0.19, 9), 6);
       ctx.fillText(itemName(it), bx + cell / 2, by + cell / 2 - cell * 0.06);
       ctx.font = `${Math.max(cell * 0.14, 7)}px ui-monospace,monospace`;
       ctx.fillText(
@@ -425,6 +427,25 @@ export function drawContainer(
 }
 
 export interface ShopRow { readonly box: Box; readonly offer: Offer }
+
+/**
+ * Shrink a font until the text fits, down to a floor.
+ *
+ * Returns having SET ctx.font. Sizing text to a tile by guessing a point size
+ * works until the strings get longer, and allele names made every tile label
+ * overflow onto its neighbours.
+ */
+function fitInto(
+  ctx: CanvasRenderingContext2D, text: string, max: number,
+  start: number, min: number,
+): void {
+  let size = start;
+  for (let i = 0; i < 12; i++) {
+    ctx.font = `${size}px ui-monospace,monospace`;
+    if (ctx.measureText(text).width <= max || size <= min) return;
+    size = Math.max(size * 0.9, min);
+  }
+}
 
 /** Trim to a measured width, with a real ellipsis. */
 function ellipsise(ctx: CanvasRenderingContext2D, text: string, max: number): string {

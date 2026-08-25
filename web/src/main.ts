@@ -8,7 +8,7 @@ import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,
          t_look, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
          t_take, t_takeTurn, t_upkeep, t_win, t_world, t_catabolise,
-         t_subclone } from "./turn.js";
+         t_subclone, t_explore } from "./turn.js";
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { ATP_MAX, Plasmid } from "./plasmid.js";
@@ -144,6 +144,10 @@ class Game {
   shopFrom: { x: number; y: number } | null = null;
   shopAnchor = 0;
   shopMoved = 0;
+  /** Auto-explore: keeps walking to the frontier until something interrupts. */
+  exploring = false;
+  /** Travel that ends in one blow, then stops. Set by tapping an enemy. */
+  strikeAfterTravel: Mob | null = null;
   /** Whatever last hurt the player, for the ledger. */
   lastAttacker: string | null = null;
   /** Persists across every strain. Saved separately from the run. */
@@ -364,6 +368,9 @@ class Game {
 
   /** Move the whole plasmid onto a different backbone. */
   subclone(to: RepliconId): void { t_subclone(this, to); }
+
+  /** Walk to the frontier until something interrupts. */
+  explore(): void { t_explore(this); }
 
   /** Order a construct with banked credit. */
   order(offer: Offer): void {

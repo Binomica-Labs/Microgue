@@ -291,6 +291,68 @@ thing a player sees when they die. A lost strain legitimately sits at zero:
 The death screen also reserves room for whatever toasts are up, so the
 obituary is never hidden behind the message announcing it.
 
+## Soak tests must pin the clock
+
+A run seeds its dungeon from `Date.now()`, so without stubbing it every soak
+gets a DIFFERENT level -- and anything depending on level shape (how long
+exploring takes, whether a mob is reachable) passes or fails by luck. That is
+what made `verify:clean` fail once in three while a plain run passed four times
+in a row. `setupEnv` pins Date, as the golden harness already did.
+
+The suite now runs in about 36 seconds, dominated by level-generation sweeps
+across many seeds. Those are the tests that have caught the most real bugs, so
+the coverage stays and the time is the price.
+
+## Auto-explore and travel-to-strike
+
+Both are ONE input that spends many turns, and both stop the moment anything
+happens. `explore.ts` holds the pure part: pick where to go.
+
+**Target the FRONTIER, not the unknown.** You cannot path into the dark -- as
+far as the pathfinder knows it might be solid. The frontier is seen floor
+adjacent to unseen, and walking there is what reveals it. `nextExplore` tries
+progressively further frontiers because the nearest is sometimes behind a wall,
+and giving up on the first failed path would stop exploring beside an open
+doorway.
+
+**The interrupt has to be total.** `look()` clears `walk` when something comes
+into view, and it must clear `exploring` too -- otherwise the next tick picks a
+new frontier and walks straight past the thing that just appeared.
+
+Tapping a creature sets `strikeAfterTravel`: the walk spends its last step ON
+the target, lands one blow, and stops. One input, one approach, one strike, and
+you decide what happens next.
+
+## Fog had grid lines
+
+Per-tile rects padded by +1 overlapped their neighbours, and two passes of a
+62% black composite to 86% -- a visible dark grid across every remembered area.
+Drawn as pixel-rounded horizontal RUNS now, and darkened to 82%.
+
+## The button column shrinks to fit
+
+Thirteen buttons no longer fit a 720x1600 screen at the preferred size, and the
+layout pinned to the top and ran into the log. It now shrinks gap first, then
+size, with 44px as the floor -- below that it stops being a touch target. The
+layout test caught this the moment the explore button was added.
+
+## Spinning the ring stranded parts
+
+Reported from play: "a part sits at position 16, past the 16 the replicon
+provides". `rotate` permuted all 24 ARRAY positions while the replicon owned
+16, so dragging the ring -- the most ordinary thing anyone does on that screen
+-- pushed parts where nothing could reach them. Rotation is modulo
+`usableSlots` now, and `swap` refuses a position the replicon does not have.
+
+The invariant caught this in the field, which is what it is for. Worth noting
+what it cost to have it: the error toast is ugly and covered the log, but the
+alternative was a part silently vanishing from a plasmid.
+
+Two more from the same screenshots: the lysate tile printed allele names like
+"psbA of fast folding" straight across its neighbours -- labels are FITTED to
+the tile now, by measurement -- and the strike and auto-attack buttons had the
+SAME crossed-swords glyph sitting next to each other.
+
 ## Footguns found by hardening
 
 **Credit spent on constructs that never arrived.** The lab could stock 60 genes;

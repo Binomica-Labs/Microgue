@@ -40,6 +40,11 @@ function setupEnv(rec: Rec): void {
   vi.stubGlobal("devicePixelRatio", 2);
   vi.stubGlobal("matchMedia", () => ({ matches: true }));
   vi.stubGlobal("performance", { now: () => 0 });
+  // A new run seeds from Date.now(). Without pinning it every soak gets a
+  // DIFFERENT dungeon, so anything that depends on level shape -- how long
+  // exploring takes, whether a mob is reachable -- passes or fails by luck.
+  vi.stubGlobal("Date", Object.assign(function DateStub() { return new Date(0); },
+                                      { now: () => 1700000000000 }));
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => { store.set(k, v); },
@@ -649,5 +654,95 @@ describe("the order form is reachable", () => {
     g.pointerDown(row.box.x + 5, row.box.y + 5);
     g.pointerUp(row.box.x + 5, row.box.y + 5);
     expect(g.lab.stock.length, "a tap did not order").toBeGreaterThan(0);
+  });
+});
+
+describe("the plasmid screen cannot break the ring", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("spinning and dragging raises no invariant violation", async () => {
+    // The reported bug: dragging the ring pushed a part to position 16 on a
+    // 16-slot replicon, and the audit fired on the next turn.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    for (let i = 0; i < 120; i++) {
+      g.genome.rotate(i % 2 === 0 ? 1 : -3);
+      g.frame(20 + i);
+    }
+    g.openPlasmid(false);
+    g.press("wait");
+    const errors = g.toasts.all().filter((t) => t.level === "error");
+    expect(errors.map((t) => t.text)).toEqual([]);
+  });
+});
+
+describe("travel and explore stop when they should", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("auto-explore moves, then stops on its own", async () => {
+    const g = await game();
+    g.startRun(0);
+    const from = { x: g.player.x, y: g.player.y };
+    g.press("explore");
+    for (let t = 0; t < 4000; t += 40) g.frame(t);
+    expect({ x: g.player.x, y: g.player.y }, "never moved").not.toEqual(from);
+    expect(g.exploring, "still exploring after 4000ms").toBe(false);
+    expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
+  });
+
+  it("pressing explore again halts it immediately", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.press("explore");
+    g.frame(50);
+    g.press("explore");
+    expect(g.exploring).toBe(false);
+    expect(g.walk, "the queued path survived the halt").toBeNull();
+  });
+
+  it("exploring never leaves the player inside rock", async () => {
+    const g = await game();
+    g.startRun(0);
+    for (let round = 0; round < 6; round++) {
+      g.press("explore");
+      for (let t = 0; t < 1500; t += 40) g.frame(round * 2000 + t);
+      expect(g.level.grid.isFloor(g.player.x, g.player.y),
+             `round ${String(round)}`).toBe(true);
+    }
+    expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
+  });
+
+  it("travel to a creature lands exactly one blow and stops", async () => {
+    const g = await game();
+    g.startRun(0);
+    // Put something adjacent and reachable, then travel onto it.
+    const m = g.level.mobs.find((x) => x.alive);
+    expect(m).toBeDefined();
+    if (!m) return;
+    g.strikeAfterTravel = m;
+    g.walk = { nodes: [{ x: g.player.x, y: g.player.y }, { x: m.x, y: m.y }], i: 0 };
+    const before = m.hp;
+    for (let t = 0; t < 800; t += 40) g.frame(t);
+    expect(m.hp, "no blow landed").toBeLessThan(before);
+    expect(g.walk, "travel continued past the strike").toBeNull();
+    expect(g.strikeAfterTravel, "the strike target was not cleared").toBeNull();
   });
 });

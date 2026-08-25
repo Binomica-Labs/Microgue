@@ -388,6 +388,7 @@ function nearestHostile(_g: Game): Mob | null {
 export function i_press(_g: Game, id: string): void {
     switch (id) {
       case "plasmid": _g.openPlasmid(!_g.showPlasmid); _g.showMap = false; break;
+      case "explore": _g.explore(); break;
       case "strike": {
         // One press, one turn. This is the primary way to fight: Crawl makes
         // you press the key each time and that repetition IS the texture of
@@ -399,6 +400,7 @@ export function i_press(_g: Game, id: string): void {
         break;
       }
       case "auto": {
+        _g.exploring = false;
         _g.autoAttack = !_g.autoAttack;
         const btn = _g.buttons.find((b) => b.id === "auto");
         if (btn) btn.active = _g.autoAttack;
