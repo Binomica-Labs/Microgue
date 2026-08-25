@@ -51,6 +51,9 @@ function partColour(p: Part): string {
 
 export interface BinGeom {
   x: number; y: number; cell: number; gap: number; cols: number;
+  /** Full extent of the list area. The grid layout only needed a corner and a
+   *  cell size; a scrolled list needs to know where it stops. */
+  w?: number; h?: number;
 }
 
 /** Screen point -> bin index, or null. */
@@ -76,6 +79,125 @@ export function partRarity(p: Part): Rarity {
   if (p.kind === "gene") return alleleRarity(p.id, p.allele);
   if (p.kind === "promoter") return PROMOTERS[p.id].rarity;
   return TERMINATORS[p.id].rarity;
+}
+
+/**
+ * The bin as a list of full rows, scrolled.
+ *
+ * It was a six-wide grid of tiles, which worked when every label was four
+ * characters. It is not: allele names run to "psychrophilic mtrC of high copy"
+ * and a tile showed "rrnB T1" as "rrnB T1" cut in half. A row can say what a
+ * part IS -- its rarity, its size, what it does -- which is the information
+ * you need to decide what to install.
+ */
+export function drawBinList(
+  ctx: CanvasRenderingContext2D, g: BinGeom, parts: readonly Part[],
+  u: number, dragging: number | null, scroll: number,
+  rows: { box: Box; index: number }[],
+): { maxScroll: number; rowH: number } {
+  const W = g.w ?? g.cell * g.cols + g.gap * (g.cols - 1);
+  const H = g.h ?? g.cell * 3;
+  rows.length = 0;
+  const rowH = 34 * u;
+  const visible = Math.max(Math.floor(H / rowH), 1);
+  const maxScroll = Math.max(parts.length - visible, 0);
+  const want = Number.isFinite(scroll) ? Math.round(scroll) : 0;
+  const from = Math.min(Math.max(want, 0), maxScroll);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.x - 4 * u, g.y - 2 * u, W + 8 * u, H + 4 * u);
+  ctx.clip();
+
+  parts.slice(from, from + visible + 1).forEach((p, k) => {
+    const i = from + k;
+    const y = g.y + k * rowH;
+    const box: Box = { x: g.x, y, w: W, h: rowH - 4 * u };
+    rows.push({ box, index: i });
+
+    const tier = RARITY[partRarity(p)];
+    ctx.globalAlpha = dragging === i ? 0.3 : 1;
+    ctx.fillStyle = "rgba(14,20,17,0.92)";
+    ctx.strokeStyle = tier.colour;
+    ctx.lineWidth = Math.max(1.4 * u, 1.2);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
+    ctx.fill();
+    ctx.stroke();
+
+    // A spine in the pathway colour: what it DOES, beside how rare it is.
+    ctx.fillStyle = partColour(p);
+    ctx.fillRect(box.x + 1.5 * u, box.y + 4 * u, 3.5 * u, box.h - 8 * u);
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.fillText(fitInto(ctx, partTitle(p), box.w - 74 * u, 11 * u, 7 * u),
+                 box.x + 10 * u, box.y + 13.5 * u);
+
+    ctx.fillStyle = "#8fa89a";
+    ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+    ctx.fillText(fitInto(ctx, partBlurb(p), box.w - 74 * u, 8.5 * u, 6 * u),
+                 box.x + 10 * u, box.y + 24 * u);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = tier.colour;
+    ctx.font = `${8 * u}px ui-monospace,monospace`;
+    ctx.fillText(tier.name, box.x + box.w - 8 * u, box.y + 13 * u);
+    if (p.kind === "gene") {
+      ctx.fillStyle = "#6f8f7c";
+      ctx.fillText(`${GENES[p.id].kb.toFixed(1)} kb`,
+                   box.x + box.w - 8 * u, box.y + 24 * u);
+    }
+    ctx.globalAlpha = 1;
+  });
+  ctx.restore();
+
+  if (maxScroll > 0) {
+    const knobH = Math.max(H * (visible / parts.length), 16 * u);
+    const t = from / maxScroll;
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(g.x + W + 2 * u, g.y, 3 * u, H);
+    ctx.fillStyle = "rgba(207,224,74,0.6)";
+    ctx.fillRect(g.x + W + 2 * u, g.y + (H - knobH) * t, 3 * u, knobH);
+  }
+  return { maxScroll, rowH };
+}
+
+/** Full name, allele and all. */
+function partTitle(p: Part): string {
+  if (p.kind === "gene") {
+    return p.id === "ori" ? "oriV" : alleleName(p.id, p.allele);
+  }
+  return p.kind === "promoter" ? PROMOTERS[p.id].name : TERMINATORS[p.id].name;
+}
+
+/** One line on what it does. */
+function partBlurb(p: Part): string {
+  if (p.kind === "gene") {
+    return p.id === "ori" ? "replication origin" : GENES[p.id].product;
+  }
+  if (p.kind === "promoter") {
+    const pr = PROMOTERS[p.id];
+    return `${pr.mode} · output x${pr.strength.toFixed(2)}`;
+  }
+  const t = TERMINATORS[p.id];
+  return `terminator · ${String(Math.round((1 - t.readthrough) * 100))}% efficient`;
+}
+
+/** Shrink a font until the text fits, then return the text. */
+function fitInto(
+  ctx: CanvasRenderingContext2D, text: string, max: number,
+  start: number, min: number,
+): string {
+  let size = start;
+  for (let i = 0; i < 14; i++) {
+    ctx.font = `${size}px ui-monospace,monospace`;
+    if (ctx.measureText(text).width <= max || size <= min) return text;
+    size = Math.max(size * 0.92, min);
+  }
+  return text;
 }
 
 export function drawBin(

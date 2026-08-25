@@ -36,6 +36,7 @@ import { recordLocus, recordSighting } from "./run.js";
 import { findPath } from "./path.js";
 import { nextExplore, unexplored } from "./explore.js";
 import { profileFor, repairTurn } from "./repair.js";
+import { distanceTo } from "./pursuit.js";
 import { headingOf, turnToward } from "./motion.js";
 import type { Part } from "./plasmid.js";
 import type { Game } from "./main.js";
@@ -337,14 +338,48 @@ export function t_step_(_g: Game, t: number): void {
       // Travel that ends in a blow. Arriving next to the thing you tapped
       // spends the last step ON it, then stops -- one input, one approach, one
       // strike, and you decide what happens next.
-      if (blocker && blocker === _g.strikeAfterTravel) {
-        _g.attack(blocker);
-        _g.walk = null;
-        _g.strikeAfterTravel = null;
-        _g.exploring = false;
+      const quarry = _g.strikeAfterTravel;
+      const inReach = (): boolean => quarry !== null && quarry.alive
+        && distanceTo(_g.player, quarry) <= _g.genome.reach(_g.dungeon.depth);
+
+      if (quarry) {
+        // Reach is checked BEFORE the step and again AFTER it. Checking only
+        // before meant arriving adjacent on the final node and then giving up,
+        // because the next tick had no node left and the re-path returned a
+        // length-1 path from where the player already stood.
+        if (inReach()) {
+          _g.attack(quarry);
+          _g.walk = null;
+          _g.strikeAfterTravel = null;
+          _g.chaseLegs = 0;
+          _g.exploring = false;
+        } else if (n && (!blocker || blocker === quarry) && _g.step(n.x, n.y)) {
+          if (inReach()) {
+            _g.attack(quarry);
+            _g.walk = null;
+            _g.strikeAfterTravel = null;
+            _g.chaseLegs = 0;
+          }
+        } else {
+          // The quarry moves while you cross the room, so the path runs out
+          // where it no longer is. Re-path to where it actually went.
+          _g.chaseLegs += 1;
+          const again = _g.chaseLegs <= 6 && quarry.alive
+            && isVisible(_g.level.sight, quarry.x, quarry.y)
+            ? findPath(_g.level.grid, { x: _g.player.x, y: _g.player.y },
+                       { x: quarry.x, y: quarry.y },
+                       { diagonal: _g.settings.diagonal })
+            : null;
+          if (again && again.length > 1) {
+            _g.walk = { nodes: again, i: 0 };
+          } else {
+            _g.walk = null;
+            _g.strikeAfterTravel = null;
+            if (quarry.alive && _g.chaseLegs > 6) _g.note("It keeps ahead of you.");
+          }
+        }
       } else if (!n || blocker || !_g.step(n.x, n.y)) {
         _g.walk = null;
-        _g.strikeAfterTravel = null;
       }
     } else if (_g.exploring && at && !_g.walk && !_g.showPlasmid) {
       // Something in view halts it, not just something ARRIVING in view: a

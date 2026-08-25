@@ -2,6 +2,7 @@ import { SLOTS } from "../src/plasmid.js";
 import * as bio from "../src/biology.js";
 import { availableAt } from "../src/replicon.js";
 import { offers } from "../src/lab.js";
+import { findPath } from "../src/path.js";
 import { WILD_TYPE } from "../src/allele.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -855,6 +856,119 @@ describe("a damaged cell recovers between fights", () => {
     g.player.atp = 1;
     for (let i = 0; i < 40; i++) g.press("wait");
     expect(g.player.atp, "repair drained the reserve").toBeGreaterThanOrEqual(0);
+    expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
+  });
+});
+
+describe("tapping a creature crosses the gap", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("walks all the way there and strikes once, not one square per tap", async () => {
+    // The bug: tap() called takeTurn() directly, which is a SINGLE step. A
+    // creature four tiles away meant four taps to reach it.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+
+    // Find somewhere open several tiles away and put a creature on it.
+    const m = g.level.mobs.find((x) => x.alive);
+    expect(m).toBeDefined();
+    if (!m) return;
+    // Scan outward properly: the arrival tile is often in a narrow passage,
+    // so the four cardinal points at a fixed distance are frequently all rock.
+    let placed = false;
+    for (let d = 3; d <= 12 && !placed; d++) {
+      for (let dx = -d; dx <= d && !placed; dx++) {
+        for (const dy of [-d + Math.abs(dx), d - Math.abs(dx)]) {
+          const nx = g.player.x + dx, ny = g.player.y + dy;
+          if (!g.level.grid.isFloor(nx, ny) || g.dungeon.mobAt(nx, ny)) continue;
+          if (!findPath(g.level.grid, { x: g.player.x, y: g.player.y },
+                        { x: nx, y: ny })) continue;
+          m.x = nx; m.y = ny; placed = true; break;
+        }
+      }
+    }
+    expect(placed, "nowhere open to place a target").toBe(true);
+
+    const start = { x: g.player.x, y: g.player.y };
+    const hp0 = m.hp;
+    g.tap(m.x, m.y);
+    expect(g.walk, "no path was built").not.toBeNull();
+    for (let t = 0; t < 3000; t += 40) g.frame(t);
+
+    const moved = Math.abs(g.player.x - start.x) + Math.abs(g.player.y - start.y);
+    expect(moved, "the player barely moved").toBeGreaterThan(1);
+    expect(m.hp, "never landed a blow").toBeLessThan(hp0);
+    expect(g.walk, "kept travelling after the strike").toBeNull();
+    expect(g.strikeAfterTravel).toBeNull();
+  });
+
+  it("a creature in reach is struck immediately without a walk", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    const m = g.level.mobs.find((x) => x.alive);
+    if (!m) return;
+    m.x = g.player.x + 1; m.y = g.player.y;
+    const hp0 = m.hp;
+    g.tap(m.x, m.y);
+    expect(m.hp).toBeLessThan(hp0);
+    expect(g.walk).toBeNull();
+  });
+});
+
+describe("the parts list shows whole parts", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("every part in the bin is reachable by scrolling", async () => {
+    // The grid showed six four-character tiles. Allele names run to
+    // "psychrophilic mtrC of high copy" and a tile showed half of "rrnB T1".
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+
+    const seen = new Set<number>();
+    for (let s = 0; s <= g.binMaxScroll; s++) {
+      g.binScroll = s;
+      g.frame(100 + s);
+      for (const r of g.binRows) seen.add(r.index);
+    }
+    expect(seen.size, "some parts cannot be reached").toBe(g.genome.bin.length);
+  });
+
+  it("scrolling is clamped and survives absurd values", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.openPlasmid(true);
+    for (const s of [-99, 1e7, NaN]) {
+      g.binScroll = s;
+      expect(() => { g.frame(50); }).not.toThrow();
+      expect(g.binRows.length, `scroll ${String(s)} emptied the list`)
+        .toBeGreaterThan(0);
+    }
     expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
   });
 });

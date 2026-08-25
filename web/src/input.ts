@@ -10,7 +10,7 @@ import * as bio from "./biology.js";
 import { classifyDown, classifyKey } from "./gesture.js";
 import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
-import { binAt, slotAt } from "./plasmid_ui.js";
+import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf } from "./chrome.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
@@ -86,7 +86,11 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     // Bin cells are checked first: they sit outside the ring, which would
     // otherwise classify as a spin.
     if (_g.showPlasmid) {
-      const b = binAt(_g.bin, _g.genome.bin.length, x, y);
+      // Hit-test the drawn ROWS, not a grid formula. The list scrolls, so
+      // where a part is on screen no longer follows from its index.
+      const b = _g.binRows.find((r) => inBoxOf(r.box, x, y))?.index ?? null;
+      _g.binFrom = b !== null ? { x, y } : null;
+      _g.binAnchor = _g.binScroll;
       if (b !== null) {
         _g.gesture = "slot";
         _g.dragBin = b;
@@ -141,6 +145,14 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
     return;
   }
     if (!_g.started) return;
+    // Dragging in the parts list scrolls it, unless a part is being dragged
+    // out of it -- an install must still win over a scroll.
+    if (_g.showPlasmid && _g.binFrom !== null && _g.dragBin === null) {
+      const dy = y - _g.binFrom.y;
+      const rowPx = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * 34;
+      _g.binScroll = Math.min(Math.max(_g.binAnchor - dy / rowPx, 0), _g.binMaxScroll);
+      return;
+    }
     if (_g.showMap && _g.panFrom && _g.view) {
       const dx = x - _g.panFrom.x, dy = y - _g.panFrom.y;
       _g.panMoved += Math.abs(dx) + Math.abs(dy);
@@ -216,7 +228,7 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
             }
           }
         } else if (_g.dragFrom !== null) {
-          if (binAt(_g.bin, _g.genome.bin.length + 1, x, y) !== null) {
+          if (_g.binRows.some((r) => inBoxOf(r.box, x, y))) {
             const r = _g.genome.uninstall(_g.dragFrom);   // ring -> bin
             if (r.ok) { _g.selected = null; _g.save(); } else _g.note(r.err);
           } else if (target !== null && target !== _g.dragFrom) {
@@ -260,6 +272,7 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
     _g.spinFrom = null;
     _g.spinStart = null;
     _g.panFrom = null;
+    _g.binFrom = null;
   }
 
 export function i_onKey(_g: Game, e: KeyboardEvent): void {

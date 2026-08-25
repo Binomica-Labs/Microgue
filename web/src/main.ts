@@ -1,6 +1,7 @@
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 
+import { distanceTo } from "./pursuit.js";
 import { strainLevel } from "./strain.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
          r_drawPlasmid, r_drawScreenFx, r_drawToasts } from "./render.js";
@@ -153,6 +154,14 @@ class Game {
   lastAttacker: string | null = null;
   /** Fractional hit points repaired but not yet applied. */
   repairDebt = 0;
+  /** Re-paths spent chasing one quarry, so a chase cannot run for ever. */
+  chaseLegs = 0;
+  /** Scroll position of the parts list, and its rows for hit-testing. */
+  binScroll = 0;
+  binMaxScroll = 0;
+  binRows: { box: Box; index: number }[] = [];
+  binFrom: { x: number; y: number } | null = null;
+  binAnchor = 0;
   /** Persists across every strain. Saved separately from the run. */
   lab: Lab = newLab();
   showResearch = false;
@@ -417,11 +426,35 @@ class Game {
     if (tx === this.player.x && ty === this.player.y) { if (this.stairs()) return; }
     const m = this.dungeon.mobAt(tx, ty);
     if (m !== undefined) {
-      // Tapping a microbe means "go kill that". In range it is a strike; out
-      // of range it becomes a pursuit that re-paths as the target moves.
+      // Tapping a microbe means "go kill that": approach it and land ONE blow.
+      // This used to call takeTurn() directly, which is a single step -- so
+      // tapping something four tiles away moved one square and stopped, and
+      // you had to tap four more times to reach it.
       this.target = m;
+      this.exploring = false;
       this.walk = null;
-      if (this.takeTurn()) return;
+
+      // Only strike if it is genuinely IN REACH. `takeTurn` returns true after
+      // taking a single pursuit STEP too, so calling it first is exactly the
+      // one-square-per-tap behaviour -- it consumed the input and the walk was
+      // never built.
+      const reach = this.genome.reach(this.dungeon.depth);
+      if (distanceTo(this.player, m) <= reach) {
+        this.attack(m);
+        return;
+      }
+
+      // Out of reach: walk to it. The last node is the creature's own tile,
+      // and the walk tick spends that step as the strike.
+      this.cursor = { x: tx, y: ty };
+      this.repath();
+      if (this.path && this.path.length > 1) {
+        this.strikeAfterTravel = m;
+        this.chaseLegs = 0;
+        this.walk = { nodes: this.path, i: 0 };
+      } else {
+        this.note("No way through to it.");
+      }
       return;
     }
     // Examine before travelling: say what is there, the way a roguelike does.

@@ -11,7 +11,7 @@ import { BARRIERS } from "./barrier.js";
 import { MAX_FLOOR, Dungeon } from "./dungeon.js";
 import { boundsOf, centreOf, stretchOf } from "./footprint.js";
 import { cloudAlpha, cloudTiles } from "./projectile.js";
-import { describe as describeSlot, drawBin, drawItemCard, drawRing }
+import { describe as describeSlot, drawBinList, drawItemCard, drawRing }
   from "./plasmid_ui.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { clampView, drawGraph, fitView, frame, litBounds } from "./kegg_ui.js";
@@ -681,13 +681,21 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     ctx.textBaseline = "alphabetic";
     ctx.fillText(`PARTS BIN  ${_g.genome.bin.length}/${BIN_CAP}`,
                  _g.bin.x, _g.bin.y - 6 * u);
-    drawBin(ctx, _g.bin, _g.genome.bin, u, _g.dragBin);
-    const binRows = Math.floor(_g.genome.bin.length / 6) + 1;
+    // Full rows, scrolled. The tile grid could not name a part: allele names
+    // run to "psychrophilic mtrC of high copy" and a tile showed half of it.
+    // The list gets the room the tile grid used, and no more: complexes and
+    // hazards still have to fit under it.
+    const binW = _g.bin.cell * _g.bin.cols + _g.bin.gap * (_g.bin.cols - 1);
+    const binH = Math.min(_g.genome.bin.length * 34 * u, 152 * u);
+    const list = drawBinList(ctx, { ..._g.bin, w: binW, h: binH },
+                             _g.genome.bin, u, _g.dragBin, _g.binScroll,
+                             _g.binRows);
+    _g.binMaxScroll = list.maxScroll;
     // Deferred: the card belongs on top of everything else on this screen.
     const card = _g.card;
 
     // Active complexes and hazards, which is the payoff for arranging well.
-    let cy = _g.bin.y + binRows * (cell + gap) + 14 * u;
+    let cy = _g.bin.y + binH + 16 * u;
     ctx.font = `${11 * u}px ui-monospace,monospace`;
     for (const c of _g.genome.complexes(_g.dungeon.depth)) {
       ctx.fillStyle = "#7fe0a4";

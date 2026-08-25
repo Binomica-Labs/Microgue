@@ -303,6 +303,34 @@ The suite now runs in about 36 seconds, dominated by level-generation sweeps
 across many seeds. Those are the tests that have caught the most real bugs, so
 the coverage stays and the time is the price.
 
+## Tapping a creature crosses the gap
+
+`tap()` called `takeTurn()` directly, which is a SINGLE step -- so tapping
+something four tiles away moved one square and stopped. Now: strike if it is
+genuinely in reach, otherwise path to it and travel.
+
+Two things this needed that were not obvious:
+
+* **Reach is checked before AND after each step.** Checking only before meant
+  arriving adjacent on the final node and then giving up, because the next tick
+  had no node left and a re-path from where you already stood returns a
+  length-1 path.
+* **The quarry MOVES while you cross the room**, so the path runs out where it
+  no longer is. It re-paths, capped at six legs, then says so.
+
+Worth knowing: a bare plasmid has 0 power. `attack` floors damage at 1, so a
+new strain can still fight, barely -- but it will not kill much until it
+expresses something.
+
+## The parts bin is a list, not a grid
+
+Six four-character tiles worked when every label was four characters. Allele
+names run to "psychrophilic mtrC of high copy" and a tile rendered half of
+"rrnB T1". Rows now carry the full name, the rarity, the size in kb and what
+the part does, scrolled by drag, with hit-testing against the DRAWN rows rather
+than a grid formula -- once it scrolls, screen position no longer follows from
+index.
+
 ## Healing is repair, and repair costs ATP
 
 Only TWO of nine complexes granted regeneration and a starting plasmid had
