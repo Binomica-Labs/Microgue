@@ -1051,3 +1051,68 @@ describe("the plasmid screen responds", () => {
     expect(g.showPlasmid).toBe(false);
   });
 });
+
+describe("a death is never a dead end", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("an affliction that kills is NAMED, not called 'an affliction'", async () => {
+    // tickStatus removes what has expired, so a status that killed you on its
+    // last turn was already gone by the time it was read -- every such death
+    // reported "killed by an affliction", which you cannot act on.
+    const { apply } = await import("../src/status.js");
+    const g = await game();
+    g.startRun(0);
+    apply(g.player.status, "oxidative", 1, 3);
+    g.player.hp = 1;
+    g.press("wait");
+    const said = g.trace.dump();
+    expect(said.toLowerCase(), "the cause was not named")
+      .not.toMatch(/killed by an affliction/);
+    expect(said, "the status name is missing").toMatch(/xidative/);
+  });
+
+  it("the recorder captures a whole session in order", async () => {
+    const g = await game();
+    g.startRun(0);
+    for (let i = 0; i < 30; i++) { g.press("wait"); g.frame(i * 40); }
+    const all = g.trace.all();
+    expect(all.length, "nothing was recorded").toBeGreaterThan(10);
+    for (let i = 1; i < all.length; i++) {
+      expect(all[i]?.t ?? 0, "events out of order")
+        .toBeGreaterThanOrEqual(all[i - 1]?.t ?? 0);
+    }
+    expect(all.some((e) => e.kind === "input"), "presses were not recorded").toBe(true);
+  });
+
+  it("the death record carries what happened at the end", async () => {
+    const g = await game();
+    g.startRun(0);
+    for (let i = 0; i < 6; i++) g.press("wait");
+    g.die();
+    expect(g.deathRecord?.epitaph.length, "no epitaph was recorded")
+      .toBeGreaterThan(0);
+    // The death event is pushed by t_die itself, so it is the last thing in
+    // the buffer when the record is built.
+    expect(g.deathRecord?.epitaph.join(" ")).toContain("death:");
+  });
+
+  it("the epitaph survives a reload", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.press("wait");
+    g.die();
+    const { parseLab } = await import("../src/lab_save.js");
+    const round = parseLab(JSON.parse(JSON.stringify(g.lab)));
+    expect(round.ledger[0]?.epitaph.length).toBeGreaterThan(0);
+  });
+});

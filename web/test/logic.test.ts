@@ -69,6 +69,7 @@ import { frontier, nextExplore, unexplored } from "../src/explore.js";
 import { playerSpeed, speedOf, tick as speedTick } from "../src/speed.js";
 import { REPAIR_GENES, estimate, profileFor, repairTurn }
   from "../src/repair.js";
+import { TRACE_CAP, Trace } from "../src/trace.js";
 import { NODE_W, NODE_H, clampView, fitView, frame, litBounds, moduleBoxes,
          toScreen, toWorld, zoomAbout, type View } from "../src/kegg_ui.js";
 
@@ -5572,5 +5573,60 @@ describe("rarity describes the copy, and is never a lie", () => {
       expect(tally[t] ?? 0, `${t} never appeared`).toBeGreaterThan(0);
     }
     expect((tally["legendary"] ?? 0) / 6000).toBeLessThan(0.05);
+  });
+});
+
+describe("the flight recorder", () => {
+  it("keeps the newest events and bounds the buffer", () => {
+    const t = new Trace();
+    for (let i = 0; i < TRACE_CAP * 3; i++) t.push(i, "move", `step ${String(i)}`);
+    const all = t.all();
+    expect(all.length).toBe(TRACE_CAP);
+    expect(all[all.length - 1]?.what, "the newest event was lost")
+      .toBe(`step ${String(TRACE_CAP * 3 - 1)}`);
+    expect(all[0]?.what, "oldest first, and the oldest should have rolled off")
+      .toBe(`step ${String(TRACE_CAP * 2)}`);
+  });
+
+  it("stays ordered across the wrap", () => {
+    // A ring buffer read back in the wrong order is worse than none: it says
+    // the effect happened before the cause.
+    const t = new Trace();
+    for (let i = 0; i < TRACE_CAP + 37; i++) t.push(i, "turn", String(i));
+    const ts = t.all().map((e) => e.t);
+    for (let i = 1; i < ts.length; i++) {
+      expect(ts[i] ?? 0, "events came back out of order")
+        .toBeGreaterThan(ts[i - 1] ?? 0);
+    }
+  });
+
+  it("bounds a runaway string", () => {
+    const t = new Trace();
+    t.push(1, "note", "x".repeat(10000));
+    expect((t.all()[0]?.what ?? "").length).toBeLessThan(130);
+  });
+
+  it("survives absurd turn numbers", () => {
+    const t = new Trace();
+    for (const n of [NaN, Infinity, -1e12]) t.push(n, "move", "x");
+    for (const e of t.all()) expect(Number.isFinite(e.t)).toBe(true);
+  });
+
+  it("the epitaph is the tail, without the chatter", () => {
+    const t = new Trace();
+    t.push(1, "note", "flavour text nobody needs");
+    t.push(2, "hurt", "oxidative stress for 3");
+    t.push(3, "death", "F4 by oxidative stress");
+    const e = t.epitaph(10);
+    expect(e.join(" ")).not.toContain("flavour");
+    expect(e[e.length - 1]).toContain("death");
+  });
+
+  it("dump reads oldest to newest", () => {
+    const t = new Trace();
+    t.push(1, "move", "first");
+    t.push(2, "move", "last");
+    const d = t.dump();
+    expect(d.indexOf("first")).toBeLessThan(d.indexOf("last"));
   });
 });

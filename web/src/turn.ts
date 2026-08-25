@@ -50,6 +50,12 @@ import type { Game } from "./main.js";
  * lies about cause of death is worse than none.
  */
 export function hurt(_g: Game, amount: number, cause: string): number {
+  const dmg0 = Math.max(Math.round(Number.isFinite(amount) ? amount : 0), 0);
+  if (dmg0 > 0) {
+    _g.trace.push(_g.clock.turn, "hurt",
+                  `${cause} for ${String(dmg0)}; hp ${String(_g.player.hp)} -> ` +
+                  String(Math.max(_g.player.hp - dmg0, 0)));
+  }
   const dmg = Math.max(Math.round(Number.isFinite(amount) ? amount : 0), 0);
   if (dmg <= 0) return 0;
   _g.player.hp = Math.max(_g.player.hp - dmg, 0);
@@ -136,10 +142,17 @@ export function t_mobTurn(_g: Game): void {
     }
 
     // The player's own afflictions resolve here too.
+    //
+    // The cause is read BEFORE ticking. `tickStatus` removes what has expired,
+    // so a status that killed you on its last turn was already gone by the
+    // time it was named -- every such death read "killed by an affliction".
+    const causes = _g.player.status.map((s) => STATUS[s.id].name);
     const selfDmg = tickStatus(_g.player.status);
     if (selfDmg > 0) {
-      const worst = _g.player.status[0];
-      hurt(_g, selfDmg, worst ? STATUS[worst.id].name : "an affliction");
+      const cause = causes.length > 0 ? causes.join(" and ") : "an affliction";
+      _g.trace.push(_g.clock.turn, "status",
+                    `${cause} deals ${String(selfDmg)}; hp ${String(_g.player.hp)}`);
+      hurt(_g, selfDmg, cause);
       _g.fx.add({ kind: "text", t0: _g.now, dur: 700, x: _g.player.x,
                     y: _g.player.y, text: `-${selfDmg}`, colour: "#c8a0ff" });
     }
@@ -401,6 +414,8 @@ export function t_step_(_g: Game, t: number): void {
 
 export function t_step(_g: Game, x: number, y: number): boolean {
   if (_g.dead) return false;
+  _g.trace.push(_g.clock.turn, "move",
+                `to ${String(x)},${String(y)} from ${String(_g.player.x)},${String(_g.player.y)}`);
     const m = _g.dungeon.mobAt(x, y);
     if (m) { _g.attack(m); return false; }
     if (!_g.level.grid.isFloor(x, y)) return false;
@@ -435,6 +450,8 @@ export function t_step(_g: Game, x: number, y: number): boolean {
 export function t_attack(_g: Game, m: Mob): void {
   if (_g.dead) return;             // a lost strain does not act
     const dmg = Math.max(Math.round(_g.atk()), 1);
+    _g.trace.push(_g.clock.turn, "attack",
+                  `${m.name} for ${String(dmg)} (had ${String(m.hp)})`);
     const ranged = Math.abs(m.x - _g.player.x) > 1 || Math.abs(m.y - _g.player.y) > 1;
     const now = _g.now;
 
@@ -515,6 +532,7 @@ export function t_attack(_g: Game, m: Mob): void {
 
 export function t_descend(_g: Game): void {
   if (_g.dead) return;             // a lost strain does not act
+  _g.trace.push(_g.clock.turn, "floor", `descend from F${String(_g.dungeon.floor)}`);
     if (!Dungeon.isCleared(_g.level)) {
       _g.note("The way down is choked. Something here has to die first.");
       _g.toasts.push("Clear the floor before descending.", "warn", _g.now);

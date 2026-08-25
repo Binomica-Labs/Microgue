@@ -422,6 +422,7 @@ function nearestHostile(_g: Game): Mob | null {
 }
 
 export function i_press(_g: Game, id: string): void {
+  _g.trace.push(_g.clock.turn, "input", `press ${id}`);
     switch (id) {
       case "plasmid": _g.openPlasmid(!_g.showPlasmid); _g.showMap = false; break;
       case "explore": _g.explore(); break;

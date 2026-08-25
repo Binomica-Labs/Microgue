@@ -32,6 +32,8 @@ export interface RunRecord {
   readonly credit: number;
   /** True if the strain reached the bottom and cleared it. */
   readonly won: boolean;
+  /** The last few things that happened, so a death is never a dead end. */
+  readonly epitaph: readonly string[];
 }
 
 export interface Lab {
@@ -114,7 +116,9 @@ const finite = (v: number, fallback: number): number =>
   Number.isFinite(v) ? v : fallback;
 
 /** Add a run to the ledger and bank its credit. */
-export function recordRun(lab: Lab, o: RunOutcome, credit: number): RunRecord {
+export function recordRun(
+  lab: Lab, o: RunOutcome, credit: number, epitaph: readonly string[] = [],
+): RunRecord {
   const floor = Math.min(Math.max(finite(o.floor, 1), 1), MAX_FLOOR);
   const rec: RunRecord = {
     n: lab.ledger.length + 1,
@@ -125,6 +129,7 @@ export function recordRun(lab: Lab, o: RunOutcome, credit: number): RunRecord {
     killedBy: o.killedBy,
     credit: Math.max(Math.round(finite(credit, 0)), 0),
     won: o.won,
+    epitaph: epitaph.slice(-8),
   };
   lab.ledger.push(rec);
   while (lab.ledger.length > LEDGER_CAP) lab.ledger.shift();

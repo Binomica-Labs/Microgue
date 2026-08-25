@@ -31,6 +31,11 @@ function parseRecord(v: unknown, i: number): RunRecord | null {
     killedBy: typeof v["killedBy"] === "string" ? v["killedBy"].slice(0, 60) : "?",
     credit: Math.max(Math.round(num(v["credit"], 0)), 0),
     won: v["won"] === true,
+    epitaph: Array.isArray(v["epitaph"])
+      ? (v["epitaph"] as unknown[])
+          .filter((x): x is string => typeof x === "string")
+          .map((x) => x.slice(0, 100)).slice(-8)
+      : [],
   };
 }
 

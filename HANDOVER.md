@@ -692,6 +692,34 @@ and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
 Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
 invariant was passing with a margin of 0.005, which is not a margin.
 
+## The flight recorder
+
+`trace.ts` keeps the last 400 events in a ring buffer -- inputs, moves,
+attacks, damage with its cause, floor changes, death. Always on: the cost is
+one small object per event against a turn that already runs pathfinding and a
+31-invariant audit, and a recorder you have to switch on is never on when you
+need it.
+
+    T    0  input   press explore
+    T    0  move    to 34,5 from 35,4
+    T    1  move    to 33,5 from 34,5
+    T    2  input   press strike
+
+Read it three ways: `microgue.trace()` and `microgue.state()` from a device
+console (there is no other way to get state off a phone); the last four events
+are printed on the death screen; and eight are stored in the ledger entry, so
+an old death can still be explained.
+
+The ring must come back IN ORDER across the wrap -- a recorder that reports the
+effect before the cause is worse than none -- and `spec` asserts it.
+
+## "Killed by an affliction"
+
+`tickStatus` removes what has expired, and the cause was read AFTER ticking --
+so a status that killed you on its last turn was already gone by the time it
+was named, and every such death reported "an affliction". The cause is captured
+before the tick now.
+
 ## Layout across form factors
 
 `test/scaling.test.ts` renders every screen at eleven real viewports -- from a

@@ -38,8 +38,13 @@ export function t_die(_g: Game): void {
     killedBy: _g.lastAttacker ?? "starvation",
     won: _g.won,
   };
+  // Recorded BEFORE the ledger entry is built, so the epitaph ends with the
+  // death rather than with whatever happened just before it.
+  _g.trace.push(_g.clock.turn, "death",
+                `F${String(_g.dungeon.floor)} by ${outcome.killedBy}`);
+
   const credit = creditFor(outcome, _g.lab.deepestEver);
-  const rec = recordRun(_g.lab, outcome, credit);
+  const rec = recordRun(_g.lab, outcome, credit, _g.trace.epitaph(8));
   writeLab(_g.lab);
 
   _g.dead = true;

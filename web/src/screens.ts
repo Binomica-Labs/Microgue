@@ -508,7 +508,19 @@ export function drawLab(
     }
     ctx.fillStyle = "#cfe04a";
     ctx.fillText(`+${String(last.credit)} synthesis credit`, left, y + 4 * u);
-    y += 26 * u;
+    y += 22 * u;
+
+    // What actually happened at the end. "Killed by an affliction" is a report
+    // you cannot act on; the last few events are.
+    if (last.epitaph.length > 0) {
+      ctx.fillStyle = "#6f8f7c";
+      ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+      for (const line of last.epitaph.slice(-4)) {
+        ctx.fillText(ellipsise(ctx, line, wide), left, y);
+        y += 11 * u;
+      }
+      y += 8 * u;
+    }
   }
 
   // The order form.

@@ -1,6 +1,7 @@
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 
+import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
 import { strainLevel } from "./strain.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
@@ -154,6 +155,8 @@ class Game {
   lastAttacker: string | null = null;
   /** Fractional hit points repaired but not yet applied. */
   repairDebt = 0;
+  /** Flight recorder. Always on; see trace.ts. */
+  readonly trace = new Trace();
   /** Re-paths spent chasing one quarry, so a chase cannot run for ever. */
   chaseLegs = 0;
   /** Scroll position of the parts list, and its rows for hit-testing. */
@@ -423,6 +426,7 @@ class Game {
 
 
   tap(tx: number, ty: number): void {
+    this.trace.push(this.clock.turn, "input", `tap ${String(tx)},${String(ty)}`);
     if (tx === this.player.x && ty === this.player.y) { if (this.stairs()) return; }
     const m = this.dungeon.mobAt(tx, ty);
     if (m !== undefined) {
