@@ -392,7 +392,9 @@ export function drawItemCard(
   part: Part, plasmid: Plasmid, depth: number,
   wrap: (s: string, max: number) => string[],
   edible = false,
-): Box | null {
+  installable = false,
+  confirming = false,
+): { eat: Box | null; install: Box | null; confirm: Box | null; cancel: Box | null } {
   const tier = RARITY[partRarity(part)];
   const pad = 14 * u;
   const cardW = Math.min(W - 40 * u, 340 * u);
@@ -448,8 +450,20 @@ export function drawItemCard(
     add(t.note);
   }
 
+  if (confirming) {
+    // In the BODY, before the height is measured. Pushed afterwards these
+    // drew past the measured bottom and over the buttons.
+    lines.push({ text: "", colour: "#000", size: 6 });
+    lines.push({ text: "This destroys the cassette.", colour: "#ff9a5a", size: 10.5 });
+    lines.push({ text: "It does not come back.", colour: "#ff9a5a", size: 10.5 });
+  }
+
   const bodyH = lines.reduce((a, l) => a + l.size * u * 1.45, 0);
-  const cardH = bodyH + (edible ? 88 : 54) * u;
+  // The confirm reuses the SAME two button slots and the same card height.
+  // Growing the card shifted everything, and the confirm landed exactly where
+  // the eat button had been -- so tapping twice in one spot destroyed a part.
+  const buttons = confirming ? 2 : (edible ? 1 : 0) + (installable ? 1 : 0);
+  const cardH = bodyH + 54 * u + buttons * 34 * u;
   const x = (W - cardW) / 2;
   const y = Math.max((H - cardH) / 2, 20 * u);
 
@@ -484,23 +498,45 @@ export function drawItemCard(
     ly += l.size * u * 1.45;
   }
 
-  // The eat target. Deliberately its own box: catabolising destroys the
-  // cassette, so it must not be the same tap that dismisses the card.
-  if (!edible) return null;
+  // Actions, as buttons. Dragging a row up to the ring is a VERTICAL gesture
+  // and vertical drags scroll the list, so drag-to-install was impossible in
+  // the only direction the ring is in. A button has no such ambiguity.
   const bw = cardW - pad * 2;
-  const box: Box = { x: x + pad, y: y + cardH - 34 * u, w: bw, h: 26 * u };
-  ctx.fillStyle = "rgba(160,255,208,0.14)";
-  ctx.strokeStyle = "#a0ffd0";
-  ctx.lineWidth = Math.max(1.2 * u, 1);
-  ctx.beginPath();
-  ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#a0ffd0";
-  ctx.font = `${9.5 * u}px ui-monospace,monospace`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("catabolise \u2014 DNA is food as well as information",
-               box.x + box.w / 2, box.y + box.h / 2);
-  return box;
+  let by = y + cardH - 34 * u;
+  const out: { eat: Box | null; install: Box | null;
+               confirm: Box | null; cancel: Box | null } =
+    { eat: null, install: null, confirm: null, cancel: null };
+
+  const button = (label: string, edge: string, fill: string): Box => {
+    const box: Box = { x: x + pad, y: by, w: bw, h: 26 * u };
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = Math.max(1.2 * u, 1);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = edge;
+    ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, box.x + box.w / 2, box.y + box.h / 2);
+    by -= 34 * u;
+    return box;
+  };
+
+  if (confirming) {
+    // Catabolising is irreversible and there is no undo, so it asks. "Keep it"
+    // takes the BOTTOM slot -- the one the eat button occupied -- so a second
+    // tap in the same place is always the safe answer.
+    out.cancel = button("keep it", "#9fb8a8", "rgba(20,26,22,0.9)");
+    out.confirm = button("catabolise it \u2014 this is permanent",
+                         "#ff9a5a", "rgba(90,40,20,0.55)");
+    return out;
+  }
+  if (edible) out.eat = button("catabolise \u2014 DNA is food", "#a0ffd0",
+                               "rgba(160,255,208,0.12)");
+  if (installable) out.install = button("install on the plasmid", "#cfe04a",
+                                        "rgba(207,224,74,0.14)");
+  return out;
 }

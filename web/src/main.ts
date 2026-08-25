@@ -177,7 +177,11 @@ class Game {
   card: Part | null = null;
   /** Bin index of the part on the card, and its eat target, if any. */
   cardIndex = -1;
-  cardEat: Box | null = null;
+  /** Action targets on the open card, and whether it is asking. */
+  cardBoxes: { eat: Box | null; install: Box | null;
+               confirm: Box | null; cancel: Box | null } =
+    { eat: null, install: null, confirm: null, cancel: null };
+  cardConfirm = false;
   clock: Clock = newClock();
   openDrop: Drop | null = null;
   dropBoxes: Box[] = [];
@@ -380,6 +384,27 @@ class Game {
 
   /** Eat a cassette from the bin: DNA is food as well as information. */
   catabolise(i: number): void { t_catabolise(this, i); }
+
+  /**
+   * Put a part from the bin onto the first free ring position.
+   *
+   * A button rather than a drag: the ring sits ABOVE the list, so dragging to
+   * it is a vertical gesture, and vertical gestures scroll. Drag-to-install
+   * was impossible in the only direction the ring is in.
+   */
+  installFromBin(i: number): void {
+    const part = this.genome.bin[i];
+    if (!part) return;
+    const free = this.genome.slots.findIndex(
+      (s, k) => s === null && this.genome.usable(k));
+    if (free < 0) { this.toasts.push("No free position on the plasmid.", "warn", this.now); return; }
+    const r = this.genome.install(i, free);
+    if (!r.ok) { this.toasts.push(r.err, "warn", this.now); return; }
+    this.selected = free;
+    this.trace.push(this.clock.turn, "input",
+                    `install ${part.kind} at slot ${String(free)}`);
+    this.save();
+  }
 
   /** Move the whole plasmid onto a different backbone. */
   subclone(to: RepliconId): void { t_subclone(this, to); }

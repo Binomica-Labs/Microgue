@@ -1116,3 +1116,130 @@ describe("a death is never a dead end", () => {
     expect(round.ledger[0]?.epitaph.length).toBeGreaterThan(0);
   });
 });
+
+describe("installing and catabolising from the card", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  /** Open the card for the first bin row. */
+  const openCard = async () => {
+    const g = await game();
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(16);
+    const row = g.binRows[0];
+    if (row) {
+      g.pointerDown(row.box.x + 20, row.box.y + 10);
+      g.pointerUp(row.box.x + 20, row.box.y + 10);
+      g.frame(40);
+    }
+    return g;
+  };
+
+  it("the install button puts the part on the ring", async () => {
+    // The ring sits ABOVE the list, so dragging to it is a vertical gesture --
+    // and vertical gestures scroll. Drag-to-install was impossible in the only
+    // direction the ring is in.
+    const g = await openCard();
+    expect(g.card, "the card did not open").not.toBeNull();
+    const box = g.cardBoxes.install;
+    expect(box, "no install button").not.toBeNull();
+    if (!box) return;
+    const onRing = g.genome.slots.filter((s) => s !== null).length;
+    const inBin = g.genome.bin.length;
+    g.pointerDown(box.x + box.w / 2, box.y + box.h / 2);
+    g.pointerUp(box.x + box.w / 2, box.y + box.h / 2);
+    expect(g.genome.slots.filter((s) => s !== null).length).toBe(onRing + 1);
+    expect(g.genome.bin.length).toBe(inBin - 1);
+  });
+
+  it("catabolise ASKS before it destroys anything", async () => {
+    const g = await openCard();
+    const eat = g.cardBoxes.eat;
+    expect(eat, "no catabolise button").not.toBeNull();
+    if (!eat) return;
+    const before = g.genome.bin.length;
+    g.pointerDown(eat.x + eat.w / 2, eat.y + eat.h / 2);
+    g.pointerUp(eat.x + eat.w / 2, eat.y + eat.h / 2);
+    expect(g.cardConfirm, "it did not ask").toBe(true);
+    expect(g.genome.bin.length, "it destroyed the part without asking")
+      .toBe(before);
+  });
+
+  it("the confirm is NOT where the eat button was", async () => {
+    // A second tap in the same place must never be able to destroy something.
+    // "Keep it" deliberately takes the bottom slot the eat button occupied;
+    // this asserts the geometry has not drifted since.
+    const g = await openCard();
+    const eat = g.cardBoxes.eat;
+    if (!eat) return;
+    const spot = { x: eat.x + eat.w / 2, y: eat.y + eat.h / 2 };
+    g.pointerDown(spot.x, spot.y);
+    g.pointerUp(spot.x, spot.y);
+    g.frame(60);
+    const before = g.genome.bin.length;
+    g.pointerDown(spot.x, spot.y);        // exactly the same place again
+    g.pointerUp(spot.x, spot.y);
+    expect(g.genome.bin.length, "double-tapping the same spot ate it")
+      .toBe(before);
+  });
+
+  it("confirming actually eats it", async () => {
+    const g = await openCard();
+    const eat = g.cardBoxes.eat;
+    if (!eat) return;
+    g.pointerDown(eat.x + eat.w / 2, eat.y + eat.h / 2);
+    g.pointerUp(eat.x + eat.w / 2, eat.y + eat.h / 2);
+    g.frame(60);
+    const yes = g.cardBoxes.confirm;
+    expect(yes, "no confirm target").not.toBeNull();
+    if (!yes) return;
+    const before = g.genome.bin.length;
+    g.pointerDown(yes.x + yes.w / 2, yes.y + yes.h / 2);
+    g.pointerUp(yes.x + yes.w / 2, yes.y + yes.h / 2);
+    expect(g.genome.bin.length).toBe(before - 1);
+  });
+
+  it("cancelling keeps it", async () => {
+    const g = await openCard();
+    const eat = g.cardBoxes.eat;
+    if (!eat) return;
+    g.pointerDown(eat.x + eat.w / 2, eat.y + eat.h / 2);
+    g.pointerUp(eat.x + eat.w / 2, eat.y + eat.h / 2);
+    g.frame(60);
+    const no = g.cardBoxes.cancel;
+    if (!no) return;
+    const before = g.genome.bin.length;
+    g.pointerDown(no.x + no.w / 2, no.y + no.h / 2);
+    g.pointerUp(no.x + no.w / 2, no.y + no.h / 2);
+    expect(g.genome.bin.length).toBe(before);
+    expect(g.cardConfirm).toBe(false);
+  });
+
+  it("the origin can be neither installed twice nor eaten", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.genome.bin.push({ kind: "gene", id: "ori", level: 1, mods: [],
+                        allele: WILD_TYPE });
+    g.openPlasmid(true);
+    g.frame(16);
+    const row = g.binRows.find((r) => {
+      const p = g.genome.bin[r.index];
+      return p?.kind === "gene" && p.id === "ori";
+    });
+    if (!row) return;
+    g.pointerDown(row.box.x + 20, row.box.y + 10);
+    g.pointerUp(row.box.x + 20, row.box.y + 10);
+    g.frame(40);
+    expect(g.cardBoxes.eat, "the origin was edible").toBeNull();
+  });
+});

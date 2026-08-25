@@ -11,7 +11,7 @@ import { classifyDown, classifyKey } from "./gesture.js";
 import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
-import { inBox as inBoxOf } from "./chrome.js";
+import { inBox as inBoxOf, type Box } from "./chrome.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
 import type { Point } from "./mapgen.js";
@@ -33,17 +33,34 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       _g.gesture = "none";
       return;
     }
-    // A card is modal within the plasmid screen: one tap anywhere dismisses it.
-    // A card is modal. Tapping the eat target catabolises the part; anywhere
-    // else dismisses. Eating destroys the cassette, so it gets its own target
-    // rather than being the same tap that closes the card.
+    // The card is modal: its buttons act, and anything else dismisses.
+    // Catabolising is irreversible so it ASKS first, and the confirm sits
+    // where the eat button was not -- a second tap in the same place should
+    // never be able to destroy something.
     if (_g.card !== null && !_g.inClose(x, y)) {
-      if (_g.cardEat !== null && inBoxOf(_g.cardEat, x, y) && _g.cardIndex >= 0) {
-        _g.catabolise(_g.cardIndex);
+      const b = _g.cardBoxes;
+      const hit = (box: Box | null): boolean => box !== null && inBoxOf(box, x, y);
+      _g.gesture = "none";
+
+      if (_g.cardConfirm) {
+        if (hit(b.confirm) && _g.cardIndex >= 0) {
+          _g.catabolise(_g.cardIndex);
+          _g.card = null;
+          _g.cardIndex = -1;
+        }
+        _g.cardConfirm = false;         // cancel, or a tap anywhere else
+        return;
+      }
+      if (hit(b.eat) && _g.cardIndex >= 0) { _g.cardConfirm = true; return; }
+      if (hit(b.install) && _g.cardIndex >= 0) {
+        _g.installFromBin(_g.cardIndex);
+        _g.card = null;
+        _g.cardIndex = -1;
+        return;
       }
       _g.card = null;
       _g.cardIndex = -1;
-      _g.gesture = "none";
+      _g.cardConfirm = false;
       return;
     }
     // While the lab screen is up, taps buy things. Closing it starts the next

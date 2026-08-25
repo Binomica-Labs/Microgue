@@ -692,6 +692,25 @@ and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
 Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
 invariant was passing with a margin of 0.005, which is not a margin.
 
+## Install is a button, not a drag
+
+The ring sits ABOVE the parts list, so dragging a row to it is a VERTICAL
+gesture -- and vertical gestures scroll the list. Drag-to-install was
+impossible in the only direction the ring is in, which is a good example of two
+correct decisions producing a broken result.
+
+The item card carries the actions now: `install on the plasmid` puts the part
+in the first free position, and `catabolise` asks first.
+
+**The confirm reuses the same two button slots and the same card height, with
+"keep it" in the BOTTOM slot the eat button occupied.** Growing the card for a
+confirmation shifted everything and put the destructive option exactly where
+the finger had just tapped -- so a double tap destroyed a part. A second tap in
+the same place is now always the safe answer, and `spec` asserts it.
+
+The warning text goes in the body BEFORE the height is measured. Pushed
+afterwards it drew past the measured bottom and over the buttons.
+
 ## The flight recorder
 
 `trace.ts` keeps the last 400 events in a ring buffer -- inputs, moves,

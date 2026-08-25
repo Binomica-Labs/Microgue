@@ -712,8 +712,8 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const py = cy + 8 * u;
     const lines = _g.selected === null
       ? ["promoter → gene → terminator switches an operon on",
-         "drag bin → slot to install, slot → bin to remove",
-         "drag outside the ring to spin it",
+         "tap a part below to inspect it, then install or catabolise",
+         "drag the list to scroll · drag outside the ring to spin it",
          "expression costs ATP; respiration pays less the deeper you go"]
       : describeSlot(_g.genome, _g.selected, _g.dungeon.depth);
     ctx.textAlign = "left";
@@ -749,10 +749,13 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     // button press dismiss the screen in the same gesture that opened it.
     _g.closeBox = drawClose(ctx, W, ins, u);
     if (card) {
-      _g.cardEat = drawItemCard(ctx, W, H, u, card, _g.genome, _g.dungeon.depth,
-                                (s, max) => _g.wrap(s, max),
-                                _g.cardIndex >= 0
-                                  && !(card.kind === "gene" && card.id === "ori"));
+      const isOrigin = card.kind === "gene" && card.id === "ori";
+      _g.cardBoxes = drawItemCard(ctx, W, H, u, card, _g.genome, _g.dungeon.depth,
+                                  (s, max) => _g.wrap(s, max),
+                                  _g.cardIndex >= 0 && !isOrigin,
+                                  _g.cardIndex >= 0 && !isOrigin
+                                    && _g.genome.free() > 0,
+                                  _g.cardConfirm);
     }
   }
 
