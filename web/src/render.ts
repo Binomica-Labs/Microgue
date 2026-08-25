@@ -717,16 +717,32 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
          "expression costs ATP; respiration pays less the deeper you go"]
       : describeSlot(_g.genome, _g.selected, _g.dungeon.depth);
     ctx.textAlign = "left";
-    ctx.font = `${11.5 * u}px ui-monospace,monospace`;
-    // A running row counter, not the entry index: wrapping produces several
-    // lines per entry and they were all being drawn at the same y.
-    let row = 0;
-    lines.forEach((line, i) => {
-      ctx.fillStyle = i === 0 ? "#ffffff" : "#9fb8a8";
+    // Shrink to the room that is actually left, and stop when there is none.
+    // The screen stacks VERTICALLY while `u` scales off the SMALLER dimension,
+    // so on a landscape phone or a desktop the footer ran off the bottom --
+    // 1114px of content on a 1080px display.
+    const bottom = H - ins.bottom - 6 * u;
+    const wrapped: { text: string; head: boolean }[] = [];
+    for (const [i, line] of lines.entries()) {
       for (const w of _g.wrap(line, W - (ins.left + ins.right + 32 * u))) {
-        ctx.fillText(w, ins.left + gap, py + row * 17 * u);
-        row++;
+        wrapped.push({ text: w, head: i === 0 });
       }
+    }
+    let lh = 17 * u;
+    let fs = 11.5 * u;
+    const need = wrapped.length * lh;
+    const room = Math.max(bottom - py, 0);
+    if (need > room && wrapped.length > 0) {
+      const k = Math.max(room / need, 0.55);
+      lh *= k;
+      fs *= k;
+    }
+    ctx.font = `${fs}px ui-monospace,monospace`;
+    wrapped.forEach((w, row) => {
+      const y = py + row * lh;
+      if (y > bottom) return;             // nothing is drawn past the edge
+      ctx.fillStyle = w.head ? "#ffffff" : "#9fb8a8";
+      ctx.fillText(w.text, ins.left + gap, y);
     });
 
     // A real close target. "Tap outside" was ambiguous, and it was what let a

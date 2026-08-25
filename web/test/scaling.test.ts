@@ -1,0 +1,196 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Layout across every form factor anyone will actually use.
+ *
+ * Not "does it throw" -- that is already covered. This records where things
+ * are DRAWN and checks they are on screen, inside their container and clear of
+ * the reserved areas. A phone in landscape and a desktop monitor are further
+ * apart than any two devices this has been tested on by hand.
+ */
+
+const VIEWPORTS: readonly (readonly [string, number, number])[] = [
+  ["small android", 320, 640],
+  ["iPhone SE", 375, 667],
+  ["iPhone 15", 393, 852],
+  ["fold closed", 344, 882],
+  ["Pixel 8", 412, 915],
+  ["phone landscape", 852, 393],
+  ["iPad mini", 744, 1133],
+  ["iPad Pro", 1024, 1366],
+  ["iPad landscape", 1366, 1024],
+  ["desktop", 1920, 1080],
+  ["ultrawide", 2560, 1080],
+];
+
+interface Rect { x: number; y: number; w: number; h: number }
+
+/** Every rect and text position a frame produced. */
+interface Trace {
+  rects: Rect[];
+  texts: { x: number; y: number; text: string; size: number }[];
+}
+
+function stubCtx(t: Trace): CanvasRenderingContext2D {
+  let font = "10px x";
+  const state: { align: string } = { align: "left" };
+  // The world is drawn inside a camera transform, in TILE coordinates. Only
+  // record while no transform is active, which is where the HUD, the screens
+  // and everything else that must fit on the display are drawn.
+  let depth = 0;
+  return new Proxy({} as CanvasRenderingContext2D, {
+    get: (_o, p: string) => {
+      if (p === "font") return font;
+      if (p === "textAlign") return state.align;
+      if (["fillStyle", "strokeStyle", "textBaseline", "globalAlpha", "lineWidth",
+           "lineCap", "lineJoin", "filter", "imageSmoothingEnabled"].includes(p)) return "";
+      return (...a: unknown[]) => {
+        if (p === "save") depth++;
+        if (p === "restore") depth = Math.max(depth - 1, 0);
+        if (depth > 0) {
+          if (p === "measureText") {
+            const s = parseFloat(font) || 10;
+            return { width: (typeof a[0] === "string" ? a[0].length : 0) * s * 0.6 };
+          }
+          if (p === "createRadialGradient" || p === "createLinearGradient") {
+            return { addColorStop: () => undefined };
+          }
+          return undefined;
+        }
+        if (p === "fillRect" || p === "strokeRect") {
+          const [x, y, w, h] = a as number[];
+          t.rects.push({ x: x ?? 0, y: y ?? 0, w: w ?? 0, h: h ?? 0 });
+        }
+        if (p === "fillText" || p === "strokeText") {
+          const [text, x, y] = a as [string, number, number];
+          t.texts.push({ x, y, text, size: parseFloat(font) || 10 });
+        }
+        if (p === "measureText") {
+          const s = parseFloat(font) || 10;
+          return { width: (typeof a[0] === "string" ? a[0].length : 0) * s * 0.6 };
+        }
+        if (p === "createRadialGradient" || p === "createLinearGradient") {
+          return { addColorStop: () => undefined };
+        }
+        return undefined;
+      };
+    },
+    set: (_o, p: string, v: unknown) => {
+      if (p === "font") font = String(v);
+      if (p === "textAlign") state.align = String(v);
+      return true;
+    },
+  });
+}
+
+async function play(W: number, H: number, t: Trace) {
+  const store = new Map<string, string>();
+  vi.stubGlobal("requestAnimationFrame", () => 0);
+  vi.stubGlobal("addEventListener", () => undefined);
+  vi.stubGlobal("innerWidth", W);
+  vi.stubGlobal("innerHeight", H);
+  vi.stubGlobal("devicePixelRatio", 2);
+  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  vi.stubGlobal("performance", { now: () => 0 });
+  vi.stubGlobal("Date", Object.assign(function D() { return new Date(0); },
+                                      { now: () => 1700000000000 }));
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => { store.set(k, v); },
+    removeItem: (k: string) => { store.delete(k); },
+  });
+  vi.stubGlobal("navigator", {});
+  vi.stubGlobal("HTMLCanvasElement", function S() { /* marker */ });
+  vi.stubGlobal("Path2D", class {
+    moveTo(): void { /* */ } lineTo(): void { /* */ }
+    arc(): void { /* */ } closePath(): void { /* */ }
+  });
+  // A real notch and home indicator: the values a phone actually reports.
+  vi.stubGlobal("getComputedStyle", () => ({
+    top: H > W ? "47px" : "0px", right: H > W ? "0px" : "44px",
+    bottom: H > W ? "34px" : "21px", left: H > W ? "0px" : "44px",
+  }));
+  vi.stubGlobal("document", {
+    getElementById: () => null,
+    createElement: () => ({ style: {} as CSSStyleDeclaration, width: 0, height: 0,
+                            remove: () => undefined, getContext: () => stubCtx(t) }),
+    body: { appendChild: () => undefined },
+    addEventListener: () => undefined,
+    visibilityState: "visible",
+  });
+
+  const { Game } = await import("../src/main.js");
+  const g = new Game({
+    width: W, height: H, style: {} as CSSStyleDeclaration,
+    getContext: () => stubCtx(t),
+    addEventListener: () => undefined,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: W, height: H }),
+  } as unknown as HTMLCanvasElement);
+  return g;
+}
+
+describe("layout holds on every form factor", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each(VIEWPORTS)("%s (%ix%i): every screen draws in bounds", async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    for (const screen of ["", "plasmid", "map", "notes", "research"]) {
+      t.rects.length = 0; t.texts.length = 0;
+      if (screen !== "") g.press(screen);
+      g.frame(100);
+      // Nothing may be drawn off the right or bottom by more than a hair.
+      const off = t.texts.filter((x) => x.x > W + 4 || x.y > H + 4 || x.x < -80);
+      expect(off.slice(0, 3).map((x) => `${x.text} at ${Math.round(x.x)},${Math.round(x.y)} in ${W}x${H}`),
+             `${name} ${screen}: text off-screen`).toEqual([]);
+      if (screen !== "") g.press(screen);
+    }
+  });
+
+  it.each(VIEWPORTS)("%s (%ix%i): buttons fit and stay tappable", async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.frame(50);
+    const bs = g.buttons;
+    expect(bs.length).toBeGreaterThan(0);
+    for (const b of bs) {
+      expect(b.w, `${name}: button smaller than a finger`).toBeGreaterThanOrEqual(40);
+      expect(b.y, `${name}: ${b.id} above the top`).toBeGreaterThanOrEqual(-1);
+      expect(b.y + b.h, `${name}: ${b.id} runs off the bottom`)
+        .toBeLessThanOrEqual(H + 1);
+      expect(b.x + b.w, `${name}: ${b.id} runs off the right`)
+        .toBeLessThanOrEqual(W + 1);
+    }
+    // No two may overlap. Checked as rectangles, not by assuming a single
+    // column: wrapping to more columns is exactly how it fits on a landscape
+    // phone, so a column assumption would fail on the correct layout.
+    for (let i = 0; i < bs.length; i++) {
+      for (let j = i + 1; j < bs.length; j++) {
+        const a = bs[i], c = bs[j];
+        if (!a || !c) continue;
+        const apart = a.x + a.w <= c.x + 1 || c.x + c.w <= a.x + 1
+          || a.y + a.h <= c.y + 1 || c.y + c.h <= a.y + 1;
+        expect(apart, `${name}: ${a.id} overlaps ${c.id}`).toBe(true);
+      }
+    }
+  });
+
+  it.each(VIEWPORTS)("%s (%ix%i): the close target is reachable", async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    for (const screen of ["plasmid", "map", "notes", "research"]) {
+      g.press(screen);
+      g.frame(60);
+      const cb = g.closeBox;
+      expect(cb.w, `${name} ${screen}: no close target`).toBeGreaterThanOrEqual(40);
+      expect(cb.x + cb.w, `${name} ${screen}: close runs off the right`)
+        .toBeLessThanOrEqual(W + 1);
+      expect(cb.y, `${name} ${screen}: close is under the notch`)
+        .toBeGreaterThanOrEqual(H > W ? 40 : 0);
+      g.press(screen);
+    }
+  });
+});

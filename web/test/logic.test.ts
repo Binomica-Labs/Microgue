@@ -4472,8 +4472,10 @@ describe("rarity reads at a glance", () => {
     expect(rarityOfTier(bio.GENES.psbA.tier)).toBe("common");
   });
 
-  it("the bin colours a part by its own rarity", () => {
-    expect(partRarity({ kind: "gene", id: "mcrA", level: 1, mods: [], allele: WILD_TYPE })).toBe("legendary");
+  it("the bin colours a part by the COPY, not the gene", () => {
+    // A wild-type mcrA is a common find of a powerful gene. Colouring it
+    // legendary described the gene and promised something the copy lacked.
+    expect(partRarity({ kind: "gene", id: "mcrA", level: 1, mods: [], allele: WILD_TYPE })).toBe("common");
     expect(partRarity({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE })).toBe("common");
     expect(partRarity({ kind: "promoter", id: "plac" })).toBe("legendary");
     expect(partRarity({ kind: "terminator", id: "hairpin" })).toBe("common");
@@ -4655,8 +4657,10 @@ describe("allelic variation is the loot roll", () => {
       tally[r] = (tally[r] ?? 0) + 1;
     }
     expect((tally["common"] ?? 0) / 3000, "common must dominate at the surface")
-      .toBeGreaterThan(0.8);
-    expect((tally["legendary"] ?? 0) / 3000).toBeLessThan(0.01);
+      .toBeGreaterThan(0.6);
+    // Legendary is now a rolled TIER rather than a lucky derivation, so the
+    // rate is the weight in RARITY rather than an emergent accident.
+    expect((tally["legendary"] ?? 0) / 3000).toBeLessThan(0.03);
   });
 
   it("depth widens the distribution rather than only raising it", () => {
@@ -4728,7 +4732,7 @@ describe("allelic variation is the loot roll", () => {
 
   it("a corrupt allele degrades to wild type rather than poisoning anything", () => {
     const bad = { kcat: NaN, km: Infinity, stability: -5,
-                  prefix: null, suffix: null } as const;
+                  prefix: null, suffix: null, rarity: "legendary" } as const;
     const e = alleleEffect(bad);
     for (const v of Object.values(e)) {
       if (typeof v === "number") expect(Number.isFinite(v)).toBe(true);
@@ -4957,6 +4961,34 @@ describe("terminators cost ATP, not just isolation", () => {
 describe("synthesis credit", () => {
   const base = { floor: 1, turns: 0, catalogued: 0, bossesCleared: 0,
                  genesCarried: 0, bestAllele: 1, killedBy: "x", won: false };
+
+  it("ground already covered pays a fraction", () => {
+    // Three hundred instant deaths on the first floor earned 2700 credit --
+    // more per second than descending -- so the optimal strategy was to kill
+    // yourself repeatedly. A lab learns nothing from the 300th identical
+    // failure.
+    const firstTime = creditFor({ ...base, floor: 12, catalogued: 8 }, 0);
+    const again = creditFor({ ...base, floor: 12, catalogued: 8 }, 12);
+    expect(again, "retreading paid the same as breaking new ground")
+      .toBeLessThan(firstTime);
+    expect(again, "and it must still pay something").toBeGreaterThan(0);
+
+    // Going DEEPER than the record pays the full rate for the new floors.
+    const deeper = creditFor({ ...base, floor: 16, catalogued: 8 }, 12);
+    expect(deeper).toBeGreaterThan(again);
+  });
+
+  it("grinding shallow deaths does not out-earn descending", () => {
+    const suicide = { ...base, floor: 1 };
+    let grind = 0;
+    for (let i = 0; i < 300; i++) grind += creditFor(suicide, 1);
+    const oneRun = creditFor({ ...base, floor: 12, catalogued: 9,
+                               bossesCleared: 3, genesCarried: 7,
+                               bestAllele: 1.2 }, 0);
+    // Three hundred restarts must not be worth more than a few real runs.
+    expect(grind, "suiciding is still the optimal strategy")
+      .toBeLessThan(oneRun * 4);
+  });
 
   it("depth dominates, but is not the only thing that pays", () => {
     // If depth were everything the optimal play would be to dive blindly past
@@ -5452,5 +5484,93 @@ describe("repair costs energy, because repair enzymes are ATPases", () => {
     for (const id of Object.keys(REPAIR_GENES)) {
       expect(bio.GENES[id as bio.GeneId], `${id} is not a gene`).toBeDefined();
     }
+  });
+});
+
+describe("rarity describes the copy, and is never a lie", () => {
+  const rolls = (depth: number, n = 4000) => {
+    const rng = makeRng(depth * 733);
+    return Array.from({ length: n }, () => rollAllele(rng, depth));
+  };
+
+  it("rare and above ALWAYS carry an affix", () => {
+    // The reported bug: a wild-type psaA at +0% on every stat displayed as
+    // RARE, because rarity came from the gene's tier rather than the find.
+    for (const depth of [1, 4, 8]) {
+      for (const a of rolls(depth, 1500)) {
+        const r = alleleRarity("psaA", a);
+        const affixes = (a.prefix ? 1 : 0) + (a.suffix ? 1 : 0);
+        if (r === "rare" || r === "epic") {
+          expect(affixes, `${r} with no affix`).toBeGreaterThanOrEqual(1);
+        }
+        if (r === "legendary") expect(affixes, "legendary with one affix").toBe(2);
+      }
+    }
+  });
+
+  it("a wild-type copy of the best gene in the game is COMMON", () => {
+    expect(alleleRarity("mcrA", WILD_TYPE)).toBe("common");
+    expect(alleleRarity("psbA", WILD_TYPE)).toBe("common");
+  });
+
+  it("rarer copies are measurably better at the same job", () => {
+    // This is the answer to "what is the win": a legendary mtrC out-performs a
+    // common mtrC, and the card says by how much.
+    const byTier: Record<string, number[]> = {};
+    for (const a of rolls(6, 6000)) {
+      const r = alleleRarity("mtrC", a);
+      (byTier[r] ??= []).push(quality(a));
+    }
+    const mean = (xs: number[] | undefined): number =>
+      xs && xs.length > 0 ? xs.reduce((x, y) => x + y, 0) / xs.length : 0;
+    const order = ["common", "uncommon", "rare", "epic", "legendary"];
+    let last = 0;
+    for (const t of order) {
+      const m = mean(byTier[t]);
+      if (m === 0) continue;
+      expect(m, `${t} is not better than the tier below`).toBeGreaterThan(last);
+      last = m;
+    }
+    expect(mean(byTier["legendary"]) / mean(byTier["common"]),
+           "the top tier must be a real step up").toBeGreaterThan(1.2);
+  });
+
+  it("a good roll means a LOW Km, so the bias must push it down", () => {
+    // Rolling Km like the others made every high-tier allele worse at the one
+    // stat that matters most when the substrate has nearly run out.
+    const km = (depth: number): number => {
+      const xs = rolls(depth, 3000)
+        .filter((a) => a.rarity === "legendary" || a.rarity === "epic")
+        .map((a) => a.km);
+      return xs.length > 0 ? xs.reduce((x, y) => x + y, 0) / xs.length : 1;
+    };
+    expect(km(8), "top-tier alleles should have tighter affinity").toBeLessThan(1);
+  });
+
+  it("a stored allele cannot claim a colour it has not earned", () => {
+    const liar = { ...WILD_TYPE, rarity: "legendary" as const };
+    expect(alleleRarity("mtrC", liar), "a wild-type legendary was accepted")
+      .toBe("common");
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [{ kind: "gene", id: "mtrC", level: 1, mods: [],
+               allele: { kcat: 1, km: 1, stability: 1, rarity: "legendary" } }],
+      bin: [], run: {}, settings: {}, heldMods: [], turn: 0, stocked: [],
+    });
+    const g = s?.ring[0];
+    if (g?.kind !== "gene") { expect(g?.kind).toBe("gene"); return; }
+    expect(alleleRarity("mtrC", g.allele)).toBe("common");
+  });
+
+  it("every tier still appears, at a rate that makes it worth hunting", () => {
+    const tally: Record<string, number> = {};
+    for (const a of rolls(8, 6000)) {
+      const r = alleleRarity("mtrC", a);
+      tally[r] = (tally[r] ?? 0) + 1;
+    }
+    for (const t of ["common", "uncommon", "rare", "epic", "legendary"]) {
+      expect(tally[t] ?? 0, `${t} never appeared`).toBeGreaterThan(0);
+    }
+    expect((tally["legendary"] ?? 0) / 6000).toBeLessThan(0.05);
   });
 });

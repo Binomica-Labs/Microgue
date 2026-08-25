@@ -75,17 +75,39 @@ export interface RunOutcome {
  * supposed to be studied as well as survived -- so cataloguing, clearing
  * strata and the quality of what you recovered all pay.
  */
-export function creditFor(o: RunOutcome): number {
+/** What ground already covered is worth. Not nothing -- you still bring back
+ *  samples -- but not what it paid the first time. */
+const REPEAT = 0.22;
+
+/**
+ * Synthesis credit earned by a run.
+ *
+ * Depth dominates, because depth is the game. But it cannot be the only term
+ * or the optimal play is to dive blindly past everything, so cataloguing,
+ * clearing strata and the quality of what you recovered all pay.
+ *
+ * **Ground already covered pays a fraction.** Three hundred instant deaths on
+ * the first floor earned 2700 credit -- more per SECOND than descending -- so
+ * the optimal strategy was to kill yourself repeatedly. A lab learns nothing
+ * from the three hundredth identical failure, and now it is paid accordingly:
+ * full rate for floors deeper than any strain has reached, a fifth for
+ * retreading.
+ */
+export function creditFor(o: RunOutcome, deepestEver = 0): number {
   const floor = Math.min(Math.max(finite(o.floor, 1), 1), MAX_FLOOR);
+  const known = Math.min(Math.max(finite(deepestEver, 0), 0), MAX_FLOOR);
+  const retrod = Math.min(floor, known);
+  const fresh = Math.max(floor - known, 0);
+
   const total =
-      floor * 9
+      fresh * 9 + retrod * 9 * REPEAT
     + Math.max(finite(o.catalogued, 0), 0) * 7
     + Math.max(finite(o.bossesCleared, 0), 0) * 30
     + Math.max(finite(o.genesCarried, 0), 0) * 4
     // A well-rolled allele is knowledge worth banking even if the strain died.
     + Math.max(finite(o.bestAllele, 1) - 1, 0) * 60
     + (o.won ? 400 : 0);
-  return Math.max(Math.round(total), 5);
+  return Math.max(Math.round(total), 2);
 }
 
 const finite = (v: number, fallback: number): number =>

@@ -38,7 +38,7 @@ export function t_die(_g: Game): void {
     killedBy: _g.lastAttacker ?? "starvation",
     won: _g.won,
   };
-  const credit = creditFor(outcome);
+  const credit = creditFor(outcome, _g.lab.deepestEver);
   const rec = recordRun(_g.lab, outcome, credit);
   writeLab(_g.lab);
 

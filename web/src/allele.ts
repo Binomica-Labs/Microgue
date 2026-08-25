@@ -20,7 +20,7 @@
 // psychrophilic ones famously fragile, chimeras fold badly.
 
 import { GENES, type GeneId } from "./biology.js";
-import { RARITY_RANK, rarityOfTier, type Rarity } from "./parts.js";
+import { RARITY_RANK, rollRarity, type Rarity } from "./parts.js";
 import type { Rng } from "./rng.js";
 
 export type PrefixId =
@@ -111,11 +111,21 @@ export interface Allele {
   readonly stability: number;
   readonly prefix: PrefixId | null;
   readonly suffix: SuffixId | null;
+  /**
+   * What this COPY is worth, rolled first and then made true.
+   *
+   * Rarity used to come from the gene's tier, so a wild-type psaA with +0% on
+   * every stat displayed as RARE -- the colour described the gene rather than
+   * the find, and promised something the item did not have. Now it describes
+   * only this copy, and the generator guarantees it: rare and above ALWAYS
+   * carry at least one affix, and the stat spread widens with the tier.
+   */
+  readonly rarity: Rarity;
 }
 
 /** The default: an unremarkable wild-type copy. */
 export const WILD_TYPE: Allele = {
-  kcat: 1, km: 1, stability: 1, prefix: null, suffix: null,
+  kcat: 1, km: 1, stability: 1, prefix: null, suffix: null, rarity: "common",
 };
 
 const PREFIX_IDS = Object.keys(PREFIXES) as PrefixId[];
@@ -124,33 +134,52 @@ const SUFFIX_IDS = Object.keys(SUFFIXES) as SuffixId[];
 const clamp = (v: number, lo: number, hi: number): number =>
   Number.isFinite(v) ? Math.min(Math.max(v, lo), hi) : lo;
 
+/** What each tier is guaranteed to be. Roll the tier, then make it true. */
+const BAND: Readonly<Record<Rarity, {
+  spread: number; bias: number; affixes: number; extra: number;
+}>> = {
+  // spread: how far the stats may stray. bias: how far the CENTRE sits above
+  // 1. affixes: guaranteed. extra: chance of one more.
+  common:    { spread: 0.10, bias: 0.00, affixes: 0, extra: 0 },
+  uncommon:  { spread: 0.16, bias: 0.05, affixes: 0, extra: 0.45 },
+  rare:      { spread: 0.22, bias: 0.11, affixes: 1, extra: 0.20 },
+  epic:      { spread: 0.27, bias: 0.18, affixes: 1, extra: 0.70 },
+  legendary: { spread: 0.32, bias: 0.26, affixes: 2, extra: 0 },
+};
+
 /**
  * Roll an allele.
  *
- * Deeper strata roll wider, not merely higher: the chance of something
- * exceptional rises, and so does the chance of junk. A distribution that only
- * shifts upward stops being a hunt.
+ * The RARITY is rolled FIRST and the stats are then generated to justify it.
+ * Deriving rarity from the gene's tier produced "rare" copies with nothing
+ * rare about them -- a wild-type psaA at +0% on every stat, displayed in blue.
+ * Rolling the tier first is the only way the label can be trusted, and it is
+ * what Diablo actually does: the item's class is chosen, then affixes are
+ * drawn to fill it.
  */
 export function rollAllele(rng: Rng, depth: number): Allele {
-  const d = clamp(depth, 1, 8);
-  const spread = 0.18 + d * 0.035;
+  const rarity = rollRarity(rng.next(), clamp(depth, 1, 8));
+  const band = BAND[rarity];
+
   const roll = (): number => {
-    // Two samples averaged: a hump around 1 rather than a flat band, so an
-    // extreme roll is genuinely uncommon.
-    const a = rng.next(), b = rng.next();
-    return 1 + ((a + b) / 2 - 0.5) * 2 * spread;
+    const x = rng.next(), y = rng.next();
+    return 1 + band.bias + ((x + y) / 2 - 0.5) * 2 * band.spread;
   };
-  // An affix is meant to be a find. At 0.16 + d*0.045 both slots filled a
-  // quarter of the time at depth, and the pair bonus alone made a third of
-  // deep drops top-tier.
-  const affixChance = 0.09 + d * 0.026;
+
+  let prefix: PrefixId | null = null;
+  let suffix: SuffixId | null = null;
+  const wanted = band.affixes + (rng.next() < band.extra ? 1 : 0);
+  if (wanted >= 1) prefix = PREFIX_IDS[rng.int(PREFIX_IDS.length)] ?? null;
+  if (wanted >= 2) suffix = SUFFIX_IDS[rng.int(SUFFIX_IDS.length)] ?? null;
+
   return {
     kcat: clamp(roll(), 0.55, 1.9),
-    km: clamp(roll(), 0.55, 1.9),
+    // Km is INVERTED: a good roll is a LOW Km. Rolling it like the others made
+    // every high-tier allele worse at the one stat that matters most when the
+    // substrate has nearly run out.
+    km: clamp(2 - roll(), 0.55, 1.9),
     stability: clamp(roll(), 0.55, 1.9),
-    prefix: rng.next() < affixChance ? PREFIX_IDS[rng.int(PREFIX_IDS.length)] ?? null : null,
-    suffix: rng.next() < affixChance * 0.75
-      ? SUFFIX_IDS[rng.int(SUFFIX_IDS.length)] ?? null : null,
+    prefix, suffix, rarity,
   };
 }
 
@@ -192,15 +221,23 @@ export function quality(a: Allele): number {
   return Number.isFinite(raw) ? raw : 1;
 }
 
-/** The rarity a cassette displays: its gene's tier, raised by a good roll. */
+/**
+ * The rarity a cassette displays: its own, CLAMPED to what its stats justify.
+ *
+ * A stored allele cannot claim legendary while carrying wild-type numbers, so
+ * a hand-edited save cannot mint a colour it has not earned and the label can
+ * never overstate the item.
+ */
 export function alleleRarity(gene: GeneId, a: Allele): Rarity {
-  const base = RARITY_RANK[rarityOfTier(GENES[gene].tier)];
+  void gene;
+  const claimed = RARITY_RANK[a.rarity];
   const q = quality(a);
-  // Tuned so most finds are unremarkable. A ladder where a third of drops are
-  // top-tier is not a hunt; the good roll has to be worth stopping for.
-  const bump = q > 1.42 ? 2 : q > 1.18 ? 1 : q < 0.97 ? -1 : 0;
   const affixes = (a.prefix ? 1 : 0) + (a.suffix ? 1 : 0);
-  const rank = Math.min(Math.max(base + bump + (affixes === 2 ? 1 : 0), 0), 4);
+  const earned = affixes >= 2 ? 4
+    : q > 1.26 ? 3
+    : affixes >= 1 ? 2
+    : q > 1.05 ? 1 : 0;
+  const rank = Math.min(claimed, Math.max(earned, 0));
   return (["common", "uncommon", "rare", "epic", "legendary"] as const)[rank]
     ?? "common";
 }
@@ -220,14 +257,18 @@ export function alleleReadout(a: Allele): string[] {
   const e = alleleEffect(a);
   const pct = (v: number): string =>
     `${v >= 1 ? "+" : ""}${String(Math.round((v - 1) * 100))}%`;
-  const out = [
-    `kcat ${pct(e.kcat)} turnover`,
-    // Inverted deliberately: a low Km is a HIGH affinity.
-    `Km ${pct(1 / e.km)} affinity`,
-    `stability ${pct(e.stability)}`,
-  ];
-  if (e.expression !== 1) out.push(`expression ${pct(e.expression)}`);
-  if (e.upkeep !== 1) out.push(`upkeep ${pct(e.upkeep)}`);
+  const near = (v: number): boolean => Math.abs(v - 1) < 0.02;
+
+  // Only what actually differs. Three lines of "+0%" told you nothing and made
+  // an unremarkable copy look like it had statistics.
+  const out: string[] = [];
+  if (!near(e.kcat)) out.push(`kcat ${pct(e.kcat)} turnover`);
+  // Inverted deliberately: a low Km is a HIGH affinity.
+  if (!near(e.km)) out.push(`Km ${pct(1 / e.km)} affinity`);
+  if (!near(e.stability)) out.push(`stability ${pct(e.stability)}`);
+  if (!near(e.expression)) out.push(`expression ${pct(e.expression)}`);
+  if (!near(e.upkeep)) out.push(`upkeep ${pct(e.upkeep)}`);
   if (e.promiscuous) out.push("accepts more than one substrate");
+  if (out.length === 0) out.push("an ordinary copy \u2014 nothing to distinguish it");
   return out;
 }

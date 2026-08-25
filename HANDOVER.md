@@ -692,6 +692,76 @@ and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
 Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
 invariant was passing with a margin of 0.005, which is not a margin.
 
+## Layout across form factors
+
+`test/scaling.test.ts` renders every screen at eleven real viewports -- from a
+320x640 android to a 2560x1080 ultrawide, including landscape phones and
+tablets -- with a real notch and home indicator. It records where things are
+DRAWN and checks they are on screen, inside their container and clear of the
+reserved areas. It found two things by hand-testing could not:
+
+**The button column overflowed on small phones, landscape phones AND tablets.**
+Sizing shrank by one pixel per pass with a cap of 24 passes: fine on a phone,
+useless on an iPad where 46*u starts at 112px. And on a landscape phone
+fourteen buttons at the 44px minimum need 616px against about 250 of room, so
+no single column fits at any size that is still tappable. It now solves for the
+size directly and WRAPS to more columns -- two on a phone, four in landscape,
+one on a tablet. 44px is the floor throughout: below that it stops being a
+touch target.
+
+**The plasmid screen's footer ran off the bottom** on desktop, landscape and
+small phones -- 1114px of content on a 1080px display. The screen stacks
+vertically while `u` scales off the SMALLER dimension. The footer now shrinks
+to the room left below it and draws nothing past the edge.
+
+One note for the test itself: the world is drawn inside a camera transform in
+TILE coordinates, so a bounds check has to ignore anything drawn while a
+transform is active. Otherwise the stair marker at tile (46,70) reads as being
+1489px off-screen.
+
+## Grinding deaths out-earned playing
+
+Three hundred instant deaths on the first floor earned 2700 credit -- more per
+SECOND than descending -- so the optimal strategy was to kill yourself
+repeatedly. Ground already covered now pays a fifth of the full rate: full for
+floors deeper than any strain has reached, `REPEAT` for retreading. Measured
+now at roughly break-even per minute rather than dominant, which is right --
+you do learn something from a failure, just not what you learned the first
+time.
+
+## Rarity describes the COPY, not the gene
+
+Reported from play: a wild-type psaA at +0% on every stat, displayed as RARE.
+It was rare because psaA is tier 4 -- the colour described the GENE, and
+promised something that particular copy did not have. That makes the whole
+ladder decoration.
+
+Fixed by inverting the generator. The RARITY is rolled first and the stats are
+then generated to justify it, which is what Diablo actually does: the item's
+class is chosen, then affixes are drawn to fill it. Deriving rarity from the
+numbers afterwards can only ever produce labels that sometimes lie.
+
+    common      psaA -- stability +5%
+    uncommon    psaA -- kcat +7%, Km +20% affinity, stability +14%
+    rare        halotolerant psaA -- Km +29% affinity, stability +33%
+    epic        chimeric psaA of broad specificity -- kcat +29%
+    legendary   psychrophilic psaA of high copy -- kcat +77% turnover
+
+Guarantees, asserted by `spec`: rare and epic ALWAYS carry at least one affix,
+legendary always carries two, and mean quality rises strictly with tier -- so
+a legendary mtrC genuinely out-performs a common mtrC at the same job. That is
+the answer to "what is the win".
+
+**Km is inverted and the bias has to push it DOWN.** A good roll is a LOW Km.
+Rolling it like the others made every high-tier allele worse at the one stat
+that matters most when the substrate has nearly run out.
+
+A stored allele keeps its claimed tier but `alleleRarity` CLAMPS it to what the
+numbers justify, so a hand-edited save cannot mint a colour it has not earned.
+
+The readout shows only what DIFFERS. Three lines of "+0%" told you nothing and
+made an unremarkable copy look like it had statistics.
+
 ## Alleles: the loot roll
 
 Two copies of the same gene are not the same enzyme. Homologues differ in

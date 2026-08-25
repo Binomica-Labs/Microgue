@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  Recorded at v0.55. The equivalence with the PRE-refactor build was proven
  *  separately, by running the same tracer against both trees outside vitest:
  *  42220 calls, identical. This constant is the in-suite anchor. */
-const GOLDEN = "d811db438e32dbf3";
+const GOLDEN = "4f7cd59ce50d133b";
 
 const trace: string[] = [];
 

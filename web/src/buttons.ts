@@ -37,38 +37,59 @@ export function makeButtons(): Button[] {
  *  log and the bar text, because it only reserved the bar's height and the log
  *  sits above that. A strip can collide with neither. Targets are at least
  *  44pt, the usual minimum. */
+/**
+ * Lay the buttons out down the right edge, wrapping to more columns if one
+ * will not fit.
+ *
+ * Sizing used to shrink by one pixel per iteration with a cap of 24 passes,
+ * which is fine on a phone and useless on a tablet: 46*u starts at 112px there
+ * and 24 passes only reaches 88. And on a landscape phone fourteen buttons at
+ * the 44px minimum need 616px against about 250 of room -- no single column
+ * fits at any size that is still tappable, so it has to wrap.
+ *
+ * 44px is the floor throughout. Below that it stops being a touch target, and
+ * a control you cannot reliably hit is worse than one you cannot see.
+ */
 export function layoutButtons(
   bs: Button[], W: number, H: number,
   ins: { top: number; right: number; bottom: number }, u: number, reserve: number,
 ): void {
-  // Shrink to fit rather than overflow. The column grew past what a 720x1600
-  // screen holds at the preferred size, and pinning to the top just ran it
-  // into the log. 44px is the floor: below that it stops being a touch target.
-  const usableTop = ins.top + Math.round(9 * u);
-  const usableBottom = H - ins.bottom - reserve - Math.round(9 * u);
-  const room = usableBottom - usableTop;
+  const MIN = 44;
+  const edge = Math.round(9 * u);
+  const top = ins.top + edge;
+  const bottom = H - ins.bottom - reserve - edge;
+  const room = Math.max(bottom - top, MIN);
 
-  let size = Math.max(Math.round(46 * u), 44);
-  let gap = Math.round(9 * u);
-  for (let i = 0; i < 24; i++) {
-    if (bs.length * size + (bs.length - 1) * gap <= room) break;
-    if (gap > 2) { gap -= 1; continue; }
-    if (size <= 44) break;
-    size -= 1;
+  // Solve for the size directly rather than stepping toward it.
+  const fit = (n: number): { size: number; gap: number } => {
+    const perCol = Math.ceil(bs.length / n);
+    const gap = Math.max(Math.round(9 * u * 0.6), 4);
+    const size = Math.floor((room - (perCol - 1) * gap) / perCol);
+    return { size: Math.min(Math.max(size, MIN), Math.max(Math.round(46 * u), MIN)), gap };
+  };
+
+  let cols = 1;
+  while (cols < 4) {
+    const { size, gap } = fit(cols);
+    const perCol = Math.ceil(bs.length / cols);
+    if (perCol * size + (perCol - 1) * gap <= room) break;
+    cols++;
   }
+  const { size, gap } = fit(cols);
+  const perCol = Math.ceil(bs.length / cols);
+  const stack = perCol * size + (perCol - 1) * gap;
+  const startY = top + Math.max((room - stack) / 2, 0);
 
-  const stack = bs.length * size + (bs.length - 1) * gap;
-  const x = W - ins.right - Math.round(9 * u) - size;
-  let y = usableTop + Math.max((room - stack) / 2, 0);
-  if (stack > room) y = usableTop;
-
-  for (const btn of bs) {
-    btn.x = x;
-    btn.y = Math.round(y);
+  bs.forEach((btn, i) => {
+    const col = Math.floor(i / perCol);
+    const row = i % perCol;
     btn.w = size;
     btn.h = size;
-    y += size + gap;
-  }
+    // Columns grow LEFTWARD from the right edge, so the first column stays
+    // where the thumb already is.
+    btn.x = W - ins.right - edge - size - col * (size + gap);
+    btn.y = startY + row * (size + gap);
+  });
 }
 
 export function buttonAt(bs: Button[], x: number, y: number): Button | null {

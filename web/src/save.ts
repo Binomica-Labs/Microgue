@@ -7,6 +7,7 @@
 
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
 import { REPLICONS, type RepliconId } from "./replicon.js";
+import { RARITY, type Rarity } from "./parts.js";
 import { PREFIXES, SUFFIXES, WILD_TYPE, type Allele, type PrefixId,
          type SuffixId } from "./allele.js";
 import { MAX_LEVEL, MODIFIERS, PROMOTERS, TERMINATORS, modifierSlots,
@@ -90,8 +91,14 @@ function parseAllele(v: unknown): Allele {
     Math.min(Math.max(num(x, 1), 0.4), 2.2);
   const pre = v["prefix"];
   const suf = v["suffix"];
+  const claimed = v["rarity"];
   return {
     kcat: band(v["kcat"]), km: band(v["km"]), stability: band(v["stability"]),
+    // The claimed tier is kept, but `alleleRarity` clamps it to what the
+    // numbers justify -- a save cannot mint a colour it has not earned.
+    rarity: typeof claimed === "string"
+      && Object.prototype.hasOwnProperty.call(RARITY, claimed)
+      ? claimed as Rarity : "common",
     prefix: typeof pre === "string"
       && Object.prototype.hasOwnProperty.call(PREFIXES, pre) ? pre as PrefixId : null,
     suffix: typeof suf === "string"
