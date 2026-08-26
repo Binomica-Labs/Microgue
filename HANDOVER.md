@@ -11,8 +11,8 @@ Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 
 ## Read this first
 
-Six things a reasonable-looking change will break. Each of these was arrived at
-the hard way; none are arbitrary.
+Nine things a reasonable-looking change will break. Each of these was arrived
+at the hard way; none are arbitrary.
 
 1. **The service worker cache name is derived, not written.** `build.mjs`
    hashes the bundle, index.html, manifest and icons and injects the result as
@@ -80,50 +80,94 @@ the hard way; none are arbitrary.
 ```
 web/
   src/
-    rng.ts        seeded mulberry32; generation is reproducible
-    biology.ts    8 strata, 20 organisms, 21 loci, pigments   <- the design doc
-    genome.ts     plasmid: capacity, burden, O2 lability, expression
-    mapgen.ts     Grid class, CA caves, region sealing, spawn placement
-    path.ts       A* with a binary heap (~90 lines, replaced jumper's ~1400)
-    dungeon.ts    multi-level descent, level caching, mob spawning
-    shapes.ts     organism morphologies as shape data in unit space
-    paint.ts      shape painter, sprite cache, per-stratum wall motifs
-    walls.ts      organic wall contouring (corner classification + tracing)
-    pixels.ts     16x16 pixel art as role grids -- EDIT THIS for sprite work
-    shapes.ts     the vector morphologies pixels.ts was seeded from
-    plasmid.ts    the ring + parts bin: operons, polarity, synergy, complexes
-    plasmid_ui.ts ring rendering + polar hit-testing for drag and spin
-    kegg.ts       KEGG modules + the metabolite graph they derive into
-    kegg_ui.ts    pannable node graph, caption relaxation, screen/world transforms
-    buttons.ts    on-screen controls
-    gesture.ts    pointer gesture classification, pure and tested
-    entity.ts     the tagged union -- add a kind and switches stop compiling
-    status.ts     status effects: one list per entity, one loop
-    behaviour.ts  motility patterns and size classes
-    footprint.ts  multi-tile bodies: filaments lie along their own axis
-    weapons.ts    the four ranged mechanisms, line of sight, cloud discs
-    projectile.ts travelling particles and lingering gradients
-    pursuit.ts    chase-to-kill, re-pathed every turn
-    run.ts        the roguelike layer: resynthesis, notebook, export
-    ncbi.ts       real sequences: Entrez queries, caching, throttling
-    chrome.ts     shared screen furniture: close button, header, wrap
-    sw_client.ts  keeping an installed PWA actually up to date
-    screens.ts    splash and notebook, as free functions
-    items.ts      floor loot: gene cassettes and metabolisable substrates
-    flavour.ts    all player-facing combat and pickup text
-    fov.ts        recursive shadowcasting, plus remembered terrain
-    cycle.ts      the diel cycle: daylight, night, chemocline shift
-    rooms.ts      chambers carved into the cave: ports, mats, blooms, vaults
-    combat.ts     the microbe turn, extracted and testable without a canvas
-    saves.ts      named characters in numbered slots
-    toast.ts      transient notices + guard(), the error boundary
-    fx.ts         effects: easing, lunge, shake decay, hitstop -- all pure
-    motion.ts     facing, short-arc turning, squash, wake -- all pure
-    hud.ts        Winogradsky column gauge, bars, plasmid ring
-    save.ts       localStorage with a real runtime validator
-    main.ts       canvas, input, game loop  <- the only DOM-aware file
-    sw.ts         service worker (own tsconfig: WebWorker lib)
-  test/logic.test.ts    45 assertions, no browser needed
+    -- engine-free core: no DOM reference anywhere in these ------------------
+    rng.ts          seeded mulberry32; generation is reproducible
+    biology.ts      8 strata, 20 organisms, 69 loci, pigments   <- the design doc
+    metabolism.ts   per-gene ATP generation, substrate needs, O2 lability
+    mapgen.ts       Grid class, CA caves, region sealing, spawn placement
+    path.ts         A* with a binary heap (~90 lines, replaced jumper's ~1400)
+    dungeon.ts      24 floors, level caching, mob and boss placement
+    rooms.ts        chambers carved into the cave: ports, mats, blooms, vaults
+    barrier.ts      material you digest through, opened by an expressed enzyme
+    fov.ts          recursive shadowcasting, plus remembered terrain
+    cycle.ts        the diel cycle: daylight, night, chemocline shift
+    production.ts   the biological pump: floors refill from ABOVE, over time
+
+    -- the plasmid ----------------------------------------------------------
+    transcription.ts  the ring model: promoters, attenuating terminators, flow
+    parts.ts          the catalogue: promoters, terminators, modifiers, rarity
+    plasmid.ts        arrangement and economics: operons, synergy, complexes
+    chromosome.ts     one growing replicon: cassette sites, traits, ATP ceiling
+    allele.ts         the loot roll: kcat, Km, stability, affixes
+    strain.ts         strain level from the notebook AND the deepest floor
+    kegg.ts           KEGG modules + the metabolite graph they derive into
+
+    -- the run --------------------------------------------------------------
+    entity.ts       the tagged union -- add a kind and switches stop compiling
+    behaviour.ts    motility patterns and size classes
+    speed.ts        an energy budget, so fractional speed carries across turns
+    footprint.ts    multi-tile bodies: filaments lie along their own axis
+    weapons.ts      the four ranged mechanisms, line of sight, cloud discs
+    projectile.ts   travelling particles and lingering gradients
+    pursuit.ts      chase-to-kill, re-pathed every turn
+    explore.ts      auto-explore: pick a FRONTIER, not an unknown tile
+    combat.ts       the microbe turn, extracted and testable without a canvas
+    status.ts       status effects: one list per entity, one loop
+    repair.ts       healing is a conversion: spend ATP, recover hp
+    items.ts        floor loot: gene cassettes and metabolisable substrates
+    lysis.ts        the death sequence, as pure timing maths
+    run.ts          the notebook and the FASTA export
+    lab.ts          what outlives the strain: credit, ledger, standing order
+    progress.ts     death, catabolism, expansion, the research bench
+    invariants.ts   31 properties that must never be false
+    trace.ts        the flight recorder: last 400 events, always on
+
+    -- persistence ----------------------------------------------------------
+    save.ts         localStorage with a real runtime validator (SCHEMA 11)
+    saves.ts        named characters in numbered slots
+    lab_save.ts     the lab, in its OWN key -- deleting a slot must not cost it
+
+    -- presentation ---------------------------------------------------------
+    shapes.ts       organism morphologies as shape data in unit space
+    pixels.ts       16x16 pixel art as role grids -- EDIT THIS for sprite work
+    paint.ts        shape painter, sprite cache, per-stratum wall motifs
+    walls.ts        organic wall contouring (corner classification + tracing)
+    motion.ts       facing, short-arc turning, squash, wake -- all pure
+    fx.ts           easing, lunge, shake decay, hitstop -- all pure
+    fx_render.ts    what those effects actually draw
+    hud.ts          Winogradsky column gauge, bars, plasmid ring
+    buttons.ts      on-screen controls, wrapping to fit the viewport
+    chrome.ts       shared screen furniture: close button, header, wrap
+    screens.ts      splash, notebook, lab, bench -- free functions
+    plasmid_ui.ts   ring rendering + polar hit-testing for drag and spin
+    kegg_ui.ts      pannable node graph, caption relaxation, transforms
+    flavour.ts      all player-facing combat and pickup text
+
+    -- the browser boundary -------------------------------------------------
+    main.ts         canvas, state, lifecycle, save/load  <- the only DOM file
+    render.ts       the world, the HUD, and the screens needing game state
+    turn.ts         everything that happens because time passed
+    input.ts        pointers, gestures, keys, buttons
+    safety.ts       on() -- the ONLY way to register a listener
+    toast.ts        transient notices + guard(), the error boundary
+    gesture.ts      pointer gesture classification, pure and tested
+    ncbi.ts         real sequences: Entrez queries, caching, throttling
+    sw.ts           service worker (own tsconfig: WebWorker lib)
+    sw_client.ts    keeping an installed PWA actually up to date
+    version.ts      build identity, injected at compile time
+
+  test/             11 files, 800 assertions
+    logic.test.ts     the bulk: biology, plasmid, generation, saves
+    soak.test.ts      the REAL Game over thousands of frames
+    invariant.test.ts every invariant, plus a breaker for each
+    audit.test.ts     NaN/Infinity fuzzing of every pure surface
+    scaling.test.ts   every screen at eleven real viewports
+    golden.test.ts    a hashed canvas-call trace of a fixed scenario
+    render.test.ts    the real render path, without a browser
+    safety.test.ts    listener discipline and the module-size ceiling
+    update.test.ts    the service-worker update path
+    sync.test.ts      sync.sh, against a stub gh
+    boot.test.ts      the bundle is inert without a canvas
   public/               build output + icons + manifest
 .github/workflows/pages.yml     push -> verify -> build -> deploy
 sync.sh              one-command update from a downloaded tarball
@@ -133,12 +177,16 @@ sync.sh              one-command update from a downloaded tarball
 and their constraints are all data; changing the game usually means changing
 that table, not the code.
 
-**Engine-free core.** `biology.ts`, `genome.ts`, `mapgen.ts`, `path.ts`,
-`dungeon.ts`, `rng.ts`, `shapes.ts` contain zero DOM references. That is what
-made the port from Lua cheap, and it is worth preserving — keep `main.ts` and
-`paint.ts`/`hud.ts` as the only files that touch a canvas.
+**Engine-free core.** Everything in the first block above contains zero DOM
+references. That is what made the port from Lua cheap, and it is worth
+preserving -- keep `main.ts`, `render.ts` and `paint.ts`/`hud.ts` as the only
+files that touch a canvas.
 
----
+**No module may exceed 900 lines**, asserted in `test/safety.test.ts`. That
+ceiling is load-bearing: `main.ts` reached 2272 and was where every save and
+state bug in this project hid. When a file crosses it, split by CONCERN --
+`metabolism.ts` came out of `plasmid.ts` that way, taking the per-gene tables
+and leaving the arrangement logic behind.
 
 ## Commands
 
@@ -164,13 +212,54 @@ won't trigger a build.
 
 **Left LÖVE for the browser.** The game draws rectangles and one circle; a
 love.js WASM build ships several megabytes of engine to do it. The TypeScript
-build is 14 kB gzipped and needs no install on any platform, which was the
-actual goal — "playable on any device" meant a URL, not more native targets.
+build needs no install on any platform, which was the actual goal — "playable
+on any device" meant a URL, not more native targets.
 
 **No framework, no renderer library.** Canvas 2D with a hand-rolled A*. At
-these grid sizes the per-frame budget is ~0.008% consumed; a rendering library
-would be pure weight. If sprite counts ever reach thousands, PixiJS is the
-drop-in.
+these grid sizes a rendering library would be pure weight. If sprite counts
+ever reach thousands, PixiJS is the drop-in.
+
+**Re-examined at v0.84: TypeScript stays, and the measurements say why.** The
+question was whether a faster language would serve the three goals better —
+easy to share, runs on a potato, decent 2D. Measured on the logic path, which
+is the only thing a language change touches:
+
+    level generation (once per floor)      11.31 ms
+    findPath across the floor               0.357 ms
+    nextExplore (per auto-explore tick)     0.138 ms
+    microbeTurn, whole level, 78 mobs       0.027 ms
+    plasmid full read (the HUD path)        0.018 ms
+    computeFov                              0.005 ms
+
+**The entire per-turn simulation is about 0.05 ms — 0.3% of a 60 fps frame.**
+A language ten times faster hands back 0.27% of a frame. There is nothing
+there to win, and the reason is structural rather than lucky: this is a
+turn-based game on a 96x96 grid with at most 22 sprites on screen. It cannot
+become CPU-bound at its design scale.
+
+What actually costs on a weak device is startup and fill rate, and both get
+WORSE with the usual alternatives. The bundle is **76 kB gzipped** (the 14 kB
+figure this document used to quote is long stale — check it, do not trust it).
+Rust/macroquad or Zig to WASM lands at several hundred kB to a few MB before
+it draws anything, Go's runtime alone is over a megabyte, and a Godot web
+export is tens of MB with a startup pause a phone genuinely notices. Canvas 2D
+rasterising is the browser's work, identical whatever emitted the calls. WASM
+also would not obviously win the compute even if compute mattered: V8 already
+packs small-int arrays, which is exactly why `Grid`'s `Uint8Array` benchmarked
+as no faster than `Tile[][]` and was kept for type safety instead.
+
+The one number above worth attacking is level generation, and it is
+algorithmic — 11 ms of cellular automaton and region sealing, once per floor,
+in a language that is not the reason it costs that. `nextExplore` was the same
+story: 0.74 ms per tick, made 5x cheaper by scanning once instead of six times
+rather than by changing language.
+
+The honest case for leaving TypeScript is not speed, it is reach — a native
+target for Steam or a console. That directly contradicts "playable on any
+device means a URL", so it is a different product decision, not an
+optimisation. If it is ever taken, the engine-free core is the asset: those
+modules have no DOM reference and port cheaply, which is the property that
+made the move off Lua cheap in the first place. Keep it that way.
 
 **RNG is injected, not global.** The Lua version called `love.math.random`,
 which made generation unreproducible and coupled logic to the engine. Now the
@@ -1130,7 +1219,8 @@ gene rather than being transcribed.
 
 ## Sacred invariants
 
-`src/invariants.ts` holds 23 properties that must NEVER be false. Not balance
+`src/invariants.ts` holds 31 properties that must NEVER be false, and
+`INVARIANT_COUNT` is derived from the table so it cannot drift. Not balance
 preferences -- things that mean the game is broken, and that fail SILENTLY: a
 body inside rock is invisible and unhittable, a lost origin makes every
 expression zero, a NaN coordinate simply stops being drawn.
@@ -1369,9 +1459,15 @@ the reason to descend carefully and the reason a looted gene matters. Do not
 soften it into a cosmetic warning.
 
 **"If your character dies, you get resynthesized with some of the genes you
-acquired in the previous run."** Death ends the run and reseeds the dungeon,
-but the lineage keeps the earliest-acquired half of its loci. Not permadeath,
-not a free respawn.
+acquired in the previous run."** This one was built, shipped, and then
+deliberately overruled -- see "Permadeath and the lab". Resynthesising in place
+made death a setback rather than an ending, and the ending is what gives a run
+its shape. What carries forward now is what a LAB keeps: synthesis credit, the
+notebook, the ledger. The clause survives in two narrower forms: the
+`mobilisable` trait really does pass half a plasmid's loci to the next strain,
+and the standing order really does put the previous strain's genes in the next
+one's bin. `resynthesise()` and `CARRYOVER` were removed at v0.84 -- no caller
+for a long time, and four tests keeping them warm.
 
 Also from the thread: layers run on the WASTE of their neighbours -- biomass
 sinks, sulfide rises -- which is why every stratum names a `donor` and a
@@ -1888,6 +1984,25 @@ Worth knowing, because they recurred:
 - **`JSON.parse` returns `any`.** It was piping unvalidated save data straight
   into game state. `save.ts` narrows `unknown` explicitly now — keep it that
   way; a corrupted localStorage entry should be rejected, not trusted.
+- **A guard that enumerates by hand.** The memo-invalidation test opens
+  "Enumerate them" and is a literal list of ten methods. It could not fail for
+  an eleventh, and covered no FIELDS at all -- which is where the stale reads
+  actually came from. If a guard's job is coverage, derive its list or assert
+  its completeness; a list maintained by remembering is not a guard.
+- **A failure-path test that takes the cheap route to "no".** The atomicity
+  suite had an "assemble with no spare promoter" case whose fixture removed
+  every promoter, which trips an early return before any mutation. The real
+  bug was in the branch where a promoter EXISTS. Reach the failure the way a
+  player does.
+- **A test that manufactures the state the game should have produced.**
+  "strain advances as the lineage catalogues and descends" sets
+  `run.deepest = 20` by hand. It proved the formula and hid the fact that
+  nothing in the game ever wrote that field. This is "Built is not wired" one
+  level in: the feature was reachable, but one of its INPUTS was not.
+- **A unit that lives only in the reader's head.** `run.deepest` was a floor
+  in `strain.ts` and `invariants.ts`, a stratum in `save.ts`, and printed with
+  a "D" prefix in `screens.ts`. Nothing disagreed loudly; it just quietly
+  clamped 20 to 8 on load. Name the unit in the type or in the field.
 - **Rendering is unverified.** There has never been a browser in the loop. All
   45 tests are logic; layout and paint have only been checked by rendering the
   same shape data offline. Treat any visual claim in code comments as a
@@ -1897,42 +2012,192 @@ Worth knowing, because they recurred:
 
 ## State
 
-**Working:** 8 procedurally generated strata with stairs and level caching;
-20 organisms spawning at their real depths; bump combat; HGT on kill; plasmid
-with capacity, burden, oxygen lability and depth-gated expression; circular
-plasmid map; sprites and wall motifs; Winogradsky column HUD; localStorage
-save/resume; PWA install with offline play.
+At v0.84. 64 modules, ~14000 lines of TypeScript, 800 assertions across 11 test
+files, and a full `npm run verify` in about 40 seconds.
 
-**Not built yet:**
-- Gene *effects* beyond damage. `omcS` should be a ranged nanowire strike,
-  `sqr` should gate survival in the sulfidic zones, `katG` should be required
-  to survive D1. Right now every gene just adds to `playerAtk()`.
-- A codex. `dsrA` and `mcrA` are a wall for anyone who isn't a microbiologist,
-  and the biology is the actual pitch. `GENES[].desc` already holds the text.
-- Sound. Nothing at all.
-- Accessibility beyond redundant encoding: no screen reader support (canvas has
-  no accessibility tree), no user-facing text scale control.
-- The `settings.reduceMotion` and `uiScale` fields exist and are persisted but
-  have no UI to change them.
+**Content:** 8 strata over 24 floors, 20 organisms, 69 loci, 9 complexes,
+3 hazards, 9 KEGG modules, 31 invariants.
 
-**Stranded:** the original LÖVE version has six commits — the crash fix, the
-spec suite, the hot-reload rig, the Winogradsky data in `biology.lua` — that
+**Working, and reachable from play** -- the distinction matters here, because
+three systems once shipped fully built and fully unreachable:
+
+* Procedural generation: disc-masked CA caves, rooms, barriers, boss floors,
+  level caching, everything asserted connected across many seeds.
+* The plasmid: operons, transcriptional polarity, attenuating terminators,
+  clustering synergy, complexes, hazards, burden, gene dosage.
+* The chromosome: one growing replicon, cassette sites bought with ATP,
+  three traits, an ATP ceiling that scales with the cell.
+* Combat: four ranged mechanisms, wind-ups, multi-tile bodies, per-organism
+  speed as an energy budget, status effects.
+* Loot: allele rolls with real affix trade-offs, rarity that describes the
+  COPY, catabolism as a sink, gated substrates.
+* The column as a resource: primary production from the top, the diel cycle,
+  floors that refill from above rather than on their own.
+* Permadeath and the lab: credit, ledger, standing order, the deepest floor
+  ever reached on the splash screen.
+* Auto-explore, travel-to-strike, the flight recorder, the pathway map.
+* PWA install, offline play, an update path that actually updates.
+* An item card that IS the codex the old "Next" list asked for: what a gene
+  does, what it is expressing at right now, its modifiers and level, the
+  complexes and hazards it participates in, and its real discovery history.
+
+**Genuinely not built:**
+
+* **Sound.** Nothing at all. Still the largest single gap.
+* **A settings screen.** `settings.reduceMotion` and `settings.uiScale` are
+  read by the renderer and persisted correctly, and there is no UI anywhere
+  that can change either. They are reachable only by hand-editing the save.
+* **Accessibility beyond redundant encoding.** A canvas has no accessibility
+  tree, so there is no screen-reader support and no text-scale control.
+* **An organism attribution on the item card.** The card names the discovery
+  but not which organism in THIS column drops the gene; that mapping exists
+  only in the notebook, in the other direction.
+
+**Not a gap, but worth knowing:** rendering has never had a browser in the
+loop. `golden.test.ts` hashes 77575 canvas calls for a fixed scenario and
+`scaling.test.ts` checks every screen at eleven viewports, but both assert on
+RECORDED CALLS, not on pixels. Treat any visual claim as a hypothesis.
+
+**Stranded:** the original LÖVE version has six commits -- the crash fix, the
+spec suite, the hot-reload rig, the Winogradsky data in `biology.lua` -- that
 were never pushed and live only in a local clone on another machine. The
-`Microgue.love` and Lua files at the repo root are the *old* pre-fix state.
-Either recover those commits or treat the Lua tree as abandoned; right now it
-is misleading.
+`Microgue.love`, `main.lua`, `map.lua`, `mapGen.lua`, `testLevel.lua`,
+`gamera.lua`, `ConcordTest.lua`, `gridm_Demo.lua` files and the `concord/`
+and `jumper/` directories at the repo ROOT are that *old, pre-fix* tree. They
+are dead weight in the working directory and actively misleading -- `jumper`
+in particular is the ~1400-line pathfinder `path.ts` replaced. Either recover
+those six commits or delete the Lua tree.
 
 ---
 
+## What an adversarial audit found, and what it says about the tests
+
+A full pass over the tree at v0.84, with every finding reproduced by execution
+before it was believed. The suite was green throughout: **800 passing tests did
+not catch any of these.** That is the useful part -- each one names a shape of
+test that was missing, not just a line that was wrong.
+
+**A refusal had already destroyed the parts.** `assemble` found the spare
+promoter's bin index, then pulled the module's genes out of the bin -- and
+every gene sitting below the promoter shifted that index down by one. Off the
+end it returned "no spare promoter in the bin", which was false, *after*
+binning four genes. Measured: 8 parts in, 4 parts out, on a path reporting a
+refusal. The atomicity suite forces thirteen failure paths and compares the
+whole plasmid before and after, and it has an "assemble with no spare
+promoter" case -- but its fixture strips EVERY promoter first, so `pi` is -1
+and the early return fires before any mutation. The bug lived in the branch
+the test could not reach. *A failure-path test must reach the failure the way
+a player does, not the cheapest way to make the function say no.*
+
+**Four public fields fed a memo that keyed only on ring mutations.**
+`integrated`, `strain`, `traits`, `depth` and `inducers` all change what
+`operons()` and the ATP figures should return, and none of them bumped `rev`.
+Measured: after integrating eight sites, acquiring `relaxed copy control` and
+reaching L8, `atpCost` still read **0.19 where the truth was 0.77** -- a
+four-fold understatement that corrected itself only when the player next
+happened to move a part on the ring. The comment above the invalidation test
+says "Enumerate them"; it is a hand-written list of ten METHODS. *A guard that
+enumerates by hand is a guard with a hole, and this one had no coverage of
+fields at all.*
+
+**Half the progression formula was never fed.** `strainLevel` takes cataloguing
+AND depth, and nothing in the game ever wrote `run.deepest` -- only `t_win`
+did. So the depth term was zero for every real run, the maximum reachable
+strain was **L5 of 8**, and `bonusSlots(8)` and `bonusCapacityKb(8)` could not
+happen. The golden trace had been recording `fillRect(42,783.59,0,2)` -- the
+strain progress bar, at width ZERO, on every frame of every run since it was
+added -- and the hash matched, because it had always been zero. The existing
+"strain advances as the lineage catalogues and descends" test sets
+`g.run.deepest = 20` by hand. *A test that manufactures the state the game
+should have produced proves the formula, never the wiring* -- which is the
+same lesson as "Built is not wired", one level further in.
+
+**Credit bought a strain level that lasted one turn.** `startRun` set
+`genome.strain` from `lab.startStrain`; `upkeep` then recomputed it from an
+empty notebook and silently overwrote it -- L8 to L1, three ring positions
+gone, no message, because the toast only fires when the level goes UP. The lab
+sells that offer up to L8 at an escalating price. Same shape as "credit spent
+on constructs that never arrived", which has its own section above.
+
+**The save destroyed the resource the growth curve is paid in.** `parseSave`
+clamped `atp` to a flat 100 while `atpCeiling` reaches 350, so a developed
+strain lost up to 250 ATP on every reload -- against expansions costing up to
+324 and traits at 130/190/260. The "atp is within its pool" invariant passes
+happily, because 100 <= 350.
+
+**`run.deepest` meant different things in four files.** `strain.ts` normalises
+it by MAX_FLOOR and `invariants.ts` bounds it by MAX_DEPTH*3 -- a FLOOR. But
+`parseSave` clamped it to MAX_DEPTH, a STRATUM, so a floor-20 lineage loaded
+back as 8; and the notebook printed it as "deepest D20", a stratum label on a
+floor value, when only D1-D8 exist. A unit that is only in the reader's head
+disagrees with itself eventually.
+
+**Smaller, all silent:** the leak walk in `wastedTranscription` iterated to
+SLOTS while `norm` wraps at `usableSlots`, so an 8-slot ring was walked three
+times and every terminator's readthrough applied three times -- the fifth bug
+from "the array is sized for the largest replicon". `ensureOrigin` overwrote a
+regulatory part to put the origin back, the one path that broke the
+conservation guarantee `install`/`uninstall` are tested for. `add` checked the
+ring but not the bin, so a gene could sit in both. `parseInfo` had no
+finiteness guard, so a corrupt index rendered "deepest D NaN" -- the fourth
+appearance of that exact shape. `migrateLegacy` deleted the legacy save before
+checking it had parsed. The toast collapse keyed on "the last message pushed",
+so two failures alternating each frame never collapsed at all. The NCBI
+sequence cache was `JSON.parse` cast straight to its type, the same hole
+`save.ts` exists to close. `httpFetcher` had no timeout, and `exporting` is
+only cleared when the promise settles -- one hung socket disabled the export
+button for the rest of the session.
+
+**Dead code, with tests keeping it warm.** `replicon.ts` (172 lines) was
+documented above as deleted and was not; `genome.ts` (130 lines) was the
+pre-plasmid model, imported by nothing, and re-declared `O2_LABILE` and
+`BURDEN_KNEE` that `plasmid.ts` also defines -- so "update the O2-labile list"
+had two plausible places to do it and one of them did nothing. `resynthesise`
+and `CARRYOVER` had four tests and no caller, while `soak.test.ts` asserted
+the opposite behaviour. All removed.
+
+Every one of these is now a test that fails without the fix. Each was checked
+by running the new test against the old tree first, because the alternative is
+a test that cannot fail -- which this codebase has shipped before.
+
 ## Next
 
-In rough order of value:
+The old list here was written around v0.45 and never revised: items 1 and 2 --
+gene effects and a codex -- both shipped, in `weapons.ts`/`barrier.ts`/the
+complex effects and in the item card respectively. What is actually left, in
+rough order of value:
 
-1. Gene effects. The plasmid is the best system in the game and currently only
-   changes a damage number.
-2. Codex, reachable from the plasmid screen — tap a gene, read what it does and
-   which organism it came from.
-3. Tune wall motif density on a real screen. It was set by rendering mocks
-   offline and is the most likely thing to be wrong.
-4. Balance. Nothing has been tuned; hp, damage and spawn counts are first
-   guesses.
+1. **Sound.** The only whole system still missing. A turn-based game gets
+   disproportionate weight from one good hit sound and one ambient bed, and
+   the column has an obvious palette: bubbles, sediment, the electrical tick
+   of a nanowire discharge. Keep it in a pure module with the timing testable,
+   the way `fx.ts` is, and gate it on `settings`.
+
+2. **A settings screen.** `reduceMotion` and `uiScale` are read everywhere,
+   persisted correctly, validated on load -- and unreachable. This is the
+   cheapest real win on the list, and `reduceMotion` is an accessibility
+   feature that currently exists only for people who edit localStorage.
+
+3. **Re-run the audit shapes above against the rest of the tree.** Every
+   finding came from four questions, and only the plasmid and the save path
+   have been swept with them properly: *who mutates this without going through
+   the guard; is this index still valid after that splice; does the test reach
+   the failure the way a player does; and does this number mean the same thing
+   in every file that reads it.*
+
+4. **Put a browser in the loop, once.** The golden hashes canvas calls and the
+   scaling suite checks bounds; neither has ever looked at a pixel. One
+   Playwright run producing screenshots at three viewports would confirm or
+   kill several standing hypotheses at once -- wall motif density above all,
+   which was tuned against offline mocks and is the most likely thing to be
+   visually wrong.
+
+5. **Balance, now that the progression actually runs.** Strain level was
+   capped at L5 of 8 and a lab-bought strain was wiped on turn one, so every
+   number tuned against observed play was tuned against a broken curve. The
+   assertions in `spec` bound the shape; the feel is untested.
+
+6. **Delete or recover the Lua tree at the repo root.** It is the old,
+   pre-fix state, it is not what runs, and `jumper/` is the pathfinder
+   `path.ts` replaced. Right now it is the first thing anyone opening the repo
+   sees.
