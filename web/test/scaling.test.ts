@@ -28,7 +28,7 @@ interface Rect { x: number; y: number; w: number; h: number }
 /** Every rect and text position a frame produced. */
 interface Trace {
   rects: Rect[];
-  texts: { x: number; y: number; text: string; size: number }[];
+  texts: { x: number; y: number; text: string; size: number; align: string }[];
   /** cx, cy, r, a0, a1 -- so a drawn ring can be measured, not inferred. */
   arcs: number[][];
 }
@@ -66,7 +66,7 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
         if (p === "arc") t.arcs.push(a as number[]);
         if (p === "fillText" || p === "strokeText") {
           const [text, x, y] = a as [string, number, number];
-          t.texts.push({ x, y, text, size: parseFloat(font) || 10 });
+          t.texts.push({ x, y, text, size: parseFloat(font) || 10, align: state.align });
         }
         if (p === "measureText") {
           const s = parseFloat(font) || 10;
@@ -148,6 +148,21 @@ describe("layout holds on every form factor", () => {
       const off = t.texts.filter((x) => x.x > W + 4 || x.y > H + 4 || x.x < -80);
       expect(off.slice(0, 3).map((x) => `${x.text} at ${Math.round(x.x)},${Math.round(x.y)} in ${W}x${H}`),
              `${name} ${screen}: text off-screen`).toEqual([]);
+
+      // The ORIGIN being on screen is not the same as the STRING fitting.
+      // This only checked x, so the status line -- left-aligned, starting well
+      // inside the frame -- ran off the right edge of every phone and passed:
+      // real Chrome rendered "before dawn" as "before da". Measured the same
+      // way the stub measures, so a string that overflows is a failure here.
+      const over = t.texts.filter((x) => {
+        const w = x.text.length * x.size * 0.6;
+        const right = x.align === "center" ? x.x + w / 2
+          : x.align === "right" ? x.x : x.x + w;
+        return right > W + 4;
+      });
+      expect(over.slice(0, 3).map((x) =>
+        `"${x.text}" runs to ${Math.round(x.align === "center" ? x.x + x.text.length * x.size * 0.3 : x.x + x.text.length * x.size * 0.6)} in ${W}x${H}`),
+             `${name} ${screen}: text overflows the right edge`).toEqual([]);
       if (screen !== "") g.press(screen);
     }
   });

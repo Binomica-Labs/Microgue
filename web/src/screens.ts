@@ -125,7 +125,7 @@ export function drawNotes(
     `${String(seen.length)}/${String(bio.MICROBES.length)} recorded · ` +
     // F, not D: `run.deepest` is a FLOOR (1..24) and everything else in the
     // game prints floors as F. "D24" is not a stratum that exists.
-    `deepest F${String(run.deepest)} · ${String(run.deaths)} lysis events`);
+    `deepest F${String(run.deepest)} · ${String(run.deaths)} lysis events`, W);
 
   const maxW = W - ins.left - ins.right - 28 * u;
   const floor = H - ins.bottom - 60 * u;
@@ -205,7 +205,7 @@ export function drawResearch(
 
   let y = drawHeader(ctx, ins, u, "THE BENCH",
     `${String(Math.floor(atp))} ATP · ${String(held.length)} modifiers held · `
-    + describeLevel(strain));
+    + describeLevel(strain), W);
 
   // The chromosome itself: how big it is, and what it costs to grow.
   const wideTop = W - ins.left - ins.right - 28 * u;
@@ -235,7 +235,8 @@ export function drawResearch(
     ctx.fillText("integrate another cassette site", box.x + 9 * u, box.y + 13 * u);
     ctx.fillStyle = "#6f8f7c";
     ctx.font = `${8 * u}px ui-monospace,monospace`;
-    ctx.fillText("an integron captures one more; every kilobase is copied for ever",
+    ctx.fillText(ellipsise(ctx, "an integron captures one more; every kilobase is copied for ever",
+                           box.w - 18 * u),
                  box.x + 9 * u, box.y + 24 * u);
     ctx.textAlign = "right";
     ctx.fillStyle = can ? "#cfe04a" : "#6f8f7c";
@@ -485,7 +486,7 @@ function fitInto(
 }
 
 /** Trim to a measured width, with a real ellipsis. */
-function ellipsise(ctx: CanvasRenderingContext2D, text: string, max: number): string {
+export function ellipsise(ctx: CanvasRenderingContext2D, text: string, max: number): string {
   if (max <= 0) return "";
   if (ctx.measureText(text).width <= max) return text;
   let lo = 0, hi = text.length;
@@ -523,7 +524,7 @@ export function drawLab(
   const below: Insets = { ...ins, top: ins.top + toastBand * u };
   let y = drawHeader(ctx, below, u,
     last === null ? "THE LAB" : last.won ? "THE COLUMN IS YOURS" : "STRAIN LOST",
-    describeLab(lab));
+    describeLab(lab), W);
 
   const left = ins.left + 14 * u;
   const wide = W - ins.left - ins.right - 28 * u;

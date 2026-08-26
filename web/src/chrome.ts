@@ -42,9 +42,22 @@ export function drawClose(
 }
 
 /** Title and subtitle for an overlay. Returns the y to start content at. */
+/** Trim to fit, measured. */
+function fit(ctx: CanvasRenderingContext2D, text: string, max: number): string {
+  if (!Number.isFinite(max) || max <= 0) return text;
+  if (ctx.measureText(text).width <= max) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(`${text.slice(0, mid)}\u2026`).width <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${text.slice(0, lo).trimEnd()}\u2026`;
+}
+
 export function drawHeader(
   ctx: CanvasRenderingContext2D, ins: Insets, u: number,
-  title: string, subtitle: string,
+  title: string, subtitle: string, W = Infinity,
 ): number {
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -53,7 +66,12 @@ export function drawHeader(
   ctx.fillText(title, ins.left + 14 * u, ins.top + 26 * u);
   ctx.fillStyle = "#8fa89a";
   ctx.font = `${10 * u}px ui-monospace,monospace`;
-  ctx.fillText(subtitle, ins.left + 14 * u, ins.top + 42 * u);
+  // Fitted. Every screen shares this header and the subtitle carries the long
+  // strings -- "0 ATP - 0 modifiers held - strain L1 - 0 bonus slots - +0.0 kb
+  // headroom" is 62 characters and ran off every phone. `W` defaults to
+  // Infinity so a caller that does not know its width is unchanged.
+  const room = W - ins.left - ins.right - 28 * u;
+  ctx.fillText(fit(ctx, subtitle, room), ins.left + 14 * u, ins.top + 42 * u);
   return ins.top + 68 * u;
 }
 

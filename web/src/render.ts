@@ -26,7 +26,7 @@ import { traceWalls } from "./walls.js";
 import { timeName } from "./cycle.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
-import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash }
+import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash, ellipsise }
   from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
 import { MAX_STRAIN, levelProgress } from "./strain.js";
@@ -519,7 +519,6 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
     const pad = 8 * u;
     const left = ins.left + pad;
-    const maxW = W - ins.left - ins.right - pad * 2;
     const s = _g.level.stratum;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
@@ -543,6 +542,9 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
 
     const barX = left + gaugeW;
     const barW = Math.min(W - barX - ins.right - pad, 260 * u);
+    // The gauges are capped at 260u; the status LINE gets whatever is actually
+    // there, or it is ellipsised against a width narrower than the screen.
+    const statusW = W - barX - ins.right - pad;
     const size = Math.min(_g.fitFont(s.name, barW - 12, 13 * u), 13 * u);
     ctx.font = `${size}px ui-monospace,monospace`;
     const lh = size * 1.35;
@@ -556,8 +558,11 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     ctx.fillStyle = s.accent;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText(`F${_g.dungeon.floor}/${MAX_FLOOR}${sealed ? " \u26D4" : ""} ${s.name}  ${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV  ${timeName(_g.clock)}`,
-                 barX, barTop + lh * 0.9);
+    // MEASURED. Real Chrome showed this running off the right edge of every
+    // phone: "before dawn" arriving as "before da".
+    const status = `F${_g.dungeon.floor}/${MAX_FLOOR}${sealed ? " \u26D4" : ""} ${s.name}  `
+      + `${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV  ${timeName(_g.clock)}`;
+    ctx.fillText(ellipsise(ctx, status, statusW), barX, barTop + lh * 0.9);
 
     // One row: hp gauge, then plain readouts. A miniature plasmid ring used to
     // sit here and read as an unexplained circle, so it is gone -- the real
@@ -603,19 +608,28 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     const room = W - ins.right - 6 * u - tailX;
     const long = `${ops} operon${ops === 1 ? "" : "s"}   ${_g.dungeon.aliveCount()} hostile`;
     const short = `${ops}op  ${_g.dungeon.aliveCount()}hp`;
-    ctx.fillText(ctx.measureText(long).width <= room ? long : short,
-                 tailX, barTop + lh * 1.15 + gaugeH / 2);
+    // The SHORT form was never measured either; on a 320-wide phone it
+    // overflows too, and there is nothing below it to fall back to.
+    const tail = ctx.measureText(long).width <= room ? long
+      : ctx.measureText(short).width <= room ? short : "";
+    if (tail !== "") ctx.fillText(tail, tailX, barTop + lh * 1.15 + gaugeH / 2);
     ctx.textBaseline = "alphabetic";
 
     const LIFE = 9000;
     const FADE = 2000;
     const now = performance.now();
     const wrapped: { line: string; alpha: number }[] = [];
+    const logW = W - barX - ins.right - pad;
+    // Wrap at the font the log is DRAWN in. The readout above sets 0.86*size,
+    // so wrapping under it and drawing at full size underestimated by 16%.
+    ctx.font = `${size}px ui-monospace,monospace`;
     for (const entry of _g.log) {
       const age = now - entry.t;
       if (age > LIFE) continue;
       const alpha = age > LIFE - FADE ? (LIFE - age) / FADE : 1;
-      for (const line of _g.wrap(entry.text, maxW)) wrapped.push({ line, alpha });
+      // Wrapped to where it is DRAWN: the log sits at barX, indented past the
+      // gauge, so wrapping to the full width overran by exactly that gauge.
+      for (const line of _g.wrap(entry.text, logW)) wrapped.push({ line, alpha });
     }
     const shown = wrapped.slice(-4);
     // +lh: text is positioned by baseline, so the top line's ascender sits
@@ -809,7 +823,8 @@ export function r_drawMapScreen(_g: Game, W: number, H: number): void {
     ctx.fillText("PATHWAY MAP", ins.left + 14 * u, ins.top + 24 * u);
     ctx.fillStyle = "#8fa89a";
     ctx.font = `${10 * u}px ui-monospace,monospace`;
-    ctx.fillText("drag to pan · pinch to zoom · tap a complete module to build it",
+    ctx.fillText(ellipsise(ctx, "drag to pan · pinch to zoom · tap a complete module to build it",
+                           W - ins.left - ins.right - 16),
                  ins.left + 14 * u, ins.top + 40 * u);
 
     _g.closeBox = drawClose(ctx, W, ins, u);
