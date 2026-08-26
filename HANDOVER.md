@@ -646,67 +646,6 @@ Two related things that fell out of the same pass:
 * The v0.55 refactor's mechanical `this.` -> `_g.` rename had rewritten twelve
   COMMENTS into nonsense ("promoters read _g"). Repaired.
 
-## Each replicon is a RULE, not a stat block
-
-The first version was five points on ONE line -- more copies, fewer slots --
-so every backbone sat on the same trade and there was never a reason to prefer
-one over its neighbour. Each carries a signature now, and every signature is
-something the real plasmid does:
-
-    pSC101   partitioned   immune to hazards: intermediates never accumulate
-    pBR322   plain         the baseline everything else is measured against
-    pUC19    runaway       copy number tracks your ATP
-    RSF1010  mobilisable   half its genes pass to the next strain
-    BAC      roomy         size costs nothing, however much DNA you load
-
-**pUC is the interesting one.** Its copy control is genuinely broken, so it
-replicates as hard as the energy budget allows: 7 copies when starved, 133 when
-flush, and the running cost falls as it collapses. That is a self-limiting
-oscillation and it is exactly what a runaway plasmid does to its host. The
-swing has to be an order of magnitude in COPIES to be felt at all, because
-dosage is compressed (copies^0.28).
-
-**RSF1010 is the one that changes how you play.** A mobilisable plasmid
-transfers out of a dying cell, so half its loci reach the next strain -- the
-only thing that survives a death besides credit. Carrying it is choosing
-insurance over output.
-
-Two bugs from wiring this up:
-
-* The ATP figures are memoised on DEPTH alone, so a runaway backbone's cost
-  never recomputed when its copy number changed -- it reported the cost of
-  whatever energy it first saw. The setter clears the memo, and QUANTISES to
-  20 steps first so a continuously drifting value does not clear it every turn.
-  Measured at 0.5us per turn.
-* `hazards` and `burden` had to be checked before their own arithmetic, not
-  after, or `partitioned` and `roomy` would have been decoration.
-
-## Replicons, not attack/defence/utility plasmids
-
-The request was for separate attack / defence / utility plasmids. Bacteria do
-carry several plasmids at once -- but they are divided by REPLICON, not by
-function, and that distinction generates better builds because it comes with
-two real constraints:
-
-**Copy number.** A pUC origin sits at hundreds of copies and a BAC at one.
-Copy number multiplies expression AND burden. Measured, all with one gene and
-a tandem terminator: pUC19 gives 1.83 expression at 3.40 ATP; a BAC gives 0.52
-at 0.42. Every replicon stays net positive, so none is simply correct.
-
-**Incompatibility.** Two plasmids sharing replication control partition against
-each other. Inc groups are why a strain carries four plasmids and not five of
-the same kind, and they are what will make "which plasmids" a decision when
-multiple simultaneous plasmids land -- the system is built for it, the UI is
-not there yet.
-
-Dosage and burden are NORMALISED to pBR322. The whole economy was tuned against
-one implicit plasmid; making that the centre meant introducing replicons
-re-balanced nothing.
-
-**`SLOTS` was defined twice and the two disagreed** -- 16 in plasmid.ts, 24 in
-transcription.ts -- so the largest replicon was silently clamped and levelling
-appeared to do nothing.
-
 ## Strain level
 
 Not experience points. A strain advances by CATALOGUING: breadth in the
@@ -726,6 +665,66 @@ The starting vector now ships WITH a terminator, because a real vector has one
 and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
 Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
 invariant was passing with a margin of 0.005, which is not a margin.
+
+## The growth curve has to fit inside the energy budget
+
+Eighty percent of the chromosome system shipped unreachable. Expansion rose at
+1.42 per step, so the eighth site cost 744 ATP against a ceiling of 100 --
+thirteen of sixteen expansions and EVERY trait could never be bought. The
+system worked perfectly and no player could ever have seen most of it.
+
+Two changes, and they belong together:
+
+* Expansion rises at 1.16 per step: 35 ATP for the first site, 324 for the
+  last.
+* `atpCeiling` scales with the cell -- `100 + (strain-1)*22 + sites*6`, so a
+  developed strain holds 344. A bigger, better-adapted cell stores more energy;
+  the pool scales with biomass. That is what makes a rising cost curve payable
+  rather than theoretical.
+
+Traits cost 130 / 190 / 260, which `spec` asserts are ALL reachable by a
+developed strain and NONE affordable at the start. There are tests that every
+expansion is payable at maximum ceiling, and that the last one still costs more
+than 60% of a full pool -- reachable is not the same as cheap.
+
+The lesson generalises: whenever a cost curve is added, assert it against the
+budget that pays it. A cost nobody can pay is the same as a feature that does
+not exist.
+
+## One chromosome that grows
+
+The replicon menu is gone. Choosing between five backbones was a fork in the
+road, not a thing that grew, and it never aligned with what the game is.
+
+`chromosome.ts`. One circular replicon, eight cassette sites to start, grown by
+integrating more. That is not a metaphor: an INTEGRON is a site that captures
+gene cassettes one after another, each with its own promoter, and the array
+grows as more are taken. Expansion is paid in ATP because replicating and
+maintaining more DNA is what it actually costs a cell.
+
+    sites   slots  capacity  next costs
+      0       8      9.0 kb      45
+      4      12     14.4 kb     183
+      8      16     19.8 kb     744
+     12      20     25.2 kb    3025
+
+Full expansion is 29000 ATP, far beyond one run -- you grow a few sites per
+strain, and the LAB buys a higher starting point with credit.
+
+What survived from the replicon design is the part worth keeping: the
+signatures are TRAITS now, bought once each with ATP and kept for the run.
+`par locus` (no hazards), `relaxed copy control` (copy number tracks your ATP),
+`oriT and relaxase` (half its loci reach the next strain). Architecture you
+invest in, on one molecule, rather than a menu of alternatives.
+
+`replicon.ts` is deleted; the dosage compression moved into `chromosome.ts`
+because copy number still matters once relaxed control is on the table.
+
+**A note on the test migration.** Base slots went 16 -> 8, so every fixture
+that laid an operon at slots 4-9 ran off the end. Growing them all to maximum
+was wrong: it inflates CAPACITY too, which silently removed the burden that
+two of those tests exist to measure. `withOperon` grows only as far as its
+operon needs, and the capacity tests are explicitly NOT grown.
 
 ## The ring is the replicon's, not the array's
 

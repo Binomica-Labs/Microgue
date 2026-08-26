@@ -10,10 +10,11 @@
 // for a gene or a grid, and a mechanical rename to `g` silently pointed at the
 // wrong one.
 
-export { t_catabolise, t_die, t_research, t_subclone, t_win }
+export { t_acquire, t_catabolise, t_die, t_expand, t_research, t_win }
   from "./progress.js";
 import { WILD_TYPE, rollAllele } from "./allele.js";
 import { describeLevel, strainLevel } from "./strain.js";
+import { atpCeiling } from "./chromosome.js";
 import * as bio from "./biology.js";
 import * as say from "./flavour.js";
 import { BARRIERS, barrierAt, blockedBy, degrade } from "./barrier.js";
@@ -182,6 +183,15 @@ export function t_upkeep(_g: Game): void {
     const level = strainLevel({
       catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
     });
+    // The energy a cell can hold scales with how big and how adapted it is.
+    // Without this the ceiling sat at 100 for ever and most of the growth
+    // curve, and every trait, was unreachable.
+    const ceiling = atpCeiling(_g.genome.integrated, _g.genome.strain);
+    if (ceiling !== _g.player.atpMax) {
+      _g.player.atpMax = ceiling;
+      _g.player.atp = Math.min(_g.player.atp, ceiling);
+    }
+
     if (level !== _g.genome.strain) {
       const before = _g.genome.strain;
       _g.genome.strain = level;

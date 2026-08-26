@@ -11,7 +11,7 @@ import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,
          t_look, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
          t_take, t_takeTurn, t_upkeep, t_win, t_world, t_catabolise,
-         t_subclone, t_explore } from "./turn.js";
+         t_expand, t_acquire, t_explore } from "./turn.js";
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { ATP_MAX, Plasmid } from "./plasmid.js";
@@ -41,7 +41,7 @@ import { type WorldView } from "./invariants.js";
 import { installGlobalHandlers, on } from "./safety.js";
 import { capacityAt, describeStock, restockAmount } from "./production.js";
 import { WILD_TYPE,rollAllele } from "./allele.js";
-import type { RepliconId } from "./replicon.js";
+import type { TraitId } from "./chromosome.js";
 import { newLab, type Lab, type RunRecord } from "./lab.js";
 import { readLab, writeLab } from "./lab_save.js";
 import { buy, type Offer } from "./lab.js";
@@ -406,8 +406,11 @@ class Game {
     this.save();
   }
 
-  /** Move the whole plasmid onto a different backbone. */
-  subclone(to: RepliconId): void { t_subclone(this, to); }
+  /** Integrate another cassette site into the chromosome. */
+  expand(): void { t_expand(this); }
+
+  /** Acquire a piece of architecture, once. */
+  acquire(id: TraitId): void { t_acquire(this, id); }
 
   /** Walk to the frontier until something interrupts. */
   explore(): void { t_explore(this); }
@@ -538,7 +541,8 @@ class Game {
       }),
       heldMods: [...this.mods],
       turn: this.clock.turn,
-      replicon: this.genome.replicon,
+      integrated: this.genome.integrated,
+      traits: [...this.genome.traits],
       stocked: this.dungeon.visitedLevels()
         .map((l): [number, number] => [l.floor, l.stockedAt]),
       won: this.won,
@@ -555,11 +559,14 @@ class Game {
     this.dungeon = new Dungeon(96, 96, s.seed);
     this.dungeon.floor = s.floor;
     this.genome = new Plasmid();
-    // The replicon FIRST. `put` refuses positions the replicon does not have,
-    // and the saved array runs to the largest replicon's length -- so writing
-    // the ring before knowing which backbone it belongs to drops everything
-    // past the default's sixteenth position.
-    this.genome.replicon = s.replicon;
+    // The chromosome's SIZE first. `put` refuses positions it does not have,
+    // and the saved array runs to the maximum -- so writing the ring before
+    // knowing how far the chromosome was grown drops everything past the
+    // base eight positions.
+
+    this.genome.integrated = s.integrated;
+    this.genome.traits.clear();
+    for (const t of s.traits) this.genome.traits.add(t);
     this.genome.strain = strainLevel({
       catalogued: s.run.bestiary.length, deepest: s.run.deepest,
     });
@@ -750,7 +757,7 @@ class Game {
 
       // Everything the lab has ordered is on the new strain from turn one.
       // This is what the previous strain died for.
-      this.genome.replicon = this.lab.startReplicon;
+      this.genome.integrated = this.lab.startSites;
       this.genome.strain = this.lab.startStrain;
       for (const g of this.lab.stock) {
         this.genome.stash({ kind: "gene", id: g, level: 1, mods: [],

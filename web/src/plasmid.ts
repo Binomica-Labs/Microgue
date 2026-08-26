@@ -83,8 +83,8 @@ const WASTE_PER_UNIT = 1.15;
 export type { Part } from "./transcription.js";
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
-import { REPLICONS, dosage, copyBurden, effectiveCopies,
-         type RepliconId } from "./replicon.js";
+import { capacityFor, copiesFor, copyBurden, dosage, slotsFor,
+         type TraitId } from "./chromosome.js";
 import { TERMINATORS } from "./parts.js";
 import { bonusCapacityKb, bonusSlots } from "./strain.js";
 import { MAX_LEVEL, MODIFIERS, evolutionCost, levelMultiplier, modifierSlots,
@@ -163,8 +163,7 @@ export class Plasmid {
     if (!part) return { ok: false, err: "no such part" };
     if (!this.usable(slot)) {
       return { ok: false,
-               err: `${REPLICONS[this.replicon].name} has only `
-                 + `${String(this.usableSlots)} positions` };
+               err: `the chromosome has only ${String(this.usableSlots)} positions` };
     }
     const displaced = this.at(slot);
     if (displaced?.kind === "gene" && displaced.id === "ori") {
@@ -280,18 +279,18 @@ export class Plasmid {
     const q = Math.round(e * 20) / 20;
     if (q === this._energy) return;
     this._energy = q;
-    if (REPLICONS[this.replicon].signature === "runaway") this.memoAtp.clear();
+    if (this.traits.has("runaway")) this.memoAtp.clear();
   }
 
   /** Copies actually present, which a runaway backbone varies with energy. */
   copies(): number {
-    return effectiveCopies(REPLICONS[this.replicon], this.energy);
+    return copiesFor(this.traits.has("runaway"), this.energy);
   }
 
   dosage(): number { return dosage(this.copies()); }
 
   capacityKb(): number {
-    return REPLICONS[this.replicon].capacityKb + bonusCapacityKb(this.strain);
+    return capacityFor(this.usableSlots, bonusCapacityKb(this.strain));
   }
 
   /** Place a part in the first free USABLE slot after `from`, or fail. */
@@ -400,13 +399,17 @@ export class Plasmid {
   /** Which plasmid this is. Copy number multiplies both expression and burden;
    *  slots and capacity come from the replicon plus whatever the strain has
    *  earned. See replicon.ts and strain.ts. */
-  replicon: RepliconId = "pbr322";
+  /** Cassette sites integrated beyond the base. Bought with ATP; see
+   *  chromosome.ts. Dies with the strain -- the LAB buys a higher start. */
+  integrated = 0;
+  /** Architecture acquired, once each and kept for the run. */
+  readonly traits = new Set<TraitId>();
   /** Strain level, set by the game from the notebook and the deepest floor. */
   strain = 1;
 
   /** Ring positions actually usable: the replicon's, plus strain bonus. */
   get usableSlots(): number {
-    return Math.min(REPLICONS[this.replicon].slots + bonusSlots(this.strain), SLOTS);
+    return Math.min(slotsFor(this.integrated, bonusSlots(this.strain)), SLOTS);
   }
   private context(): Context {
     return { stratum: stratum(this.depth), inducers: this.inducers };
@@ -427,9 +430,6 @@ export class Plasmid {
   }
 
   burden(): number {
-    // A single-copy backbone pays nothing for size: one copy is one copy
-    // however long it is, which is exactly why a BAC carries 300 kb.
-    if (REPLICONS[this.replicon].signature === "roomy") return 0;
     const frac = this.used() / this.capacityKb();
     if (frac <= BURDEN_KNEE) return 0;
     const over = (frac - BURDEN_KNEE) / (1 - BURDEN_KNEE);
@@ -769,9 +769,9 @@ export class Plasmid {
 
   /** Half-built pathways. The intermediate accumulates and it is cytotoxic. */
   hazards(depth: number): Hazard[] {
-    // An actively partitioned replicon is the stable one: intermediates do
-    // not accumulate because nothing is ever mis-segregated mid-pathway.
-    if (REPLICONS[this.replicon].signature === "partitioned") return [];
+    // Faithful segregation means no daughter is ever left holding half a
+    // pathway, which is where a toxic intermediate comes from.
+    if (this.traits.has("partitioned")) return [];
     return HAZARDS.filter((h) =>
       this.expression(h.present, depth) > 0 && this.expression(h.missing, depth) <= 0);
   }

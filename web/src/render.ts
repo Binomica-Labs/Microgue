@@ -404,7 +404,8 @@ export function r_draw(_g: Game): void {
           p?.kind === "gene" && p.id !== "ori"
             ? [{ id: p.id, level: p.level, mods: p.mods }] : []),
         _g.mods, _g.player.atp, _g.researchPick, _g.researchRows,
-        _g.genome.strain, _g.genome.replicon);
+        _g.genome.strain, _g.genome.usableSlots,
+        _g.genome.capacityKb(), _g.genome.traits);
       _g.drawToasts(W, H);
       return;
     }

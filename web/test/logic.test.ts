@@ -8,7 +8,7 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { DEFAULT_SETTINGS, SCHEMA, parseSave } from "../src/save.js";
-import { BIN_CAP, Plasmid, SLOTS, STARTING_PARTS, type Part }
+import { ATP_MAX, BIN_CAP, Plasmid, SLOTS, STARTING_PARTS, type Part }
   from "../src/plasmid.js";
 import { MAX_LEVEL, MODIFIERS, PROMOTERS, RARITY, RARITY_IDS, TERMINATORS,
          RARITY_RANK, evolutionCost, modifierSlots, partsOfRarity,
@@ -56,13 +56,12 @@ import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
 import { partRarity } from "../src/plasmid_ui.js";
 import { RESTOCK_TURNS, capacityAt, describeStock, meanLight, rateAt,
          restockAmount } from "../src/production.js";
-import { REPLICONS, REPLICON_IDS, availableAt, compatible, copyBurden, dosage,
-         effectiveCopies, incompatibleReason, type RepliconId }
-  from "../src/replicon.js";
+import { BASE_SLOTS, MAX_SLOTS, TRAITS, TRAIT_IDS, atpCeiling, capacityFor,
+         copiesFor, expansionCost, slotsFor } from "../src/chromosome.js";
 import { MAX_STRAIN, bonusCapacityKb, bonusSlots, strainLevel }
   from "../src/strain.js";
 import { LEDGER_CAP, STOCK_CAP, buy, creditFor, genePrice, newLab, offers,
-         recordRun, repliconPrice, strainPrice } from "../src/lab.js";
+         recordRun, sitesPrice, strainPrice } from "../src/lab.js";
 import { parseLab } from "../src/lab_save.js";
 import { LYSIS_MS, phaseAt, shards } from "../src/lysis.js";
 import { levelProgress } from "../src/strain.js";
@@ -340,7 +339,11 @@ describe("save validation", () => {
 });
 
 describe("plasmid operons", () => {
-  const P = () => new Plasmid();
+  const P = () => {
+    const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // room for the fixtures below
+    return p;
+  };
 
   it("starts transcribing an origin", () => {
     const p = P();
@@ -539,6 +542,7 @@ describe("plasmid ring geometry", () => {
   });
   it("describe() flags an untranscribed gene", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(9, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     expect(describeSlot(p, 9, 4).join(" ")).toContain("NOT TRANSCRIBED");
   });
@@ -955,6 +959,7 @@ describe("keyboard while the plasmid is open", () => {
 describe("parts bin", () => {
   it("starts stocked with regulatory parts, not genes", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     expect(p.bin.length).toBeGreaterThan(0);
     expect(p.bin.every((x) => x.kind !== "gene")).toBe(true);
     expect(p.bin.some((x) => x.kind === "promoter")).toBe(true);
@@ -963,6 +968,7 @@ describe("parts bin", () => {
 
   it("loot goes to the bin, not onto the ring", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(true);
     expect(p.inBin("mtrC")).toBe(true);
     expect(p.has("mtrC")).toBe(false);
@@ -971,6 +977,7 @@ describe("parts bin", () => {
 
   it("refuses a duplicate whether it is on the ring or in the bin", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(false);
     p.install(p.bin.findIndex((x) => x.kind === "gene"), 8);
@@ -979,6 +986,7 @@ describe("parts bin", () => {
 
   it("install and uninstall conserve parts -- nothing is destroyed", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     const count = () => p.bin.length + p.slots.filter((x) => x !== null).length;
     const before = count();
     p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
@@ -992,6 +1000,7 @@ describe("parts bin", () => {
 
   it("installing over an occupied slot returns the old part to the bin", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(8, { kind: "terminator", id: "rrnbt1" });
     p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     const binBefore = p.bin.length;
@@ -1002,6 +1011,7 @@ describe("parts bin", () => {
 
   it("the origin can be neither displaced nor uninstalled", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     const oi = p.slots.findIndex((x) => x?.kind === "gene" && x.id === "ori");
     expect(p.uninstall(oi).ok).toBe(false);
     p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
@@ -1012,6 +1022,7 @@ describe("parts bin", () => {
 describe("operon complexes", () => {
   const build = (parts: [number, Part][]) => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     for (const [i, part] of parts) p.put(i, part);
     return p;
   };
@@ -1070,6 +1081,7 @@ describe("operon complexes", () => {
 describe("toxic intermediates", () => {
   it("nitrate reductase without N2O reductase accumulates nitrous oxide", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "narG", level: 1, mods: ["codon"], allele: WILD_TYPE });
     expect(p.hazards(2).map((h) => h.id)).toContain("n2o");
@@ -1078,6 +1090,7 @@ describe("toxic intermediates", () => {
 
   it("completing the chain clears the hazard and grants the complex", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "narG", level: 1, mods: ["codon"], allele: WILD_TYPE });
     p.put(6, { kind: "gene", id: "nosZ", level: 1, mods: ["codon"], allele: WILD_TYPE });
@@ -1087,6 +1100,7 @@ describe("toxic intermediates", () => {
 
   it("a hazard needs the offending gene to actually be expressed", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(9, { kind: "gene", id: "narG", level: 1, mods: ["codon"], allele: WILD_TYPE });   // no promoter
     expect(p.toxicity(2)).toBe(0);
   });
@@ -1178,6 +1192,7 @@ describe("KEGG modules", () => {
 
   it("stashed genes count toward completeness, like a genome scan", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.stash({ kind: "gene", id: "sat", level: 1, mods: [], allele: WILD_TYPE });
     expect(p.carried().has("sat")).toBe(true);
   });
@@ -1187,12 +1202,14 @@ describe("module auto-assembly", () => {
   const sulfate: bio.GeneId[] = ["sat", "aprA", "dsrA"];
   const stocked = () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     for (const g of sulfate) p.stash({ kind: "gene", id: g, level: 1, mods: ["codon"], allele: WILD_TYPE });
     return p;
   };
 
   it("refuses when an enzyme is missing, and names it", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.stash({ kind: "gene", id: "dsrA", level: 1, mods: ["codon"], allele: WILD_TYPE });
     const r = p.assemble(sulfate);
     expect(r.ok).toBe(false);
@@ -1369,6 +1386,7 @@ describe("edge cases across modules", () => {
     // Modulo usableSlots, not SLOTS: the array is sized for the largest
     // replicon and only the positions this one owns take part.
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23106" });
     p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     const snap = () => p.slots.map((x) => (x?.kind === "gene" ? x.id : x?.kind ?? null));
@@ -1382,29 +1400,29 @@ describe("edge cases across modules", () => {
     }
   });
 
-  it("spinning the ring never strands a part past the replicon", () => {
-    // Rotating all 24 array positions while the replicon owned 16 pushed parts
-    // where nothing could reach them -- from simply dragging the ring, which
-    // is the most ordinary thing a player does on that screen.
-    for (const rep of REPLICON_IDS) {
+  it("spinning the ring never strands a part past the chromosome", () => {
+    // Rotating all 24 array positions while the chromosome owned 8 pushed
+    // parts where nothing could reach them -- from simply dragging the ring,
+    // which is the most ordinary thing a player does on that screen.
+    for (let rep = 0; rep <= MAX_SLOTS - BASE_SLOTS; rep += 3) {
       const p = new Plasmid();
-      p.replicon = rep;
+      p.integrated = rep;
       p.strain = 1;
       for (let i = 0; i < 60; i++) {
         p.rotate(i * 7 - 30);
         for (let s = 0; s < SLOTS; s++) {
           if (!p.usable(s)) {
-            expect(p.at(s), `${rep}: part stranded at ${String(s)}`).toBeNull();
+            expect(p.at(s), `${String(rep)}: part stranded at ${String(s)}`).toBeNull();
           }
         }
       }
-      expect(p.has("ori"), `${rep}: origin lost while spinning`).toBe(true);
+      expect(p.has("ori"), `${String(rep)}: origin lost while spinning`).toBe(true);
     }
   });
 
-  it("a swap outside the replicon is refused rather than stranding a part", () => {
+  it("a swap outside the chromosome is refused rather than stranding a part", () => {
     const p = new Plasmid();
-    p.replicon = "puc";           // 10 slots
+    p.integrated = 0;             // the base eight positions
     p.strain = 1;
     expect(p.swap(1, 20).ok).toBe(false);
     expect(p.at(20)).toBeNull();
@@ -1413,6 +1431,7 @@ describe("edge cases across modules", () => {
 
   it("swapping a slot with itself changes nothing", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     const before = JSON.stringify(p.slots);
     p.swap(3, 3);
     expect(JSON.stringify(p.slots)).toBe(before);
@@ -1420,11 +1439,13 @@ describe("edge cases across modules", () => {
 
   it("assembling an empty module list is refused, not a crash", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     expect(() => p.assemble([])).not.toThrow();
   });
 
   it("a completely full ring reports no free slots and refuses installs", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     // Fill the RING, not the array: positions past the replicon's last are not
     // free space, they do not exist.
     for (let i = 0; i < p.usableSlots; i++) {
@@ -1436,6 +1457,7 @@ describe("edge cases across modules", () => {
 
   it("a full bin refuses further loot rather than dropping it silently", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     while (p.stash({ kind: "terminator", id: "rrnbt1" }).ok) { /* fill */ }
     expect(p.bin.length).toBeLessThanOrEqual(18);
     expect(p.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(false);
@@ -1443,6 +1465,7 @@ describe("edge cases across modules", () => {
 
   it("expression is finite and non-negative at every depth for every gene", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     let slot = 5;
     for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
@@ -1585,6 +1608,7 @@ describe("pathway graph", () => {
 describe("starter parts library", () => {
   it("stocks enough to lay down several transcripts before looting", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     const proms = p.bin.filter((x) => x.kind === "promoter").length;
     const terms = p.bin.filter((x) => x.kind === "terminator").length;
     expect(proms).toBeGreaterThanOrEqual(3);
@@ -1593,6 +1617,7 @@ describe("starter parts library", () => {
 
   it("a fresh plasmid can assemble a looted module without extra promoters", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     for (const g of ["sat", "aprA", "dsrA"] as const) {
       p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
     }
@@ -1603,6 +1628,7 @@ describe("starter parts library", () => {
 
   it("starter parts leave room in the bin for loot", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     expect(p.bin.length).toBeLessThan(BIN_CAP - 4);
   });
 });
@@ -1934,6 +1960,10 @@ describe("facing and movement", () => {
 describe("ATP economy", () => {
   const withOperon = (...genes: bio.GeneId[]) => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
+    // The base chromosome is eight positions and the starting vector uses
+    // three. These fixtures lay down whole operons, so they need room.
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
     p.put(4, { kind: "promoter", id: "j23119" });
     genes.forEach((g, i) => {
       p.put(5 + i, { kind: "gene", id: g, level: 1, mods: ["codon"], allele: WILD_TYPE });
@@ -1950,6 +1980,7 @@ describe("ATP economy", () => {
     // replicon genuinely costs energy, so compare against that baseline.
     const base = new Plasmid().atpCost(2);
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(9, { kind: "gene", id: "narG", level: 1, mods: ["codon"], allele: WILD_TYPE });   // no promoter
     expect(p.atpCost(2)).toBeCloseTo(base, 6);
   });
@@ -1987,15 +2018,22 @@ describe("ATP economy", () => {
 
   it("a bare plasmid is net positive -- you are never dead on arrival", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     for (let d = 1; d <= bio.MAX_DEPTH; d++) {
       expect(p.atpBalance(d), `D${d}`).toBeGreaterThan(0);
     }
   });
 
   it("a generator-free hoard runs at a loss, and worse the deeper it goes", () => {
+    // Baseline fermentation covers a small hoard at the surface -- it was
+    // raised to 1.6 when repair began costing ATP. What has to hold is that
+    // carrying dead weight gets steadily worse as respiration pays less, and
+    // that it is underwater well before the bottom.
     const p = withOperon("katG", "cbbL", "aclB", "nosZ");
-    expect(p.atpBalance(1)).toBeLessThan(0);
     expect(p.atpBalance(5)).toBeLessThan(p.atpBalance(1));
+    expect(p.atpBalance(5), "a generator-free hoard should be underwater by D5")
+      .toBeLessThan(0);
+    expect(p.atpBalance(8)).toBeLessThan(p.atpBalance(5));
   });
 
   it("every canonical respiration pays for itself at its own depth", () => {
@@ -2382,6 +2420,7 @@ describe("the microbe turn", () => {
 describe("plasmid memoisation cannot go stale", () => {
   const fresh = () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "narG", level: 1, mods: ["codon"], allele: WILD_TYPE });
     return p;
@@ -2967,6 +3006,7 @@ describe("the run, as a roguelike", () => {
 
   it("the export names real loci and refuses to invent sequence", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: ["codon"], allele: WILD_TYPE });
     const out = exportAnnotation("SP162", 7, p.slots);
@@ -3001,6 +3041,7 @@ describe("running out of ATP is lethal, not cosmetic", () => {
   it("a plasmid with no respiration for this depth runs a deficit", () => {
     // A load of structural genes and no generator, deep down.
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     (["katG", "cbbL", "aclB"] as const).forEach((g, i) => {
       p.put(5 + i, { kind: "gene", id: g, level: 1, mods: ["codon"], allele: WILD_TYPE });
@@ -3010,6 +3051,7 @@ describe("running out of ATP is lethal, not cosmetic", () => {
 
   it("acquiring the right respiration turns the deficit around", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     (["katG", "cbbL", "aclB"] as const).forEach((g, i) => {
       p.put(5 + i, { kind: "gene", id: g, level: 1, mods: ["codon"], allele: WILD_TYPE });
@@ -3118,6 +3160,7 @@ describe("NCBI sequence retrieval", () => {
 
   it("the export emits real FASTA when sequences are in hand", async () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: ["codon"], allele: WILD_TYPE });
     const got = await fetchAll(["mtrC"], stub());
@@ -3129,6 +3172,7 @@ describe("NCBI sequence retrieval", () => {
 
   it("a locus without a sequence exports its query, never invented bases", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: ["codon"], allele: WILD_TYPE });
     const out = exportAnnotation("Hilden", 7, p.slots, new Map());
@@ -3139,6 +3183,7 @@ describe("NCBI sequence retrieval", () => {
 
   it("the origin is exported as a design element, not a locus", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     const out = exportAnnotation("x", 1, p.slots, new Map());
     expect(out).toContain("design element, no NCBI record");
   });
@@ -3528,6 +3573,7 @@ describe("crawl-like behaviours", () => {
 
   it("a discarded part leaves the bin and does not come back", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     const before = p.bin.length;
     const i = p.bin.findIndex((x) => x.kind === "gene");
@@ -3619,6 +3665,7 @@ describe("day and night", () => {
 describe("bioluminescence", () => {
   const lit = () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(4, { kind: "promoter", id: "j23119" });
     p.put(5, { kind: "gene", id: "luxAB", level: 1, mods: ["codon"], allele: WILD_TYPE });
     return p;
@@ -3694,6 +3741,7 @@ describe("the difficulty curve", () => {
   // A player who built a sensible, capacity-respecting kit for their depth.
   const kitFor = (depth: number): Plasmid => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     const useful: bio.GeneId[] = [];
     for (const m of bio.MICROBES) {
       if (m.depth > depth || m.depth < depth - 2) continue;
@@ -3716,10 +3764,16 @@ describe("the difficulty curve", () => {
 
   it("an over-stuffed plasmid is crippled but never silently switched off", () => {
     const p = new Plasmid();
+    // Grown, then over-filled: the point is exceeding CAPACITY, and the
+    // biggest genes are the ones that do it.
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
     p.put(3, { kind: "promoter", id: "j23119" });
+    const big = (Object.keys(bio.GENES) as bio.GeneId[])
+      .filter((id) => id !== "ori")
+      .sort((a, b) => bio.GENES[b].kb - bio.GENES[a].kb);
     let slot = 4;
-    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
-      if (id === "ori" || slot >= 15) continue;
+    for (const id of big) {
+      if (slot >= p.usableSlots) break;
       p.put(slot++, { kind: "gene", id, level: 1, mods: ["codon"], allele: WILD_TYPE });
     }
     expect(p.burden()).toBeGreaterThan(0.5);
@@ -4244,6 +4298,7 @@ describe("the part catalogue is data, not code", () => {
   it("readthrough reaches genes downstream, proportionally", () => {
     const build = (id: TerminatorId): number => {
       const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
       p.put(0, { kind: "promoter", id: "j23119" });
       p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
       p.put(2, { kind: "terminator", id });
@@ -4271,6 +4326,7 @@ describe("the part catalogue is data, not code", () => {
 
   it("modifiers compose multiplicatively and are capped by level", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(0, { kind: "promoter", id: "j23119" });
     p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     const bare = p.expression("mtrC", 4);
@@ -4286,6 +4342,7 @@ describe("the part catalogue is data, not code", () => {
 
   it("directed evolution raises efficacy and costs more each time", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(0, { kind: "promoter", id: "j23119" });
     p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     let last = p.expression("mtrC", 4);
@@ -4431,6 +4488,7 @@ describe("rare parts drop and research spends", () => {
     expect(modifierSlots(2)).toBe(2);
     expect(modifierSlots(MAX_LEVEL)).toBe(3);
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(0, { kind: "promoter", id: "j23119" });
     p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     let added = 0;
@@ -4442,6 +4500,7 @@ describe("rare parts drop and research spends", () => {
 
   it("evolving is atomic: a refusal changes nothing", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(1, { kind: "gene", id: "mtrC", level: MAX_LEVEL, mods: [], allele: WILD_TYPE });
     const before = JSON.stringify(p.slots);
     expect(p.evolve("mtrC").ok).toBe(false);
@@ -4817,62 +4876,6 @@ describe("the gene catalogue is deep enough to hunt in", () => {
   });
 });
 
-describe("replicons make the build", () => {
-  const withGene = (rep: RepliconId) => {
-    const p = new Plasmid();
-    p.replicon = rep; p.strain = 8;
-    p.put(0, { kind: "promoter", id: "j23119" });
-    p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
-    p.put(2, { kind: "terminator", id: "rrnbt1t2" });
-    return p;
-  };
-
-  it("copy number buys expression and charges burden for it", () => {
-    const puc = withGene("puc"), bac = withGene("bac");
-    expect(puc.expression("mtrC", 4), "high copy must express more")
-      .toBeGreaterThan(bac.expression("mtrC", 4));
-    expect(puc.atpCost(4), "and cost more to carry").toBeGreaterThan(bac.atpCost(4));
-  });
-
-  it("the default replicon is the baseline, so nothing was re-tuned", () => {
-    // The whole economy was balanced against one implicit plasmid. Making that
-    // plasmid the centre means adding replicons re-balanced nothing.
-    expect(dosage(REPLICONS.pbr322.copies)).toBeCloseTo(1, 6);
-    expect(copyBurden(REPLICONS.pbr322.copies)).toBeCloseTo(1, 6);
-  });
-
-  it("neither extreme is simply correct", () => {
-    // If one replicon dominated there would be no decision to make.
-    const nets = REPLICON_IDS.map((id) => withGene(id).atpBalance(4));
-    const spread = Math.max(...nets) - Math.min(...nets);
-    expect(spread, "every replicon should stay viable").toBeLessThan(1.5);
-    for (const n of nets) expect(n).toBeGreaterThan(0);
-  });
-
-  it("incompatibility groups are a real constraint", () => {
-    // Two plasmids sharing replication control partition against each other.
-    expect(compatible(["puc", "pbr322"]), "both ColE1").toBe(false);
-    expect(compatible(["puc", "psc101", "rsf1010"])).toBe(true);
-    expect(incompatibleReason(["puc"], "pbr322")).toContain("ColE1");
-    expect(incompatibleReason(["puc"], "rsf1010")).toBeNull();
-  });
-
-  it("a replicon's slots are enforced, not decorative", () => {
-    const p = new Plasmid();
-    p.replicon = "puc"; p.strain = 1;      // 10 slots
-    expect(p.usableSlots).toBe(REPLICONS.puc.slots);
-    p.stash({ kind: "terminator", id: "rrnbt1" });
-    const i = p.bin.findIndex((x) => x.kind === "terminator");
-    expect(p.install(i, 15).ok, "slot 15 does not exist on pUC19").toBe(false);
-    expect(p.install(i, 8).ok).toBe(true);
-  });
-
-  it("a bigger replicon carries more DNA", () => {
-    const small = new Plasmid(); small.replicon = "puc";
-    const big = new Plasmid(); big.replicon = "bac";
-    expect(big.capacityKb()).toBeGreaterThan(small.capacityKb() * 2);
-  });
-});
 
 describe("strain level comes from what the lineage has learned", () => {
   it("both breadth and depth count", () => {
@@ -4914,13 +4917,6 @@ describe("strain level comes from what the lineage has learned", () => {
     expect(high.usableSlots).toBeGreaterThan(low.usableSlots);
   });
 
-  it("better replicons unlock with level, and the starter is always available", () => {
-    expect(availableAt(1).length).toBeGreaterThan(0);
-    expect(availableAt(MAX_STRAIN).length).toBe(REPLICON_IDS.length);
-    for (let l = 1; l < MAX_STRAIN; l++) {
-      expect(availableAt(l + 1).length).toBeGreaterThanOrEqual(availableAt(l).length);
-    }
-  });
 });
 
 describe("terminators cost ATP, not just isolation", () => {
@@ -4929,6 +4925,7 @@ describe("terminators cost ATP, not just isolation", () => {
   // and including its terminator, so the "no terminator" case quietly had one.
   const withTerm = (id: TerminatorId | null) => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
     p.put(6, { kind: "promoter", id: "j23119" });
     p.put(7, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
     if (id !== null) p.put(8, { kind: "terminator", id });
@@ -4966,12 +4963,14 @@ describe("terminators cost ATP, not just isolation", () => {
 
   it("the starting vector ships with a terminator, as a real one does", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     expect(p.slots.some((s) => s?.kind === "terminator"),
            "an unterminated starter burns ATP from turn one").toBe(true);
   });
 
   it("waste is finite for any arrangement", () => {
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     for (let i = 0; i < 16; i++) p.put(i, { kind: "promoter", id: "j23119" });
     expect(Number.isFinite(p.wastedTranscription(4))).toBe(true);
     for (let i = 0; i < 16; i++) p.put(i, { kind: "terminator", id: "hairpin" });
@@ -5088,20 +5087,20 @@ describe("synthesis credit", () => {
 
   it("prices rise with what a construct actually costs to synthesise", () => {
     expect(genePrice("mcrA")).toBeGreaterThan(genePrice("psbA"));
-    expect(repliconPrice("bac")).toBeGreaterThan(repliconPrice("puc"));
+    expect(sitesPrice(3)).toBeGreaterThan(sitesPrice(0));
     expect(strainPrice(5)).toBeGreaterThan(strainPrice(1));
   });
 
   it("a stored lab is clamped to what play can produce", () => {
     const lab = parseLab({
-      credit: -50, deepestEver: 9999, startStrain: 99, startReplicon: "nonsense",
+      credit: -50, deepestEver: 9999, startStrain: 99, startSites: 999,
       stock: ["mtrC", "mtrC", "notAGene", 7],
       ledger: [{ floor: 9999, credit: -3, killedBy: "x".repeat(500) }, "junk"],
     });
     expect(lab.credit).toBeGreaterThanOrEqual(0);
     expect(lab.deepestEver).toBeLessThanOrEqual(MAX_FLOOR);
     expect(lab.startStrain).toBeLessThanOrEqual(MAX_STRAIN);
-    expect(lab.startReplicon).toBe("pbr322");
+    expect(lab.startSites).toBeLessThanOrEqual(MAX_SLOTS - BASE_SLOTS);
     expect(lab.stock).toEqual(["mtrC"]);
     expect(lab.ledger).toHaveLength(1);
     expect(lab.ledger[0]?.killedBy.length).toBeLessThanOrEqual(60);
@@ -5184,7 +5183,8 @@ describe("the plasmid grows as the strain learns", () => {
       expect(bonusSlots(l), `L${String(l)}`).toBeGreaterThanOrEqual(bonusSlots(l - 1));
     }
     // and the ring array must be able to hold the biggest combination
-    expect(REPLICONS.bac.slots + bonusSlots(MAX_STRAIN)).toBeLessThanOrEqual(SLOTS + 3);
+    // The ring array must hold the biggest combination there is.
+    expect(slotsFor(MAX_SLOTS, bonusSlots(MAX_STRAIN))).toBeLessThanOrEqual(SLOTS);
   });
 
   it("progress fills toward the next level and reads full at the cap", () => {
@@ -5269,6 +5269,7 @@ describe("nothing ordered is ever lost", () => {
     const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
     for (const o of offers(lab, all)) buy(lab, o);
     const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     let arrived = 0;
     for (const g of lab.stock) {
       if (p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE }).ok) {
@@ -5651,113 +5652,160 @@ describe("the flight recorder", () => {
   });
 });
 
-describe("every replicon does something no other does", () => {
-  const heavy = ["mtrC", "omcS", "cymA", "mtrB", "dsrA", "nifD", "cdhA",
-                 "hynL", "uvrA"] as bio.GeneId[];
-  const build = (rep: RepliconId, genes: bio.GeneId[] = heavy) => {
+
+describe("the chromosome grows", () => {
+  it("starts small and every site costs more than the last", () => {
+    // One replicon that GROWS, not a menu of five to pick between. An integron
+    // is literally a site that captures gene cassettes one after another.
+    expect(slotsFor(0, 0)).toBe(BASE_SLOTS);
+    let last = 0;
+    for (let i = 0; i < MAX_SLOTS - BASE_SLOTS; i++) {
+      const c = expansionCost(slotsFor(i, 0));
+      expect(Number.isFinite(c), `site ${String(i)}`).toBe(true);
+      expect(c, "expansion got cheaper").toBeGreaterThan(last);
+      last = c;
+    }
+    expect(expansionCost(MAX_SLOTS)).toBe(Infinity);
+  });
+
+  it("never grows past what the ring array can hold", () => {
+    expect(slotsFor(999, 999)).toBe(MAX_SLOTS);
+    expect(slotsFor(MAX_SLOTS, MAX_SLOTS)).toBeLessThanOrEqual(SLOTS);
+  });
+
+  it("headroom grows with the molecule", () => {
+    const small = capacityFor(BASE_SLOTS, 0);
+    const big = capacityFor(MAX_SLOTS, 0);
+    expect(big).toBeGreaterThan(small * 2);
+    for (let s = BASE_SLOTS; s <= MAX_SLOTS; s++) {
+      expect(capacityFor(s, 0)).toBeGreaterThanOrEqual(capacityFor(s - 1, 0));
+    }
+  });
+
+  it("every site is reachable, and the last one is hard", () => {
+    // The first version rose at 1.42 per step: the eighth site cost 744 ATP
+    // against a ceiling of 100, so thirteen of sixteen expansions and every
+    // trait were simply unreachable. Eighty percent of the system was
+    // decoration.
+    for (let i = 0; i < MAX_SLOTS - BASE_SLOTS; i++) {
+      const cost = expansionCost(slotsFor(i, 0));
+      const ceiling = atpCeiling(i, MAX_STRAIN);
+      expect(cost, `site ${String(i)} can never be paid for`)
+        .toBeLessThanOrEqual(ceiling);
+    }
+    // And the last must still be a real commitment: most of a full pool.
+    const last = MAX_SLOTS - BASE_SLOTS - 1;
+    expect(expansionCost(slotsFor(last, 0)) / atpCeiling(last, MAX_STRAIN))
+      .toBeGreaterThan(0.6);
+  });
+
+  it("every trait is reachable by a developed strain, and none at the start", () => {
+    for (const id of TRAIT_IDS) {
+      expect(TRAITS[id].cost, `${id} can never be bought`)
+        .toBeLessThanOrEqual(atpCeiling(MAX_SLOTS - BASE_SLOTS, MAX_STRAIN));
+      expect(TRAITS[id].cost, `${id} is affordable from turn one`)
+        .toBeGreaterThan(atpCeiling(0, 1));
+    }
+  });
+
+  it("the pool grows with the cell, and never shrinks with growth", () => {
+    let last = 0;
+    for (let i = 0; i <= MAX_SLOTS - BASE_SLOTS; i++) {
+      const c = atpCeiling(i, 1);
+      expect(c).toBeGreaterThanOrEqual(last);
+      last = c;
+    }
+    expect(atpCeiling(0, 1)).toBe(ATP_MAX);
+    expect(atpCeiling(16, MAX_STRAIN)).toBeGreaterThan(ATP_MAX * 2);
+    for (const n of [NaN, -9, 1e9]) {
+      expect(Number.isFinite(atpCeiling(n, n))).toBe(true);
+      expect(atpCeiling(n, n)).toBeGreaterThanOrEqual(ATP_MAX);
+    }
+  });
+
+  it("survives absurd input", () => {
+    for (const n of [NaN, -5, 1e9, Infinity]) {
+      expect(Number.isFinite(slotsFor(n, n))).toBe(true);
+      expect(slotsFor(n, n)).toBeLessThanOrEqual(MAX_SLOTS);
+      expect(Number.isFinite(capacityFor(n, n))).toBe(true);
+      const c = expansionCost(n);
+      expect(Number.isFinite(c) || c === Infinity).toBe(true);
+    }
+  });
+
+  it("the plasmid reflects what has been integrated", () => {
     const p = new Plasmid();
-    p.replicon = rep; p.strain = MAX_STRAIN;
-    let s = 4;
-    p.put(s++, { kind: "promoter", id: "j23119" });
-    for (const g of genes) p.put(s++, { kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
-    p.put(s, { kind: "terminator", id: "rrnbt1t2" });
-    return p;
-  };
+    expect(p.usableSlots).toBe(BASE_SLOTS);
+    const before = p.capacityKb();
+    p.integrated = 4;
+    expect(p.usableSlots).toBe(BASE_SLOTS + 4);
+    expect(p.capacityKb(), "headroom did not follow").toBeGreaterThan(before);
+  });
+});
 
-  it("each carries a distinct signature and a rule that says so", () => {
-    // Five points on one line -- more copies, fewer slots -- is a stat block,
-    // not a decision. Every backbone has to be a different KIND of thing.
-    const sigs = REPLICON_IDS.map((id) => REPLICONS[id].signature);
-    expect(new Set(sigs).size, "two replicons share a signature")
-      .toBe(REPLICON_IDS.length);
-    for (const id of REPLICON_IDS) {
-      expect(REPLICONS[id].rule.length, `${id} has no rule`).toBeGreaterThan(20);
+describe("architecture is bought once and kept", () => {
+  it("each trait is a different KIND of advantage", () => {
+    expect(new Set(TRAIT_IDS).size).toBe(TRAIT_IDS.length);
+    for (const id of TRAIT_IDS) {
+      expect(TRAITS[id].rule.length, `${id} has no rule`).toBeGreaterThan(20);
+      expect(TRAITS[id].cost, `${id} is free`).toBeGreaterThan(0);
     }
   });
 
-  it("runaway: copy number tracks the energy available", () => {
-    const p = build("puc", ["mtrC"]);
-    p.energy = 0;
-    const starved = { copies: p.copies(), expr: p.expression("mtrC", 4) };
-    p.energy = 1;
-    const flush = { copies: p.copies(), expr: p.expression("mtrC", 4) };
-    expect(flush.copies / starved.copies, "the swing is not worth taking")
-      .toBeGreaterThan(8);
-    expect(flush.expr).toBeGreaterThan(starved.expr * 1.8);
-    // And it eats what it needs to run: that is the self-limiting part.
-    p.energy = 1;
-    const rich = p.atpBalance(4);
-    p.energy = 0;
-    expect(p.atpBalance(4), "running away should cost more, not less")
-      .toBeGreaterThan(rich);
-  });
-
-  it("nothing but pUC varies with energy", () => {
-    for (const id of REPLICON_IDS) {
-      if (id === "puc") continue;
-      const p = build(id, ["mtrC"]);
-      p.energy = 0;
-      const a = p.copies();
-      p.energy = 1;
-      expect(p.copies(), `${id} drifted with energy`).toBe(a);
-    }
-  });
-
-  it("roomy: a single-copy backbone pays nothing for size", () => {
-    const bac = build("bac");
-    const bnl = build("pbr322");
-    // Load both past capacity.
-    expect(bac.used()).toBeGreaterThan(0);
-    expect(bac.burden(), "a BAC was charged for its size").toBe(0);
-    const over = new Plasmid();
-    over.replicon = "bac";
-    over.strain = MAX_STRAIN;
-    for (let i = 0; i < over.usableSlots; i++) {
-      if (over.at(i) === null) {
-        over.put(i, { kind: "gene", id: "cdhA", level: 1, mods: [], allele: WILD_TYPE });
-      }
-    }
-    expect(over.burden(), "even an over-stuffed BAC pays nothing").toBe(0);
-    void bnl;
-  });
-
-  it("partitioned: pSC101 never accumulates an intermediate", () => {
-    // A hazard needs a present gene and a missing partner, so build one.
-    const mk = (rep: RepliconId) => {
+  it("partitioned: intermediates never accumulate", () => {
+    const mk = (part: boolean) => {
       const p = new Plasmid();
-      p.replicon = rep; p.strain = MAX_STRAIN;
+      p.integrated = 6;
+      if (part) p.traits.add("partitioned");
       p.put(4, { kind: "promoter", id: "j23119" });
       p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: [], allele: WILD_TYPE });
       p.put(6, { kind: "terminator", id: "rrnbt1" });
       return p;
     };
-    expect(mk("psc101").hazards(7)).toEqual([]);
-    expect(mk("psc101").toxicity(7)).toBe(0);
+    expect(mk(true).hazards(7)).toEqual([]);
+    expect(mk(true).toxicity(7)).toBe(0);
   });
 
-  it("the signatures are not all just 'more expression'", () => {
-    // If every rule collapsed to a number the choice would be a stat block
-    // again. Each must win on a DIFFERENT axis.
-    const e = (id: RepliconId): number => {
-      const p = build(id, ["mtrC"]);
-      p.energy = 1;
-      return p.expression("mtrC", 4);
-    };
-    const best = REPLICON_IDS.reduce((a, b) => (e(a) > e(b) ? a : b));
-    expect(best, "pUC should win on raw output").toBe("puc");
-    // ...and lose on room, and on what survives.
-    expect(REPLICONS.puc.slots).toBeLessThan(REPLICONS.bac.slots);
-    expect(REPLICONS.puc.capacityKb).toBeLessThan(REPLICONS.rsf1010.capacityKb);
-    expect(REPLICONS.bac.slots).toBeGreaterThan(REPLICONS.pbr322.slots);
+  it("runaway: copy number tracks the energy, and only with the trait", () => {
+    const plain = new Plasmid();
+    plain.energy = 0;
+    const a = plain.copies();
+    plain.energy = 1;
+    expect(plain.copies(), "a plain chromosome drifted").toBe(a);
+    expect(a, "a chromosome is single copy").toBe(1);
+
+    const wild = new Plasmid();
+    wild.traits.add("runaway");
+    wild.energy = 0;
+    const low = wild.copies();
+    wild.energy = 1;
+    expect(wild.copies() / low, "the swing is not worth taking").toBeGreaterThan(8);
   });
 
-  it("effectiveCopies survives absurd energy", () => {
+  it("copiesFor survives absurd energy", () => {
     for (const n of [NaN, -5, Infinity]) {
-      for (const id of REPLICON_IDS) {
-        const c = effectiveCopies(REPLICONS[id], n);
-        expect(Number.isFinite(c), `${id} at ${String(n)}`).toBe(true);
+      for (const has of [true, false]) {
+        const c = copiesFor(has, n);
+        expect(Number.isFinite(c), String(n)).toBe(true);
         expect(c).toBeGreaterThanOrEqual(1);
       }
     }
+  });
+
+  it("the lab sells a bigger starting chromosome, dearer each time", () => {
+    const lab = newLab();
+    let last = 0;
+    for (let i = 0; i < 6; i++) {
+      const price = sitesPrice(i);
+      expect(price, "sites got cheaper").toBeGreaterThan(last);
+      last = price;
+    }
+    lab.credit = 1e6;
+    const before = lab.startSites;
+    const offer = offers(lab, []).find((o) => o.id.kind === "sites");
+    expect(offer).toBeDefined();
+    if (!offer) return;
+    expect(buy(lab, offer).ok).toBe(true);
+    expect(lab.startSites).toBe(before + 1);
   });
 });

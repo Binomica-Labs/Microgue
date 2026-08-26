@@ -10,7 +10,8 @@ import { SLOTS as SAVE_SLOTS, listSlots } from "./saves.js";
 import { MAX_LEVEL, MODIFIERS, RARITY, evolutionCost, levelMultiplier,
          modifierSlots, type ModifierId } from "./parts.js";
 import { GENES, type GeneId } from "./biology.js";
-import { availableAt, type RepliconId } from "./replicon.js";
+import { TRAITS, TRAIT_IDS, expansionCost, type TraitId }
+  from "./chromosome.js";
 import { describeLevel } from "./strain.js";
 import { describeLab, offers, type Lab, type Offer, type RunRecord }
   from "./lab.js";
@@ -167,10 +168,10 @@ export function drawNotes(
 /** One tappable row in the research screen. */
 export interface ResearchRow {
   readonly box: Box;
-  readonly kind: "evolve" | "attach" | "subclone";
+  readonly kind: "evolve" | "attach" | "expand" | "trait";
   readonly gene: GeneId;
   readonly mod?: ModifierId;
-  readonly replicon?: RepliconId;
+  readonly trait?: TraitId;
   readonly cost: number;
   readonly afford: boolean;
 }
@@ -192,7 +193,9 @@ export function drawResearch(
   selected: GeneId | null,
   rows: ResearchRow[],
   strain: number,
-  current: RepliconId,
+  slots: number,
+  capKb: number,
+  traits: ReadonlySet<TraitId>,
 ): Box {
   ctx.fillStyle = "rgba(4,7,6,0.97)";
   ctx.fillRect(0, 0, W, H);
@@ -202,49 +205,76 @@ export function drawResearch(
     `${String(Math.floor(atp))} ATP · ${String(held.length)} modifiers held · `
     + describeLevel(strain));
 
-  // Replicons first: which backbone you are on shapes everything below it.
+  // The chromosome itself: how big it is, and what it costs to grow.
   const wideTop = W - ins.left - ins.right - 28 * u;
-  const options = availableAt(strain);
+  const grow = expansionCost(slots);
   ctx.fillStyle = "#8fa89a";
   ctx.font = `${10 * u}px ui-monospace,monospace`;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText("backbone — subcloning costs ATP and a turn", ins.left + 14 * u, y);
+  ctx.fillText(`chromosome — ${String(slots)} cassette sites, `
+    + `${capKb.toFixed(1)} kb`, ins.left + 14 * u, y);
   y += 14 * u;
 
+  {
+    const box: Box = { x: ins.left + 14 * u, y, w: wideTop, h: 30 * u };
+    const can = Number.isFinite(grow) && atp >= grow;
+    rows.push({ box, kind: "expand", gene: "ori", cost: Number.isFinite(grow) ? grow : 0,
+                afford: can });
+    ctx.fillStyle = "rgba(16,22,18,0.9)";
+    ctx.strokeStyle = can ? "rgba(207,224,74,0.65)" : "rgba(255,255,255,0.14)";
+    ctx.lineWidth = Math.max(1.2 * u, 1);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = can ? "#ffffff" : "#7f8f87";
+    ctx.font = `${10.5 * u}px ui-monospace,monospace`;
+    ctx.fillText("integrate another cassette site", box.x + 9 * u, box.y + 13 * u);
+    ctx.fillStyle = "#6f8f7c";
+    ctx.font = `${8 * u}px ui-monospace,monospace`;
+    ctx.fillText("an integron captures one more; every kilobase is copied for ever",
+                 box.x + 9 * u, box.y + 24 * u);
+    ctx.textAlign = "right";
+    ctx.fillStyle = can ? "#cfe04a" : "#6f8f7c";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.fillText(Number.isFinite(grow) ? `${String(grow)} ATP` : "maxed",
+                 box.x + box.w - 9 * u, box.y + 19 * u);
+    ctx.textAlign = "left";
+    y += 34 * u;
+  }
+
+  // Architecture, once each and kept.
   const cw = Math.max((wideTop - 6 * u * 2) / 3, 60);
-  options.forEach((r, i) => {
-    const c = i % 3, rr = Math.floor(i / 3);
+  TRAIT_IDS.forEach((id, i2) => {
+    const tr = TRAITS[id];
+    const c = i2 % 3, rr = Math.floor(i2 / 3);
     const bx = ins.left + 14 * u + c * (cw + 6 * u);
     const by = y + rr * 38 * u;
-    const cost = 30 + r.copies;
-    const on = r.id === current;
-    rows.push({ box: { x: bx, y: by, w: cw, h: 34 * u }, kind: "subclone",
-                gene: "ori", replicon: r.id, cost,
-                afford: !on && atp >= cost });
-    ctx.fillStyle = on ? "rgba(90,200,140,0.28)" : "rgba(16,22,18,0.9)";
-    ctx.strokeStyle = on ? "#5ec98a" : atp >= cost ? "rgba(207,224,74,0.6)"
-      : "rgba(255,255,255,0.14)";
+    const have = traits.has(id);
+    rows.push({ box: { x: bx, y: by, w: cw, h: 34 * u }, kind: "trait",
+                gene: "ori", trait: id, cost: tr.cost,
+                afford: !have && atp >= tr.cost });
+    ctx.fillStyle = have ? "rgba(90,200,140,0.28)" : "rgba(16,22,18,0.9)";
+    ctx.strokeStyle = have ? "#5ec98a"
+      : atp >= tr.cost ? "rgba(207,224,74,0.6)" : "rgba(255,255,255,0.14)";
     ctx.lineWidth = Math.max(1.2 * u, 1);
     ctx.beginPath();
     ctx.roundRect(bx, by, cw, 34 * u, 5 * u);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#ffffff";
-    ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+    ctx.font = `${9 * u}px ui-monospace,monospace`;
     ctx.textAlign = "center";
-    ctx.fillText(r.name, bx + cw / 2, by + 12 * u);
-    // The RULE, not the stat block. Which backbone you carry is a choice
-    // between five different behaviours, and the numbers alone never said so.
-    ctx.fillStyle = on ? "#7fe0a4" : "#8fa89a";
-    ctx.font = `${7.5 * u}px ui-monospace,monospace`;
-    ctx.fillText(ellipsise(ctx, r.rule, cw - 8 * u), bx + cw / 2, by + 21 * u);
-    ctx.fillStyle = "#6f8f7c";
+    ctx.fillText(ellipsise(ctx, tr.name, cw - 8 * u), bx + cw / 2, by + 12 * u);
+    ctx.fillStyle = have ? "#7fe0a4" : "#8fa89a";
     ctx.font = `${7 * u}px ui-monospace,monospace`;
-    ctx.fillText(`${String(r.copies)}x · ${String(r.slots)} slots`,
-                 bx + cw / 2, by + 28 * u);
+    ctx.fillText(ellipsise(ctx, tr.rule, cw - 8 * u), bx + cw / 2, by + 22 * u);
+    ctx.fillStyle = have ? "#5ec98a" : "#6f8f7c";
+    ctx.fillText(have ? "acquired" : `${String(tr.cost)} ATP`,
+                 bx + cw / 2, by + 30 * u);
   });
-  y += Math.ceil(options.length / 3) * 38 * u + 10 * u;
+  y += Math.ceil(TRAIT_IDS.length / 3) * 38 * u + 10 * u;
   ctx.textAlign = "left";
 
   if (genes.length === 0) {

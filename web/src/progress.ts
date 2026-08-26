@@ -6,7 +6,8 @@
 
 import * as bio from "./biology.js";
 import { MODIFIERS } from "./parts.js";
-import { REPLICONS, availableAt, type RepliconId } from "./replicon.js";
+import { TRAITS, atpCeiling, expansionCost, type TraitId }
+  from "./chromosome.js";
 import { STOCK_CAP, creditFor, recordRun } from "./lab.js";
 import { writeLab } from "./lab_save.js";
 import { deleteSlot } from "./saves.js";
@@ -46,7 +47,7 @@ export function t_die(_g: Game): void {
   // A mobilisable replicon transfers itself out of a dying cell. Half of what
   // it carried reaches the next strain -- which is how resistance genuinely
   // crosses between organisms, and the one way anything survives a death.
-  if (REPLICONS[_g.genome.replicon].signature === "mobilisable") {
+  if (_g.genome.traits.has("mobilisable")) {
     const aboard = [..._g.genome.carried()].filter((g) => g !== "ori");
     const rescued = aboard.filter((_, i) => i % 2 === 0).slice(0, STOCK_CAP);
     const room = Math.max(STOCK_CAP - _g.lab.stock.length, 0);
@@ -115,56 +116,60 @@ export function t_catabolise(_g: Game, binIndex: number): void {
 }
 
 /**
- * Move the whole plasmid onto a different replicon.
+ * Integrate another cassette site into the chromosome.
  *
- * Subcloning: you are lifting every part off one backbone and ligating it onto
- * another. It costs ATP and a turn, it fails if the new replicon cannot hold
- * what you are carrying, and parts that no longer fit go to the bin rather
- * than being destroyed -- losing loot to a UI decision would be indefensible.
+ * Paid in ATP because replicating and maintaining more DNA is what it actually
+ * costs a cell: every extra kilobase is copied at every division, for ever.
+ * Steeply super-linear, so late expansion competes with everything else the
+ * energy could have done.
  */
-export function t_subclone(_g: Game, to: RepliconId): void {
-  if (_g.dead) return;             // a lost strain does not act
-  const def = REPLICONS[to];
-  if (_g.genome.replicon === to) return;
-  if (!availableAt(_g.genome.strain).some((r) => r.id === to)) {
-    _g.toasts.push(`${def.name} needs strain L${String(def.unlock)}.`, "warn", _g.now);
+export function t_expand(_g: Game): void {
+  if (_g.dead) return;
+  const slots = _g.genome.usableSlots;
+  const cost = expansionCost(slots);
+  if (!Number.isFinite(cost)) {
+    _g.toasts.push("The chromosome is as large as it will get.", "warn", _g.now);
     return;
   }
-  const cost = 30 + def.copies;
   if (_g.player.atp < cost) {
-    _g.toasts.push(`Subcloning needs ${String(cost)} ATP.`, "warn", _g.now);
+    _g.toasts.push(`Integration needs ${String(cost)} ATP.`, "warn", _g.now);
     return;
   }
-
-  const before = _g.genome.replicon;
-  _g.genome.replicon = to;
   _g.player.atp = Math.max(_g.player.atp - cost, 0);
+  _g.genome.integrated += 1;
+  // The pool grows with the molecule; upkeep would apply it next turn anyway,
+  // but not before the message says what you now have.
+  _g.player.atpMax = atpCeiling(_g.genome.integrated, _g.genome.strain);
+  _g.note(`An integron captures another cassette site. The chromosome now `
+    + `carries ${String(_g.genome.usableSlots)} positions and `
+    + `${_g.genome.capacityKb().toFixed(1)} kb of headroom.`);
+  _g.trace.push(_g.clock.turn, "input", `integrate -> ${String(_g.genome.usableSlots)} slots`);
+  _g.mobTurn();
+  _g.save();
+}
 
-  // Anything past the new replicon's last position comes off the backbone. It
-  // goes to the bin if there is room, and only then is it lost.
-  let displaced = 0, lost = 0;
-  for (let i = _g.genome.slots.length - 1; i >= 0; i--) {
-    if (_g.genome.usable(i)) continue;
-    const part = _g.genome.vacate(i);
-    if (part === null) continue;
-    displaced++;
-    if (!_g.genome.stash(part).ok) lost++;
+/** Acquire a piece of architecture, once. */
+export function t_acquire(_g: Game, id: TraitId): void {
+  if (_g.dead) return;
+  const t = TRAITS[id];
+  if (_g.genome.traits.has(id)) return;
+  if (_g.player.atp < t.cost) {
+    _g.toasts.push(`${t.name} needs ${String(t.cost)} ATP.`, "warn", _g.now);
+    return;
   }
-
-  _g.note(`Subcloned from ${REPLICONS[before].name} onto ${def.name}. `
-    + `${def.rule}. ${def.note}`);
-  if (displaced > 0) {
-    _g.note(`${String(displaced)} part${displaced === 1 ? "" : "s"} would not fit `
-      + `and came off the backbone${lost > 0 ? `; ${String(lost)} had nowhere to go` : ""}.`);
-  }
+  _g.player.atp = Math.max(_g.player.atp - t.cost, 0);
+  _g.genome.traits.add(id);
+  _g.note(`${t.name} acquired. ${t.rule}. ${t.note}`);
+  _g.trace.push(_g.clock.turn, "input", `acquire ${id}`);
   _g.mobTurn();
   _g.save();
 }
 
 export function t_research(_g: Game, row: ResearchRow): void {
   if (_g.dead) return;             // a lost strain does not act
-  if (row.kind === "subclone") {
-    if (row.replicon !== undefined) t_subclone(_g, row.replicon);
+  if (row.kind === "expand") { t_expand(_g); return; }
+  if (row.kind === "trait") {
+    if (row.trait !== undefined) t_acquire(_g, row.trait);
     return;
   }
     if (row.kind === "evolve") {

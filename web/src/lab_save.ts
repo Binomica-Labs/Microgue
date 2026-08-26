@@ -6,7 +6,7 @@
 // designing out rather than remembering.
 
 import { GENES, type GeneId } from "./biology.js";
-import { REPLICONS, type RepliconId } from "./replicon.js";
+import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
 import { MAX_STRAIN } from "./strain.js";
 import { LEDGER_CAP, newLab, type Lab, type RunRecord } from "./lab.js";
 import { MAX_FLOOR } from "./dungeon.js";
@@ -42,7 +42,6 @@ function parseRecord(v: unknown, i: number): RunRecord | null {
 /** Parse a stored lab, clamping everything to what play can produce. */
 export function parseLab(raw: unknown): Lab {
   if (!isRecord(raw)) return newLab();
-  const rep = raw["startReplicon"];
   const ledger = Array.isArray(raw["ledger"])
     ? (raw["ledger"] as unknown[])
         .map((e, i) => parseRecord(e, i))
@@ -56,9 +55,8 @@ export function parseLab(raw: unknown): Lab {
     stock: Array.isArray(raw["stock"])
       ? [...new Set((raw["stock"] as unknown[]).filter(isGeneId))].slice(0, 60)
       : [],
-    startReplicon: typeof rep === "string"
-      && Object.prototype.hasOwnProperty.call(REPLICONS, rep)
-      ? rep as RepliconId : "pbr322",
+    startSites: Math.min(Math.max(Math.round(num(raw["startSites"], 0)), 0),
+                         MAX_SLOTS - BASE_SLOTS),
     startStrain: Math.min(Math.max(Math.round(num(raw["startStrain"], 1)), 1), MAX_STRAIN),
   };
 }

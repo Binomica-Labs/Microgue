@@ -1,6 +1,6 @@
 import { SLOTS } from "../src/plasmid.js";
 import * as bio from "../src/biology.js";
-import { availableAt } from "../src/replicon.js";
+import { BASE_SLOTS } from "../src/chromosome.js";
 import { offers } from "../src/lab.js";
 import { findPath } from "../src/path.js";
 import { WILD_TYPE } from "../src/allele.js";
@@ -249,58 +249,8 @@ describe("the new systems are reachable from play", () => {
     expect(g.genome.strain, "strain never advanced").toBeGreaterThan(1);
   });
 
-  it("a better replicon becomes reachable and subcloning moves onto it", async () => {
-    const { Game } = await import("../src/main.js");
-    const g = new Game(canvas());
-    g.startRun(0);
-    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
-    g.run.deepest = 24;
-    g.press("wait");
-    expect(availableAt(g.genome.strain).map((r) => r.id)).toContain("bac");
 
-    g.player.atpMax = 500;
-    g.player.atp = 400;
-    const before = g.genome.usableSlots;
-    g.subclone("bac");
-    expect(g.genome.replicon, "subcloning did nothing").toBe("bac");
-    expect(g.genome.usableSlots, "a BAC should give more room")
-      .toBeGreaterThan(before);
-    expect(g.player.atp, "subcloning should cost").toBeLessThan(400);
-  });
 
-  it("subcloning onto a smaller backbone strands nothing", async () => {
-    const { Game } = await import("../src/main.js");
-    const g = new Game(canvas());
-    g.startRun(0);
-    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
-    g.run.deepest = 24;
-    g.press("wait");
-    g.player.atpMax = 900; g.player.atp = 800;
-    g.subclone("bac");
-    // Fill the big backbone, then move to the small one.
-    for (let i = 0; i < g.genome.usableSlots; i++) {
-      if (g.genome.at(i) === null) g.genome.put(i, { kind: "terminator", id: "rrnbt1" });
-    }
-    g.subclone("puc");
-    expect(g.genome.replicon).toBe("puc");
-    for (let i = 0; i < g.genome.slots.length; i++) {
-      if (!g.genome.usable(i)) {
-        expect(g.genome.at(i), `a part was stranded at ${String(i)}`).toBeNull();
-      }
-    }
-    expect(g.toasts.all().filter((t) => t.level === "error")).toEqual([]);
-  });
-
-  it("subcloning is refused without the strain or the ATP", async () => {
-    const { Game } = await import("../src/main.js");
-    const g = new Game(canvas());
-    g.startRun(0);
-    g.subclone("bac");                       // strain 1: locked
-    expect(g.genome.replicon).not.toBe("bac");
-    g.player.atp = 0;
-    g.subclone("psc101");                    // unlocked, but no ATP
-    expect(g.genome.replicon).not.toBe("psc101");
-  });
 
   it("catabolising a cassette heals and is reachable", async () => {
     const { Game } = await import("../src/main.js");
@@ -395,21 +345,21 @@ describe("permadeath and the lab", () => {
            "the ordered construct is not on the new strain").toBe(true);
   });
 
-  it("an ordered backbone and strain level apply to the next strain", async () => {
+  it("ordered sites and strain level apply to the next strain", async () => {
     const { Game } = await import("../src/main.js");
     const a = new Game(canvas2());
     a.startRun(0);
     a.lab.credit = 9000;
     for (const o of offers(a.lab, [])) {
-      if (o.id.kind === "replicon" && o.id.id === "puc") a.order(o);
+      if (o.id.kind === "sites") a.order(o);
       if (o.id.kind === "strain") a.order(o);
     }
-    expect(a.lab.startReplicon).toBe("puc");
+    expect(a.lab.startSites).toBeGreaterThan(0);
     expect(a.lab.startStrain).toBeGreaterThan(1);
 
     const b = new Game(canvas2());
     b.startRun(3);
-    expect(b.genome.replicon).toBe("puc");
+    expect(b.genome.integrated).toBeGreaterThan(0);
     expect(b.genome.strain).toBeGreaterThan(1);
   });
 
@@ -1305,11 +1255,11 @@ describe("an installed part can be moved", () => {
     g.run.deepest = 24;
     g.press("wait");
     g.player.atpMax = 900; g.player.atp = 800;
-    g.subclone("puc");                       // 10 slots
+    g.expand();
     g.openPlasmid(true);
     g.frame(40);
     expect(g.ring.used).toBe(g.genome.usableSlots);
-    expect(g.ring.used).toBeLessThan(16);
+    expect(g.ring.used).toBeGreaterThan(BASE_SLOTS);
   });
 });
 
@@ -1331,7 +1281,7 @@ describe("a mobilisable plasmid survives its host", () => {
     // resistance crosses species. It is the one way anything survives a death.
     const g = await game();
     g.startRun(0);
-    g.genome.replicon = "rsf1010";
+    g.genome.traits.add("mobilisable");
     for (const id of ["mtrC", "omcS", "cymA", "dsrA"] as bio.GeneId[]) {
       const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
       if (free >= 0) {
@@ -1347,7 +1297,7 @@ describe("a mobilisable plasmid survives its host", () => {
   it("a plain backbone loses everything", async () => {
     const g = await game();
     g.startRun(0);
-    g.genome.replicon = "pbr322";
+
     const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
     if (free >= 0) {
       g.genome.put(free, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
@@ -1359,7 +1309,7 @@ describe("a mobilisable plasmid survives its host", () => {
   it("mobilisation cannot overfill the manifest", async () => {
     const g = await game();
     g.startRun(0);
-    g.genome.replicon = "rsf1010";
+    g.genome.traits.add("mobilisable");
     const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((x) => x !== "ori");
     for (const id of all.slice(0, 20)) {
       const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
@@ -1370,5 +1320,107 @@ describe("a mobilisable plasmid survives its host", () => {
     const { STOCK_CAP } = await import("../src/lab.js");
     expect(g.lab.stock.length).toBeLessThanOrEqual(STOCK_CAP);
     expect(new Set(g.lab.stock).size, "duplicates got in").toBe(g.lab.stock.length);
+  });
+});
+
+describe("the chromosome is reachable from play", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("the bench offers growth and architecture, and both act", async () => {
+    // Built is not wired: this system has been shipped inert once already.
+    const g = await game();
+    g.startRun(0);
+    g.press("research");
+    g.frame(20);
+    const kinds = new Set(g.researchRows.map((r) => r.kind));
+    expect([...kinds], "the bench does not offer growth").toContain("expand");
+    expect([...kinds], "the bench does not offer architecture").toContain("trait");
+
+    const before = g.genome.usableSlots;
+    g.player.atp = g.player.atpMax;
+    const row = g.researchRows.find((r) => r.kind === "expand");
+    if (!row) return;
+    g.pointerDown(row.box.x + 10, row.box.y + 10);
+    g.pointerUp(row.box.x + 10, row.box.y + 10);
+    expect(g.genome.usableSlots, "integrating did nothing").toBe(before + 1);
+  });
+
+  it("the ATP ceiling grows with the cell", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.press("wait");
+    const base = g.player.atpMax;
+    g.genome.integrated = 10;
+    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
+    g.run.deepest = 24;
+    g.press("wait");
+    expect(g.player.atpMax, "the pool did not grow with the cell")
+      .toBeGreaterThan(base);
+  });
+
+  it("a trait can actually be acquired, and only once", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.genome.integrated = 12;
+    g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
+    g.run.deepest = 24;
+    g.press("wait");
+    g.player.atp = g.player.atpMax;
+    const spent = g.player.atp;
+    g.acquire("partitioned");
+    expect(g.genome.traits.has("partitioned"), "the trait was not acquired").toBe(true);
+    expect(g.player.atp, "it was free").toBeLessThan(spent);
+    const after = g.player.atp;
+    g.acquire("partitioned");
+    expect(g.player.atp, "it charged twice for the same trait").toBe(after);
+  });
+
+  it("growth and traits survive a reload", async () => {
+    const g = await game();
+    g.startRun(0);
+    g.genome.integrated = 5;
+    g.genome.traits.add("partitioned");
+    g.genome.traits.add("runaway");
+    g.save();
+    const b = await game();
+    b.startRun(0);
+    expect(b.genome.integrated, "growth was lost").toBe(5);
+    expect([...b.genome.traits].sort(), "architecture was lost")
+      .toEqual(["partitioned", "runaway"]);
+  });
+
+  it("a save from before the chromosome loads without its fields", async () => {
+    const { parseSave, SCHEMA } = await import("../src/save.js");
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [], bin: [], run: {}, settings: {}, heldMods: [], turn: 0, stocked: [],
+      replicon: "bac",                      // the field that used to be there
+    });
+    expect(s?.integrated).toBe(0);
+    expect(s?.traits).toEqual([]);
+  });
+
+  it("a starting strain can still build a working operon", async () => {
+    // Eight positions and the vector uses three. If a promoter, a gene and a
+    // terminator do not fit, the opening move is impossible.
+    const g = await game();
+    g.startRun(0);
+    expect(g.genome.free(), "no room to build anything").toBeGreaterThanOrEqual(3);
+    // Give it a gene to work with -- assemble builds from the BIN.
+    g.genome.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    const r = g.genome.assemble(["psbA"]);
+    expect(r.ok, `cannot lay down one operon: ${r.ok ? "" : r.err}`).toBe(true);
+    expect(g.genome.expression("psbA", 1), "it laid down but does not express")
+      .toBeGreaterThan(0);
   });
 });

@@ -17,7 +17,7 @@
 
 import { GENES, stratum, type GeneId } from "./biology.js";
 import { MAX_FLOOR, strataOf } from "./dungeon.js";
-import { REPLICONS, type RepliconId } from "./replicon.js";
+import { BASE_SLOTS, MAX_SLOTS, capacityFor, slotsFor } from "./chromosome.js";
 import { BIN_CAP, STARTING_PARTS } from "./plasmid.js";
 import { MAX_STRAIN } from "./strain.js";
 
@@ -44,15 +44,15 @@ export interface Lab {
   ledger: RunRecord[];
   /** Genes ordered from synthesis, present on every future strain. */
   stock: GeneId[];
-  /** Backbone every future strain starts on. */
-  startReplicon: RepliconId;
+  /** Cassette sites every future strain starts with. */
+  startSites: number;
   /** Head start on strain level. */
   startStrain: number;
 }
 
 export const newLab = (): Lab => ({
   credit: 0, deepestEver: 0, ledger: [], stock: [],
-  startReplicon: "pbr322", startStrain: 1,
+  startSites: 0, startStrain: 1,
 });
 
 /** Ledger entries kept. Enough to see a trend, not enough to bloat a save. */
@@ -144,7 +144,7 @@ export function recordRun(
 
 export type OfferId =
   | { kind: "gene"; gene: GeneId }
-  | { kind: "replicon"; id: RepliconId }
+  | { kind: "sites" }
   | { kind: "strain" };
 
 export interface Offer {
@@ -163,9 +163,8 @@ export function genePrice(gene: GeneId): number {
   return Math.round(30 + g.kb * 22 + g.tier * 18);
 }
 
-export function repliconPrice(id: RepliconId): number {
-  return Math.round(120 + REPLICONS[id].unlock * 55);
-}
+export const sitesPrice = (owned: number): number =>
+  Math.round(160 * Math.pow(1.5, Math.max(Number.isFinite(owned) ? owned : 0, 0)));
 
 export const strainPrice = (level: number): number =>
   Math.round(140 * Math.max(level, 1) ** 1.35);
@@ -207,15 +206,16 @@ export function offers(lab: Lab, seen: readonly GeneId[]): Offer[] {
       owned: have || full,
     });
   }
-  for (const id of Object.keys(REPLICONS) as RepliconId[]) {
-    const r = REPLICONS[id];
-    if (r.unlock <= 1) continue;
+  // A bigger chromosome to begin with. Bought repeatedly, dearer each time,
+  // so the lab grows the LINE rather than picking a backbone off a shelf.
+  if (lab.startSites < MAX_SLOTS - BASE_SLOTS) {
+    const slots = slotsFor(lab.startSites, 0);
     out.push({
-      id: { kind: "replicon", id },
-      name: `start on ${r.name}`,
-      price: repliconPrice(id),
-      note: `${String(r.copies)}x copy · ${String(r.slots)} slots · ${String(r.capacityKb)} kb`,
-      owned: lab.startReplicon === id,
+      id: { kind: "sites" },
+      name: `start with ${String(slots + 1)} cassette sites`,
+      price: sitesPrice(lab.startSites),
+      note: `${capacityFor(slots + 1, 0).toFixed(1)} kb of headroom, from turn one`,
+      owned: false,
     });
   }
   if (lab.startStrain < MAX_STRAIN) {
@@ -249,11 +249,11 @@ export function buy(lab: Lab, offer: Offer): BuyResult {
       }
       lab.stock.push(offer.id.gene);
       break;
-    case "replicon":
-      if (REPLICONS[offer.id.id].unlock > MAX_STRAIN) {
-        return { ok: false, err: "no such backbone" };
+    case "sites":
+      if (lab.startSites >= MAX_SLOTS - BASE_SLOTS) {
+        return { ok: false, err: "already fully grown" };
       }
-      lab.startReplicon = offer.id.id;
+      lab.startSites += 1;
       break;
     case "strain":
       if (lab.startStrain >= MAX_STRAIN) {

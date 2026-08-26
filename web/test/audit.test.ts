@@ -2,7 +2,7 @@ import { WILD_TYPE } from "../src/allele.js";
 import { describe, expect, it } from "vitest";
 import * as bio from "../src/biology.js";
 import { Plasmid, SLOTS, type Part } from "../src/plasmid.js";
-import { REPLICON_IDS } from "../src/replicon.js";
+import { BASE_SLOTS, MAX_SLOTS } from "../src/chromosome.js";
 import { MAX_STRAIN } from "../src/strain.js";
 import * as motion from "../src/motion.js";
 import * as fov from "../src/fov.js";
@@ -446,7 +446,7 @@ describe("no sequence of operations can strand a part", () => {
     const blame = new Map<string, number>();
     for (let seed = 0; seed < 400; seed++) {
       const p = new Plasmid();
-      p.replicon = REPLICON_IDS[seed % REPLICON_IDS.length] ?? "pbr322";
+      p.integrated = seed % (MAX_SLOTS - BASE_SLOTS + 1);
       p.strain = 1 + (seed % MAX_STRAIN);
       const rng = makeRng(seed);
       const names = ["stash", "install", "uninstall", "add", "swap",
@@ -480,7 +480,7 @@ describe("no sequence of operations can strand a part", () => {
   it("and the origin survives all of it", () => {
     for (let seed = 0; seed < 120; seed++) {
       const p = new Plasmid();
-      p.replicon = REPLICON_IDS[seed % REPLICON_IDS.length] ?? "pbr322";
+      p.integrated = seed % (MAX_SLOTS - BASE_SLOTS + 1);
       const rng = makeRng(seed + 900);
       for (let step = 0; step < 40; step++) {
         p.rotate(rng.int(30) - 15);
@@ -495,7 +495,6 @@ describe("no sequence of operations can strand a part", () => {
     // With a 16-slot replicon, wrapping mapped 20 onto 4 -- so loading a save
     // whose array runs to 23 would have overwritten the first eight positions.
     const p = new Plasmid();
-    p.replicon = "pbr322";
     const marker: Part = { kind: "terminator", id: "hairpin" };
     p.put(4, marker);
     p.put(20, { kind: "terminator", id: "trpa" });

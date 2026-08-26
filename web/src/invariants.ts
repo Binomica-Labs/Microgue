@@ -23,7 +23,7 @@ import { covers, tilesOf } from "./footprint.js";
 import type { Plasmid } from "./plasmid.js";
 import { BIN_CAP, SLOTS } from "./plasmid.js";
 import { MAX_LEVEL, modifierSlots } from "./parts.js";
-import { REPLICONS } from "./replicon.js";
+import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
 import { MAX_STRAIN } from "./strain.js";
 import type { Barrier } from "./barrier.js";
 import type { Drop } from "./items.js";
@@ -123,14 +123,10 @@ export const INVARIANTS: Readonly<Record<string, Check>> = {
     return null;
   },
 
-  "the replicon is real and unlocked": (w) => {
-    const r = w.plasmid.replicon;
-    if (!Object.prototype.hasOwnProperty.call(REPLICONS, r)) {
-      return `unknown replicon ${r}`;
-    }
-    if (REPLICONS[r].unlock > w.plasmid.strain) {
-      return `carrying ${REPLICONS[r].name}, which needs strain `
-        + `L${String(REPLICONS[r].unlock)} and the strain is L${String(w.plasmid.strain)}`;
+  "the chromosome is no larger than it has been grown to": (w) => {
+    const grown = w.plasmid.integrated;
+    if (!Number.isInteger(grown) || grown < 0 || grown > MAX_SLOTS - BASE_SLOTS) {
+      return `${String(grown)} integrated sites, which is not reachable`;
     }
     return null;
   },

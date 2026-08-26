@@ -6,7 +6,8 @@
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
-import { REPLICONS, type RepliconId } from "./replicon.js";
+import { BASE_SLOTS, MAX_SLOTS, TRAITS, type TraitId }
+  from "./chromosome.js";
 import { RARITY, type Rarity } from "./parts.js";
 import { PREFIXES, SUFFIXES, WILD_TYPE, type Allele, type PrefixId,
          type SuffixId } from "./allele.js";
@@ -31,7 +32,7 @@ export interface Settings {
 /** Bump when the shape changes incompatibly. A save from an older schema is
  *  discarded rather than half-loaded: `version` was being written and never
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
-export const SCHEMA = 10;
+export const SCHEMA = 11;
 
 export interface SaveData {
   readonly version: number;
@@ -50,8 +51,9 @@ export interface SaveData {
   readonly heldMods: readonly ModifierId[];
   /** Turn count, so the diel cycle resumes rather than restarting at dawn. */
   readonly turn: number;
-  /** Which plasmid the strain is carrying. */
-  readonly replicon: RepliconId;
+  /** Cassette sites integrated beyond the base, and architecture acquired. */
+  readonly integrated: number;
+  readonly traits: readonly TraitId[];
   /** Clock turn each visited floor was last stocked, so the pump does not
    *  reset on reload and a stripped floor stays stripped. */
   readonly stocked: readonly [number, number][];
@@ -227,9 +229,13 @@ export function parseSave(raw: unknown): SaveData | null {
       ? (raw["heldMods"] as unknown[]).filter(isModifierId).slice(0, 40)
       : [],
     turn: Math.min(Math.max(Math.round(num(raw["turn"], 0)), 0), 1e7),
-    replicon: typeof raw["replicon"] === "string"
-      && Object.prototype.hasOwnProperty.call(REPLICONS, raw["replicon"])
-      ? raw["replicon"] as RepliconId : "pbr322",
+    integrated: Math.min(Math.max(Math.round(num(raw["integrated"], 0)), 0),
+                         MAX_SLOTS - BASE_SLOTS),
+    traits: Array.isArray(raw["traits"])
+      ? [...new Set((raw["traits"] as unknown[]).filter(
+          (x): x is TraitId => typeof x === "string"
+            && Object.prototype.hasOwnProperty.call(TRAITS, x)))]
+      : [],
     stocked: Array.isArray(raw["stocked"])
       ? (raw["stocked"] as unknown[]).flatMap((e): [number, number][] =>
           Array.isArray(e) && e.length === 2

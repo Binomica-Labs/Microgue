@@ -264,10 +264,9 @@ const BREAKERS: Readonly<Record<string, () => WorldView>> = {
     (p as unknown as { rawExpression: unknown }).rawExpression = () => NaN;
     return world({ plasmid: p });
   },
-  "the replicon is real and unlocked": () => {
+  "the chromosome is no larger than it has been grown to": () => {
     const p = new Plasmid();
-    p.strain = 1;
-    p.replicon = "bac";          // needs L7
+    p.integrated = 999;
     return world({ plasmid: p });
   },
   "strain level is within its band": () => {
@@ -277,8 +276,6 @@ const BREAKERS: Readonly<Record<string, () => WorldView>> = {
   },
   "nothing occupies a slot the replicon does not have": () => {
     const p = new Plasmid();
-    p.replicon = "puc";          // 10 slots
-    p.strain = 3;
     p.slots[20] = { kind: "terminator", id: "rrnbt1" };
     return world({ plasmid: p });
   },
