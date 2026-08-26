@@ -114,10 +114,21 @@ export interface Record_ {
 export type Fetcher = (url: string) => Promise<string>;
 
 /** The default fetcher. Injected in tests so nothing touches the network. */
+/** Requests that never settle are worse than requests that fail: `exporting`
+ *  is only cleared when the promise resolves, so one hung socket disabled the
+ *  export button for the rest of the session. */
+export const FETCH_TIMEOUT_MS = 15000;
+
 export const httpFetcher: Fetcher = async (url) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-  return res.text();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => { ctl.abort(); }, FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /** First UID from an esearch reply. The response is XML, not JSON. */
@@ -140,12 +151,30 @@ export function parseFasta(text: string): { accession: string; defline: string; 
 
 type Cache = Record<string, { accession: string; defline: string; seq: string }>;
 
+/**
+ * Read the cache, narrowing it properly.
+ *
+ * `JSON.parse` returns `any` and this used to cast straight to `Cache`, which
+ * is the same hole `save.ts` exists to close: a corrupt or hand-edited entry
+ * put a number where `seq` should be, and the export then called `.slice` on
+ * it. An entry either has three strings or it is not an entry.
+ */
 function readCache(): Cache {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (raw === null) return {};
     const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Cache) : {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out: Cache = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v !== "object" || v === null) continue;
+      const e = v as Record<string, unknown>;
+      if (typeof e["accession"] !== "string" || typeof e["defline"] !== "string"
+          || typeof e["seq"] !== "string") continue;
+      if (!/^[ACGTUNRYKMSWBDHV]*$/i.test(e["seq"])) continue;
+      out[k] = { accession: e["accession"], defline: e["defline"], seq: e["seq"] };
+    }
+    return out;
   } catch { return {}; }
 }
 

@@ -22,7 +22,7 @@ import type { Grid, Point } from "./mapgen.js";
  * the frontier -- known floor next to unknown -- is what actually reveals it.
  */
 export function frontier(grid: Grid, sight: Sight, from: Point): Point | null {
-  return frontierExcluding(grid, sight, from, new Set());
+  return frontiers(grid, sight, from)[0] ?? null;
 }
 
 export type ExploreResult =
@@ -35,30 +35,28 @@ export type ExploreResult =
  * Tries the nearest frontier and then progressively further ones, because the
  * nearest is sometimes behind a wall the pathfinder cannot get through and
  * giving up on the first failure would strand you next to a doorway.
+ *
+ * ONE scan, not one per attempt. This called a nearest-frontier search up to
+ * six times, and each call walked all 9216 tiles building a `${x},${y}` string
+ * per tile to test a skip set: about 55000 string allocations per tick of
+ * auto-explore, measured at 0.74 ms against 0.03 ms for the whole microbe
+ * turn. Collect the frontiers once, sorted, and path to the nearest few.
  */
 export function nextExplore(
   grid: Grid, sight: Sight, from: Point,
 ): ExploreResult {
-  const tried = new Set<string>();
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const target = frontierExcluding(grid, sight, from, tried);
-    if (!target) break;
-    tried.add(`${String(target.x)},${String(target.y)}`);
+  for (const target of frontiers(grid, sight, from).slice(0, 6)) {
     const path = findPath(grid, from, target);
     if (path && path.length > 1) return { kind: "go", path };
   }
   return { kind: "done", why: "Nothing left within reach to explore." };
 }
 
-/** Nearest frontier tile not in `skip`. One implementation, used by both. */
-function frontierExcluding(
-  grid: Grid, sight: Sight, from: Point, skip: ReadonlySet<string>,
-): Point | null {
-  let best: Point | null = null;
-  let bestD = Infinity;
+/** Every frontier tile, nearest first. Seen floor adjacent to unseen. */
+function frontiers(grid: Grid, sight: Sight, from: Point): Point[] {
+  const out: { x: number; y: number; d: number }[] = [];
   for (let y = 0; y < grid.h; y++) {
     for (let x = 0; x < grid.w; x++) {
-      if (skip.has(`${String(x)},${String(y)}`)) continue;
       if (!isSeen(sight, x, y) || !grid.isFloor(x, y)) continue;
       let edge = false;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
@@ -68,10 +66,11 @@ function frontierExcluding(
       }
       if (!edge) continue;
       const d = (x - from.x) ** 2 + (y - from.y) ** 2;
-      if (d < bestD && d > 0) { bestD = d; best = { x, y }; }
+      if (d > 0) out.push({ x, y, d });
     }
   }
-  return best;
+  out.sort((a, b) => a.d - b.d);
+  return out.map((e) => ({ x: e.x, y: e.y }));
 }
 
 /** How much of the level is still unknown, 0..1. Used to say when it is done. */

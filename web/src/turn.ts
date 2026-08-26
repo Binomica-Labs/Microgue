@@ -180,9 +180,20 @@ export function t_upkeep(_g: Game): void {
     // Strain level, from what the lineage has actually catalogued. Without
     // this the whole levelling system sits at 1 for ever and the replicons it
     // unlocks are unreachable.
-    const level = strainLevel({
-      catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
-    });
+    // The lab's purchased start is a FLOOR under the earned level, not a
+    // starting value: without the max, `upkeep` recomputed the level from a
+    // notebook that is empty on turn one and silently downgraded a strain the
+    // lab had paid escalating credit for -- from L8 to L1, and three ring
+    // positions with it, one turn into the run and with no message.
+    const level = Math.max(
+      strainLevel({ catalogued: _g.run.bestiary.length, deepest: _g.run.deepest }),
+      _g.lab.startStrain);
+    // Strain first, THEN the ceiling: reading `genome.strain` before assigning
+    // it computed the pool from last turn's strain, so the ATP ceiling lagged
+    // a level behind for one turn after every advance.
+    const before = _g.genome.strain;
+    if (level !== before) _g.genome.strain = level;
+
     // The energy a cell can hold scales with how big and how adapted it is.
     // Without this the ceiling sat at 100 for ever and most of the growth
     // curve, and every trait, was unreachable.
@@ -192,9 +203,7 @@ export function t_upkeep(_g: Game): void {
       _g.player.atp = Math.min(_g.player.atp, ceiling);
     }
 
-    if (level !== _g.genome.strain) {
-      const before = _g.genome.strain;
-      _g.genome.strain = level;
+    if (level !== before) {
       if (level > before) {
         _g.toasts.push(`Strain advances to L${String(level)}.`, "info", _g.now);
         _g.note(`The lineage has learned enough to carry more. ${describeLevel(level)}.`);

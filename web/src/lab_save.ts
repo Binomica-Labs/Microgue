@@ -8,7 +8,7 @@
 import { GENES, type GeneId } from "./biology.js";
 import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
 import { MAX_STRAIN } from "./strain.js";
-import { LEDGER_CAP, newLab, type Lab, type RunRecord } from "./lab.js";
+import { LEDGER_CAP, newLab, stockCap, type Lab, type RunRecord } from "./lab.js";
 import { MAX_FLOOR } from "./dungeon.js";
 
 export const LAB_KEY = "microgue:lab:v1";
@@ -48,15 +48,21 @@ export function parseLab(raw: unknown): Lab {
         .filter((e): e is RunRecord => e !== null)
         .slice(-LEDGER_CAP)
     : [];
+  const startSites = Math.min(Math.max(Math.round(num(raw["startSites"], 0)), 0),
+                              MAX_SLOTS - BASE_SLOTS);
   return {
     credit: Math.min(Math.max(Math.round(num(raw["credit"], 0)), 0), 1e9),
     deepestEver: Math.min(Math.max(Math.round(num(raw["deepestEver"], 0)), 0), MAX_FLOOR),
     ledger,
+    // Cut to what THIS lab can actually send down. A flat 60 was the old cap
+    // and `buy` has enforced `stockCap` for a while, so a lab written before
+    // that -- or edited by hand -- loaded a manifest the strain could never
+    // carry, and the surplus was dropped at inoculation with nothing said.
     stock: Array.isArray(raw["stock"])
-      ? [...new Set((raw["stock"] as unknown[]).filter(isGeneId))].slice(0, 60)
+      ? [...new Set((raw["stock"] as unknown[]).filter(isGeneId))]
+          .slice(0, stockCap(startSites))
       : [],
-    startSites: Math.min(Math.max(Math.round(num(raw["startSites"], 0)), 0),
-                         MAX_SLOTS - BASE_SLOTS),
+    startSites,
     startStrain: Math.min(Math.max(Math.round(num(raw["startStrain"], 1)), 1), MAX_STRAIN),
   };
 }

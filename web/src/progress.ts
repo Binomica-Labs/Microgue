@@ -159,7 +159,7 @@ export function t_acquire(_g: Game, id: TraitId): void {
     return;
   }
   _g.player.atp = Math.max(_g.player.atp - t.cost, 0);
-  _g.genome.traits.add(id);
+  _g.genome.acquire(id);
   _g.note(`${t.name} acquired. ${t.rule}. ${t.note}`);
   _g.trace.push(_g.clock.turn, "input", `acquire ${id}`);
   _g.mobTurn();

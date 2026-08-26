@@ -2428,6 +2428,101 @@ describe("plasmid memoisation cannot go stale", () => {
 
   // The memo is keyed on a revision counter, so the ONLY way it can serve a
   // stale value is a mutator that forgets to bump it. Enumerate them.
+  // The list above is METHODS. Four public FIELDS also feed memoised reads --
+  // integrated and strain set `usableSlots`, which is an argument to
+  // transcribe(); traits set copy number; depth and inducers are the context
+  // conditional promoters read. None of them bumped `rev`, so the memo served
+  // values computed for a different chromosome. Measured before the fix:
+  // atpCost read 0.19 where the truth was 0.77, a 4x understatement that
+  // corrected itself only when the player next happened to touch the ring.
+  it("every public FIELD that feeds a memo bumps the revision", () => {
+    const cases: [string, (p: Plasmid) => void][] = [
+      ["integrated", (p) => { p.integrated += 4; }],
+      ["strain",     (p) => { p.strain = 6; }],
+      ["traits",     (p) => { p.acquire("runaway"); }],
+      ["setTraits",  (p) => { p.setTraits(["partitioned"]); }],
+      ["depth",      (p) => { p.depth = 5; }],
+      ["inducers",   (p) => { p.inducers = new Set(["h2"]); }],
+    ];
+    for (const [name, mutate] of cases) {
+      const p = fresh();
+      const before = p.revision();
+      mutate(p);
+      expect(p.revision(), `${name} did not invalidate the memo`).toBeGreaterThan(before);
+    }
+  });
+
+  it("a memoised ATP cost never disagrees with a freshly computed one", () => {
+    const p = fresh();
+    p.depth = 4;
+    p.atpCost(4);                       // prime the memo
+    p.integrated += 8;
+    p.acquire("runaway");
+    p.strain = 8;
+    const memoised = p.atpCost(4);
+    const fresh_ = new Plasmid();
+    fresh_.depth = 4;
+    fresh_.integrated = p.integrated;
+    fresh_.acquire("runaway");
+    fresh_.strain = 8;
+    for (let i = 0; i < p.slots.length; i++) fresh_.put(i, p.slots[i] ?? null);
+    expect(memoised).toBeCloseTo(fresh_.atpCost(4), 6);
+  });
+
+  // A refusal that has already destroyed the parts is the worst shape a bug
+  // can take. `pi` was found before the gene pull and used after it, so every
+  // gene sitting below the promoter in the bin shifted it -- and off the end
+  // it reported "no spare promoter in the bin" having binned four genes.
+  it("a failed assemble destroys nothing, whatever the bin order", () => {
+    const genes: bio.GeneId[] = ["narG", "nirS", "norB", "nosZ"];
+    for (const promoterFirst of [true, false]) {
+      const p = new Plasmid();
+      p.bin.length = 0;
+      const promoter = (): Part => ({ kind: "promoter", id: "j23119" });
+      const cassettes = (): Part[] => genes.map((id) =>
+        ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE }));
+      if (promoterFirst) p.bin.push(promoter(), ...cassettes());
+      else p.bin.push(...cassettes(), promoter());
+
+      const before = p.slots.filter(Boolean).length + p.bin.length;
+      const r = p.assemble(genes);
+      const after = p.slots.filter(Boolean).length + p.bin.length;
+      expect(after, `promoterFirst=${String(promoterFirst)}: parts vanished`)
+        .toBe(before);
+      // And when it says it worked, it laid the promoter down, not some
+      // other part the stale index happened to be pointing at.
+      if (r.ok) {
+        const at = p.slots.findIndex((x) => x?.kind === "gene" && x.id === "narG");
+        expect(p.at(at - 1)?.kind, "the operon is not headed by a promoter")
+          .toBe("promoter");
+      }
+    }
+  });
+
+  it("restoring the origin returns whatever it displaces to the bin", () => {
+    const p = new Plasmid();
+    const binBefore = p.bin.length;
+    // Fill every usable position, which overwrites the origin. touch() then
+    // restores it, and on a full ring it has to evict something to do so --
+    // that part used to be dropped on the floor, breaking the conservation
+    // guarantee install/uninstall are tested for.
+    for (let i = 0; i < p.usableSlots; i++) {
+      p.put(i, { kind: "terminator", id: "rrnbt1" });
+    }
+    expect(p.has("ori"), "the origin was not restored").toBe(true);
+    expect(p.bin.length, "ensureOrigin destroyed the part it overwrote")
+      .toBe(binBefore + 1);
+  });
+
+  it("a gene cannot be on the ring and in the bin at once", () => {
+    const p = new Plasmid();
+    const g = (): Part =>
+      ({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    expect(p.stash(g()).ok).toBe(true);
+    expect(p.add(g()).ok, "add() ignored the bin").toBe(false);
+    expect(p.has("psbA") && p.inBin("psbA"), "carried twice").toBe(false);
+  });
+
   it("every public mutator bumps the revision", () => {
     const cases: [string, (p: Plasmid) => void][] = [
       ["put",        (p) => { p.put(9, { kind: "terminator", id: "rrnbt1" }); }],
@@ -3217,14 +3312,38 @@ describe("audit regressions", () => {
     expect(s?.run.library).toEqual(["mtrC"]);
   });
 
-  it("deepest depth is clamped to the column", () => {
+  // `run.deepest` is a FLOOR, not a stratum: strain.ts normalises it by
+  // MAX_FLOOR and the invariant bounds it by MAX_DEPTH*3. This asserted
+  // MAX_DEPTH, which is what the parser wrongly clamped to -- so a lineage
+  // that reached F20 loaded back as 8 and lost the strain level it had earned.
+  it("deepest floor is clamped to the column, and it is a floor", () => {
     const s = parseSave({
       version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
       ring: [], bin: [], settings: {},
       run: { deepest: 9999, deaths: -5, bestiary: [], library: [] },
     });
-    expect(s?.run.deepest).toBeLessThanOrEqual(bio.MAX_DEPTH);
+    expect(s?.run.deepest).toBeLessThanOrEqual(MAX_FLOOR);
     expect(s?.run.deaths).toBeGreaterThanOrEqual(0);
+  });
+
+  it("a floor deeper than a stratum survives the round trip", () => {
+    const s = parseSave({
+      version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+      ring: [], bin: [], settings: {},
+      run: { deepest: 20, deaths: 0, bestiary: [], library: [] },
+    });
+    expect(s?.run.deepest, "a floor-20 lineage must not load back as 8").toBe(20);
+  });
+
+  it("a developed strain's ATP pool survives the round trip", () => {
+    // atpCeiling reaches 350; this clamped to a flat 100 and destroyed up to
+    // 250 ATP on every reload, which is what pays for the growth curve.
+    const s = parseSave({
+      version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 340,
+      ring: [], bin: [], settings: {},
+      run: { deepest: 1, deaths: 0, bestiary: [], library: [] },
+    });
+    expect(s?.atp).toBe(340);
   });
 
   it("a failed path gives up on a budget instead of walking the whole grid", () => {
@@ -5772,7 +5891,7 @@ describe("architecture is bought once and kept", () => {
     const mk = (part: boolean) => {
       const p = new Plasmid();
       p.integrated = 6;
-      if (part) p.traits.add("partitioned");
+      if (part) p.acquire("partitioned");
       p.put(4, { kind: "promoter", id: "j23119" });
       p.put(5, { kind: "gene", id: "dsrA", level: 1, mods: [], allele: WILD_TYPE });
       p.put(6, { kind: "terminator", id: "rrnbt1" });
@@ -5791,7 +5910,7 @@ describe("architecture is bought once and kept", () => {
     expect(a, "a chromosome is single copy").toBe(1);
 
     const wild = new Plasmid();
-    wild.traits.add("runaway");
+    wild.acquire("runaway");
     wild.energy = 0;
     const low = wild.copies();
     wild.energy = 1;

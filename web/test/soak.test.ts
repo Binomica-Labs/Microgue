@@ -252,6 +252,73 @@ describe("the new systems are reachable from play", () => {
 
 
 
+  // The test above SETS run.deepest by hand, which is why it never noticed
+  // that nothing in the game ever set it. Only t_win did, so the depth term
+  // of strainLevel -- 45% of the formula -- was zero for every real run, and
+  // no strain could pass L5 of 8 however much of the column it catalogued.
+  it("descending actually advances the deepest floor reached", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game(canvas());
+    g.startRun(0);
+    expect(g.run.deepest).toBe(1);
+    for (let i = 0; i < 5; i++) {
+      for (const m of g.level.mobs) m.alive = false;
+      g.descend();
+    }
+    expect(g.dungeon.floor, "the scenario did not descend").toBeGreaterThan(1);
+    expect(g.run.deepest, "run.deepest did not follow the descent")
+      .toBe(g.dungeon.floor);
+  });
+
+  it("climbing back up never lowers the deepest reached", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game(canvas());
+    g.startRun(0);
+    for (let i = 0; i < 3; i++) {
+      for (const m of g.level.mobs) m.alive = false;
+      g.descend();
+    }
+    const deepest = g.run.deepest;
+    g.ascend();
+    expect(g.run.deepest, "ascending erased the record").toBe(deepest);
+  });
+
+  // "start at strain L8" is bought with escalating credit and was destroyed
+  // one turn into the run: upkeep recomputed the level from an empty notebook
+  // and silently downgraded it, taking three ring positions with it.
+  it("a strain level the lab paid for survives the first turn", async () => {
+    const { LAB_KEY } = await import("../src/lab_save.js");
+    localStorage.setItem(LAB_KEY, JSON.stringify({
+      credit: 0, deepestEver: 20, ledger: [], stock: [],
+      startSites: 4, startStrain: 8,
+    }));
+    const { Game } = await import("../src/main.js");
+    const g = new Game(canvas());
+    g.startRun(0);
+    const slots = g.genome.usableSlots;
+    g.press("wait");
+    expect(g.genome.strain, "the lab's purchased strain was downgraded").toBe(8);
+    expect(g.genome.usableSlots, "ring positions were lost with it").toBe(slots);
+    g.press("wait");
+    expect(g.genome.strain, "and again on the second turn").toBe(8);
+  });
+
+  it("a purchased strain survives a save and reload", async () => {
+    const { LAB_KEY } = await import("../src/lab_save.js");
+    localStorage.setItem(LAB_KEY, JSON.stringify({
+      credit: 0, deepestEver: 1, ledger: [], stock: [],
+      startSites: 0, startStrain: 5,
+    }));
+    const { Game } = await import("../src/main.js");
+    const a = new Game(canvas());
+    a.startRun(0);
+    a.press("wait");
+    a.save();
+    const b = new Game(canvas());
+    b.startRun(0);
+    expect(b.genome.strain, "reloading undid what credit bought").toBe(5);
+  });
+
   it("catabolising a cassette heals and is reachable", async () => {
     const { Game } = await import("../src/main.js");
     const g = new Game(canvas());
@@ -1281,7 +1348,7 @@ describe("a mobilisable plasmid survives its host", () => {
     // resistance crosses species. It is the one way anything survives a death.
     const g = await game();
     g.startRun(0);
-    g.genome.traits.add("mobilisable");
+    g.genome.acquire("mobilisable");
     for (const id of ["mtrC", "omcS", "cymA", "dsrA"] as bio.GeneId[]) {
       const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
       if (free >= 0) {
@@ -1309,7 +1376,7 @@ describe("a mobilisable plasmid survives its host", () => {
   it("mobilisation cannot overfill the manifest", async () => {
     const g = await game();
     g.startRun(0);
-    g.genome.traits.add("mobilisable");
+    g.genome.acquire("mobilisable");
     const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((x) => x !== "ori");
     for (const id of all.slice(0, 20)) {
       const free = g.genome.slots.findIndex((s, k) => s === null && g.genome.usable(k));
@@ -1389,8 +1456,8 @@ describe("the chromosome is reachable from play", () => {
     const g = await game();
     g.startRun(0);
     g.genome.integrated = 5;
-    g.genome.traits.add("partitioned");
-    g.genome.traits.add("runaway");
+    g.genome.acquire("partitioned");
+    g.genome.acquire("runaway");
     g.save();
     const b = await game();
     b.startRun(0);

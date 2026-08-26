@@ -27,12 +27,17 @@ function parseInfo(v: unknown): SlotInfo | null {
   const name = v["name"];
   if (typeof slot !== "number" || slot < 0 || slot >= SLOTS) return null;
   if (typeof name !== "string" || name.length === 0) return null;
+  // Finiteness FIRST. `typeof NaN === "number"` and `Math.floor(NaN)` is NaN,
+  // so a corrupt index rendered "deepest D NaN" on the splash screen -- the
+  // fourth time this exact shape has appeared in this codebase.
+  const n = (x: unknown, d: number): number =>
+    typeof x === "number" && Number.isFinite(x) ? Math.floor(x) : d;
   return {
     slot: Math.floor(slot),
     name: name.slice(0, 18),
-    depth: typeof v["depth"] === "number" ? Math.floor(v["depth"]) : 1,
-    genes: typeof v["genes"] === "number" ? Math.floor(v["genes"]) : 0,
-    updated: typeof v["updated"] === "number" ? v["updated"] : 0,
+    depth: n(v["depth"], 1),
+    genes: n(v["genes"], 0),
+    updated: n(v["updated"], 0),
   };
 }
 
@@ -87,9 +92,12 @@ export function migrateLegacy(): boolean {
     const raw = localStorage.getItem("microgue:v1");
     if (raw === null) return false;
     const data = parseSave(JSON.parse(raw) as unknown);
-    localStorage.removeItem("microgue:v1");
+    // Only discard the legacy payload once it has been successfully carried
+    // over. Removing it first meant a save this build cannot read was deleted
+    // rather than left alone, and there is no second chance at a migration.
     if (data?.version !== SCHEMA) return false;
     saveSlot(0, "recovered", data, 0);
+    localStorage.removeItem("microgue:v1");
     return true;
   } catch { return false; }
 }

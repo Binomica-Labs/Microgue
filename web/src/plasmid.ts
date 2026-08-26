@@ -14,7 +14,7 @@
 // carries over from the previous flat model.
 
 import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
-         type Complex, type GeneId, type Hazard, type Teap } from "./biology.js";
+         type Complex, type GeneId, type Hazard } from "./biology.js";
 
 /** Re-exported from transcription.ts, which owns the ring model. There were
  *  two of these and they disagreed: the plasmid capped at 16 while the
@@ -50,37 +50,11 @@ const BURDEN_KNEE = 0.7;
 
 export const ATP_MAX = 100;
 
-/** Per-action ATP produced by a gene, when it is expressing. */
-const GENERATORS: Partial<Record<GeneId, number>> = {
-  // terminal reductases -- these ARE the respiration, so they must out-earn
-  // their own expression cost or the game punishes the correct build
-  narG: 4.6, dsrA: 12.0, mcrA: 6.6, nosZ: 2.6, norB: 2.0, nirS: 2.4,
-  // light harvesting
-  psbA: 4.4, pufM: 3.8, fmoA: 3.4, csmA: 1.8,
-  // chemolithotrophy and hydrogen
-  amoA: 3.0, nxrA: 2.8, soxB: 3.2, sqr: 1.6, hydA: 3.6, aprA: 1.6,
-  // luciferase consumes reducing power and FMNH2 to make photons.
-  luxAB: -0.8,
-  // ATP sulfurylase CONSUMES ATP -- sulfate must be activated to APS before
-  // anything can reduce it, at a cost of two ATP equivalents. It is why
-  // sulfate reduction is energetically marginal and why sulfate reducers grow
-  // slowly. A negative generator is the honest way to model it.
-  sat: -1.6,
-  // extracellular electron transfer: respiring a mineral still pays
-  mtrC: 4.2, omcS: 2.0,
-};
-
-/** Cost scales with size and how hard the gene is being driven. */
-const COST_PER_KB = 0.7;
-
-/** ATP burned per unit of transcription that runs off the end of an operon
- *  without producing anything. Tuned so a bare hairpin is a real tax and a
- *  tandem terminator is nearly free. */
-const WASTE_PER_UNIT = 1.15;
-
 // The part model lives in transcription.ts and the catalogue in parts.ts, so
 // adding a promoter, a terminator or a gene modifier does not touch this class.
 export type { Part } from "./transcription.js";
+import { CHLOROSOME, COST_PER_KB, GENERATORS, NEEDS, O2_LABILE, WASTE_PER_UNIT }
+  from "./metabolism.js";
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
 import { capacityFor, copiesFor, copyBurden, dosage, slotsFor,
@@ -95,17 +69,6 @@ export interface Operon {
   readonly output: number;
   readonly genes: readonly { slot: number; id: GeneId; rank: number; flow: number }[];
 }
-
-const O2_LABILE: ReadonlySet<GeneId> = new Set(["nifH", "hydA", "mcrA"]);
-const CHLOROSOME: ReadonlySet<GeneId> = new Set(["fmoA", "csmA"]);
-const NEEDS: Partial<Record<GeneId, "light" | Teap>> = {
-  // Luciferase is an oxygenase; without O2 it simply does not turn over.
-  luxAB: "O2",
-  psbA: "light", pufM: "light", fmoA: "light", csmA: "light",
-  mtrC: "Fe(III)", omcS: "Fe(III)",
-  dsrA: "SO4", aprA: "SO4",
-  mcrA: "CO2", narG: "NO3-",
-};
 
 export type Result = { ok: true } | { ok: false; err: string };
 
@@ -295,8 +258,11 @@ export class Plasmid {
 
   /** Place a part in the first free USABLE slot after `from`, or fail. */
   add(part: Part, from = 0): Result {
-    if (part.kind === "gene" && this.has(part.id)) {
-      return { ok: false, err: `${GENES[part.id].name} already present` };
+    // Both places, as `stash` does. Ring-only let a gene sit on the ring AND
+    // in the bin: the "carried twice" invariant fires, and a save round-trip
+    // drops one copy silently -- parseRing/parseBin dedupe separately.
+    if (part.kind === "gene" && (this.has(part.id) || this.inBin(part.id))) {
+      return { ok: false, err: `${GENES[part.id].name} already carried` };
     }
     for (let k = 0; k < this.usableSlots; k++) {
       const i = this.norm(from + k);
@@ -391,21 +357,82 @@ export class Plasmid {
     }));
   }
 
-  /** What conditional and inducible promoters can see. Depth is set by the
-   *  game each turn; without it every promoter would be constitutive. */
-  depth = 1;
-  inducers: ReadonlySet<string> = new Set();
+  /**
+   * What conditional and inducible promoters can see.
+   *
+   * Accessors, not fields: these are INPUTS to `transcribe`, but the operon
+   * memo keys on `rev`, which only ring mutations bumped. As plain fields,
+   * changing floor did not re-evaluate PfnrS or PsoxS until something touched
+   * the ring. They invalidate on a real change, and only on a real change.
+   */
+  private _depth = 1;
+  get depth(): number { return this._depth; }
+  set depth(v: number) {
+    const d = Number.isFinite(v) ? v : 1;
+    if (d === this._depth) return;
+    this._depth = d;
+    this.invalidate();
+  }
+
+  private _inducers: ReadonlySet<string> = new Set();
+  get inducers(): ReadonlySet<string> { return this._inducers; }
+  set inducers(v: ReadonlySet<string>) {
+    // By CONTENT: upkeep rebuilds this set every turn, so a reference compare
+    // would clear the memo every turn and it would never serve anything.
+    if (v.size === this._inducers.size) {
+      let same = true;
+      for (const k of v) if (!this._inducers.has(k)) { same = false; break; }
+      if (same) return;
+    }
+    this._inducers = v;
+    this.invalidate();
+  }
 
   /** Which plasmid this is. Copy number multiplies both expression and burden;
    *  slots and capacity come from the replicon plus whatever the strain has
    *  earned. See replicon.ts and strain.ts. */
   /** Cassette sites integrated beyond the base. Bought with ATP; see
-   *  chromosome.ts. Dies with the strain -- the LAB buys a higher start. */
-  integrated = 0;
-  /** Architecture acquired, once each and kept for the run. */
-  readonly traits = new Set<TraitId>();
-  /** Strain level, set by the game from the notebook and the deepest floor. */
-  strain = 1;
+   *  chromosome.ts. Dies with the strain -- the LAB buys a higher start.
+   *  An accessor for the same reason as `depth`: it sets `usableSlots`, an
+   *  argument to `transcribe`, so a site must open to transcription on the
+   *  turn it is paid for. */
+  private _integrated = 0;
+  get integrated(): number { return this._integrated; }
+  set integrated(v: number) {
+    const n = Number.isFinite(v) ? Math.round(v) : 0;
+    if (n === this._integrated) return;
+    this._integrated = n;
+    this.invalidate();
+  }
+
+  /** Architecture acquired, once each and kept for the run. Mutated only
+   *  through `acquire`/`setTraits`: `runaway` moves copy number from 1 to as
+   *  much as 61, which multiplies every ATP figure on the plasmid. */
+  private readonly _traits = new Set<TraitId>();
+  get traits(): ReadonlySet<TraitId> { return this._traits; }
+
+  acquire(id: TraitId): void {
+    if (this._traits.has(id)) return;
+    this._traits.add(id);
+    this.invalidate();
+  }
+
+  setTraits(ids: Iterable<TraitId>): void {
+    this._traits.clear();
+    for (const id of ids) this._traits.add(id);
+    this.invalidate();
+  }
+
+  /** Strain level, from the notebook and the deepest floor. Drives
+   *  `bonusSlots` and `bonusCapacityKb` -- ring size and burden. */
+  private _strain = 1;
+  get strain(): number { return this._strain; }
+  set strain(v: number) {
+    const n = Number.isFinite(v) ? Math.round(v) : 1;
+    if (n === this._strain) return;
+    this._strain = n;
+    this.invalidate();
+  }
 
   /** Ring positions actually usable: the replicon's, plus strain bonus. */
   get usableSlots(): number {
@@ -455,10 +482,16 @@ export class Plasmid {
   /** @internal: the energy setter clears this from outside the accessor. */
   private memoAtp = new Map<string, number>();
 
-  private touch(): void {
+  /** Drop every memoised read. No origin check: the non-ring inputs
+   *  (depth, inducers, strain) cannot lose it. */
+  private invalidate(): void {
     this.rev++;
     this.memoOperons = null;
     this.memoAtp.clear();
+  }
+
+  private touch(): void {
+    this.invalidate();
     this.ensureOrigin();
   }
 
@@ -478,6 +511,11 @@ export class Plasmid {
     const at = free >= 0 ? free
       : this.slots.findIndex((s, i) => this.usable(i) && s?.kind !== "gene");
     const i = at >= 0 ? at : 0;
+    // Displaced part goes back to the bin: this was the one path that broke
+    // the conservation install/uninstall guarantee, by overwriting a
+    // regulatory part on a full ring to put the origin back.
+    const displaced = this.slots[i] ?? null;
+    if (displaced && this.bin.length < BIN_CAP) this.bin.push(displaced);
     // Direct assignment: going through put() would recurse into touch().
     this.slots[i] = { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE };
   }
@@ -589,7 +627,10 @@ export class Plasmid {
       const tail = last === undefined ? 1 : last.flow;
       // What is still running after the final gene, times the promoter output.
       let leak = tail;
-      for (let k = 1; k <= SLOTS; k++) {
+      // USABLE positions, not the array: `norm` wraps at `usableSlots`, so
+      // iterating to SLOTS walked an 8-slot ring three times and re-applied
+      // every terminator on each pass. Fifth bug from that same root.
+      for (let k = 1; k <= this.usableSlots; k++) {
         const at = this.norm((last?.slot ?? op.promoter) + k);
         const part = this.slots[at];
         if (part === undefined || part === null) break;
@@ -725,7 +766,17 @@ export class Plasmid {
       return { ok: false, err: `needs ${need} contiguous free slots` };
     }
 
-    // Pull the genes off the ring, then lay everything down in order.
+    // Claimed FIRST, while `pi` still means what it meant. Pulling the genes
+    // splices the bin, and every gene below the promoter shifted it down one:
+    // running this last, `pi` pointed at the wrong part or off the end, and
+    // off the end returned "no spare promoter" AFTER the genes had left the
+    // ring -- destroying all of them on a path that reports a refusal.
+    const promoter = this.bin[pi];
+    if (!promoter) return { ok: false, err: "no spare promoter in the bin" };
+    this.bin.splice(pi, 1);
+
+    // Pull the genes off the ring, then lay everything down in order. Each
+    // lookup is a fresh findIndex, so these splices cannot strand each other.
     const parts: Part[] = [];
     for (const g of genes) {
       const at = this.slots.findIndex((p) => p?.kind === "gene" && p.id === g);
@@ -739,9 +790,6 @@ export class Plasmid {
         if (p) { parts.push(p); this.bin.splice(bi, 1); }
       }
     }
-    const promoter = this.bin[pi];
-    if (!promoter) return { ok: false, err: "no spare promoter in the bin" };
-    this.bin.splice(pi, 1);
 
     // Wrapped explicitly. `put` no longer wraps for us, and the run really can
     // cross the end of the ring -- that is what a circular plasmid is.

@@ -17,8 +17,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *
  *  Recorded at v0.55. The equivalence with the PRE-refactor build was proven
  *  separately, by running the same tracer against both trees outside vitest:
- *  42220 calls, identical. This constant is the in-suite anchor. */
-const GOLDEN = "b04b0e920c05a618";
+ *  42220 calls, identical. This constant is the in-suite anchor.
+ *
+ *  Re-recorded once since, and the diff was read before it was: 18 lines of
+ *  77575 moved, all of them the two things that were meant to move. The strain
+ *  progress bar had been drawing `fillRect(42,783.59,0,2)` -- width ZERO, on
+ *  every frame of every run -- because `run.deepest` was never advanced by
+ *  descending, and the notebook header read "deepest D1" after three floors.
+ *  Nothing else in the frame changed. */
+const GOLDEN = "043a73856646c568";
 
 const trace: string[] = [];
 

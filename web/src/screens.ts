@@ -123,7 +123,9 @@ export function drawNotes(
   const seen = notebook(run);
   let y = drawHeader(ctx, ins, u, `FIELD NOTEBOOK  ${VERSION}`,
     `${String(seen.length)}/${String(bio.MICROBES.length)} recorded · ` +
-    `deepest D${String(run.deepest)} · ${String(run.deaths)} lysis events`);
+    // F, not D: `run.deepest` is a FLOOR (1..24) and everything else in the
+    // game prints floors as F. "D24" is not a stratum that exists.
+    `deepest F${String(run.deepest)} · ${String(run.deaths)} lysis events`);
 
   const maxW = W - ins.left - ins.right - 28 * u;
   const floor = H - ins.bottom - 60 * u;

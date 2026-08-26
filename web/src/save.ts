@@ -6,8 +6,10 @@
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
-import { BASE_SLOTS, MAX_SLOTS, TRAITS, type TraitId }
+import { BASE_SLOTS, MAX_SLOTS, TRAITS, atpCeiling, type TraitId }
   from "./chromosome.js";
+import { MAX_FLOOR } from "./dungeon.js";
+import { MAX_STRAIN } from "./strain.js";
 import { RARITY, type Rarity } from "./parts.js";
 import { PREFIXES, SUFFIXES, WILD_TYPE, type Allele, type PrefixId,
          type SuffixId } from "./allele.js";
@@ -155,7 +157,11 @@ function parseRun(v: unknown): SaveData["run"] {
     ? [...new Set((v["library"] as unknown[]).filter(isGeneId))]
     : [];
   return {
-    deepest: Math.min(Math.max(num(v["deepest"], 1), 1), MAX_DEPTH),
+    // A FLOOR, 1..MAX_FLOOR -- strain.ts normalises it by MAX_FLOOR and the
+    // invariant bounds it by MAX_DEPTH*3. Clamping it to MAX_DEPTH here read
+    // it as a stratum and silently cut a floor-20 lineage back to 8 on load,
+    // taking its strain level with it.
+    deepest: Math.min(Math.max(num(v["deepest"], 1), 1), MAX_FLOOR),
     deaths: Math.max(num(v["deaths"], 0), 0),
     bestiary, library,
   };
@@ -217,12 +223,22 @@ export function parseSave(raw: unknown): SaveData | null {
   return {
     version: SCHEMA,
     depth: Math.min(Math.max(depth, 1), MAX_DEPTH),
-    floor: Math.min(Math.max(num(raw["floor"], 1), 1), MAX_DEPTH * 3),
+    floor: Math.min(Math.max(num(raw["floor"], 1), 1), MAX_FLOOR),
     seed: Math.round(num(raw["seed"], 7)),
     px: Math.round(px),
     py: Math.round(py),
-    hp: Math.max(num(raw["hp"], 30), 1),
-    atp: Math.min(Math.max(num(raw["atp"], 100), 0), 100),
+    // Bounded above as well as below. Everything else here is clamped to what
+    // play can produce; hp was the one field a hand-edited save could set to
+    // anything. `vitality` caps at 92.
+    hp: Math.min(Math.max(num(raw["hp"], 30), 1), 92),
+    // The pool is NOT a flat 100. `atpCeiling` scales with the chromosome and
+    // the strain to 350, and clamping a load to 100 quietly destroyed up to
+    // 250 ATP on every reload -- the currency that pays for expansions (to
+    // 324) and traits (130/190/260), so the late growth curve became
+    // unpayable across a save. Clamped to the largest pool any strain can
+    // hold; `upkeep` brings it down to this strain's real ceiling next turn.
+    atp: Math.min(Math.max(num(raw["atp"], 100), 0),
+                  atpCeiling(MAX_SLOTS - BASE_SLOTS, MAX_STRAIN)),
     ring: parseRing(raw["ring"]),
     bin: parseBin(raw["bin"]),
     heldMods: Array.isArray(raw["heldMods"])
@@ -241,7 +257,7 @@ export function parseSave(raw: unknown): SaveData | null {
           Array.isArray(e) && e.length === 2
             && typeof e[0] === "number" && typeof e[1] === "number"
             ? [[Math.round(e[0]), Math.max(Math.round(e[1]), 0)]] : [])
-          .slice(0, MAX_DEPTH * 3)
+          .slice(0, MAX_FLOOR)
       : [],
     won: bool(raw["won"], false),
     run: parseRun(raw["run"]),

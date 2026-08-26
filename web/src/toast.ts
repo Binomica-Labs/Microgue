@@ -24,14 +24,18 @@ export class Toasts {
   private items: Toast[] = [];
   private next = 1;
   /** Identical messages are collapsed, so a per-frame failure cannot spam. */
-  private lastText = "";
-  private lastAt = -1e9;
+  /** Keyed by TEXT, not by "the last one pushed". Two failures alternating
+   *  each frame each saw the other as `lastText`, so neither ever collapsed
+   *  and the guarantee this exists for did not hold for more than one
+   *  distinct message. Bounded so the map cannot grow without limit. */
+  private readonly seenAt = new Map<string, number>();
 
   push(text: string, level: ToastLevel, now: number): void {
     const clean = text.slice(0, 160);
-    if (clean === this.lastText && now - this.lastAt < 3000) return;
-    this.lastText = clean;
-    this.lastAt = now;
+    const last = this.seenAt.get(clean);
+    if (last !== undefined && now - last < 3000) return;
+    if (this.seenAt.size > 64) this.seenAt.clear();
+    this.seenAt.set(clean, now);
     this.items.push({ id: this.next++, text: clean, level, t0: now, dur: DUR[level] });
     while (this.items.length > MAX) this.items.shift();
   }

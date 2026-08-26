@@ -227,6 +227,8 @@ class Game {
 
   enter(level: Level, arrive: Point): void {
     this.level = level;
+    // Half the strain formula (strain.ts); only t_win ever wrote it. On
+    this.run.deepest = Math.max(this.run.deepest, level.floor);   // arrival.
     let p: Point | null = arrive;
     if (!level.grid.isFloor(p.x, p.y)) p = mg.findSpawn(level.grid, p.x, p.y);
     p ??= mg.carveSpawn(level.grid);
@@ -565,11 +567,12 @@ class Game {
     // base eight positions.
 
     this.genome.integrated = s.integrated;
-    this.genome.traits.clear();
-    for (const t of s.traits) this.genome.traits.add(t);
-    this.genome.strain = strainLevel({
-      catalogued: s.run.bestiary.length, deepest: s.run.deepest,
-    });
+    this.genome.setTraits(s.traits);
+    // Same floor as `upkeep`: the lab's purchased start is a minimum, not a
+    // starting value, or reloading a save undid what credit had bought.
+    this.genome.strain = Math.max(
+      strainLevel({ catalogued: s.run.bestiary.length, deepest: s.run.deepest }),
+      this.lab.startStrain);
     s.ring.forEach((p, i) => { this.genome.put(i, p); });
     this.genome.bin.length = 0;
     for (const p of s.bin) this.genome.bin.push({ ...p });
