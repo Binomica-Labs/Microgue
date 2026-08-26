@@ -24,8 +24,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  progress bar had been drawing `fillRect(42,783.59,0,2)` -- width ZERO, on
  *  every frame of every run -- because `run.deepest` was never advanced by
  *  descending, and the notebook header read "deepest D1" after three floors.
- *  Nothing else in the frame changed. */
-const GOLDEN = "043a73856646c568";
+ *  Nothing else in the frame changed.
+ *
+ *  Re-recorded again at the sprite/status-line pass. Diff read first: 117
+ *  lines of 77680, and every one of them either a measureText from ellipsising
+ *  the status line -- which real Chrome showed running off the right edge of
+ *  every phone -- or a fill in Nitzschia's pigment, from the striae its sprite
+ *  had been missing. */
+const GOLDEN = "51d3716ac7ac2970";
 
 const trace: string[] = [];
 
