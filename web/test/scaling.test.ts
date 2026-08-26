@@ -104,6 +104,7 @@ async function play(W: number, H: number, t: Trace) {
   vi.stubGlobal("Path2D", class {
     moveTo(): void { /* */ } lineTo(): void { /* */ }
     arc(): void { /* */ } closePath(): void { /* */ }
+    rect(): void { /* */ }
   });
   // A real notch and home indicator: the values a phone actually reports.
   vi.stubGlobal("getComputedStyle", () => ({
@@ -191,6 +192,63 @@ describe("layout holds on every form factor", () => {
       expect(cb.y, `${name} ${screen}: close is under the notch`)
         .toBeGreaterThanOrEqual(H > W ? 40 : 0);
       g.press(screen);
+    }
+  });
+});
+
+describe("the fog has no seams", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("is drawn as ONE fill per shade, not per tile", async () => {
+    // Two earlier attempts failed the same way: per-tile rects overlapped and
+    // two passes of a 62% black composited to 86%, drawing a grid of dark
+    // lines across every remembered area. Rounding to whole pixels did not
+    // help because this is inside a FRACTIONAL camera translate -- the
+    // rounding was in tile space and the transform undid it.
+    //
+    // A single fill composites once per pixel however much its subpaths
+    // overlap, and does not care what transform is active.
+    const rects: number[] = [];
+    class RecordingPath {
+      moveTo(): void { /* */ }
+      lineTo(): void { /* */ }
+      arc(): void { /* */ }
+      closePath(): void { /* */ }
+      rect(...a: number[]): void { rects.push(a.length); }
+    }
+    const t: Trace = { rects: [], texts: [] };
+    const g = await play(400, 800, t);
+    // After play(), which replaces the globals wholesale.
+    vi.stubGlobal("Path2D", RecordingPath);
+    g.startRun(0);
+    g.frame(100);
+    expect(rects.length, "the fog is not using a path at all")
+      .toBeGreaterThan(0);
+  });
+
+  it("adjacent runs overlap rather than abut", async () => {
+    // Abutting rects leave sub-pixel gaps once a fractional transform is
+    // applied. Overlapping is free inside one fill, and closes them.
+    const seen: number[][] = [];
+    class RecordingPath {
+      moveTo(): void { /* */ }
+      lineTo(): void { /* */ }
+      arc(): void { /* */ }
+      closePath(): void { /* */ }
+      rect(...a: number[]): void { seen.push(a); }
+    }
+    const t: Trace = { rects: [], texts: [] };
+    const g = await play(400, 800, t);
+    vi.stubGlobal("Path2D", RecordingPath);
+    g.startRun(0);
+    g.frame(100);
+    const rows = seen.filter((r) => r.length === 4);
+    expect(rows.length).toBeGreaterThan(4);
+    // Every rect must be padded: height strictly greater than one tile.
+    const tile = 32 * g.zoom;
+    for (const r of rows.slice(0, 40)) {
+      expect(r[3] ?? 0, "a fog rect is exactly one tile tall, so it will seam")
+        .toBeGreaterThan(tile);
     }
   });
 });

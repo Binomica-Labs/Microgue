@@ -79,6 +79,7 @@ describe("the real render path", () => {
       lineTo(): void { /* ditto */ }
       arc(): void { /* ditto */ }
       closePath(): void { /* ditto */ }
+      rect(): void { /* ditto */ }
     });
     vi.stubGlobal("getComputedStyle", () => ({ top: "0px", right: "0px",
                                                bottom: "0px", left: "0px" }));

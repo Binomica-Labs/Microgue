@@ -324,33 +324,46 @@ export function r_draw(_g: Game): void {
     }
     // The fog. Unseen is black, remembered is dimmed, lit is untouched.
     //
-    // Drawn as horizontal RUNS with pixel-rounded edges, not per tile. A
-    // per-tile rect padded by +1 overlapped its neighbour, and two passes of a
-    // 62% black composite to 86% -- which is exactly the grid of dark lines
-    // that showed up across every remembered area.
+    // ONE fill per shade, over a compound path. Two earlier attempts failed
+    // for the same underlying reason: a per-tile rect padded by +1 overlapped
+    // its neighbour and two passes of a 62% black composited to 86%, and
+    // rounding the rects to whole pixels did nothing because this is drawn
+    // inside a FRACTIONAL camera translate -- the rounding was in tile space
+    // and the transform undid it.
+    //
+    // A single fill composites once per pixel however much its subpaths
+    // overlap, and it does not care what transform is active. That is the only
+    // version of this that cannot seam.
     if (!hc) {
-      const DIM = "rgba(2,4,4,0.82)";
-      const DARK = "#010303";
+      const dim = new Path2D();
+      const dark = new Path2D();
       for (let y = y0; y <= y1; y++) {
         let runStart = -1;
-        let runStyle = "";
+        let runSeen = false;
         const flush = (endX: number): void => {
           if (runStart < 0) return;
-          const x1p = Math.round((endX + 1) * px);
-          const x0p = Math.round(runStart * px);
-          ctx.fillStyle = runStyle;
-          ctx.fillRect(x0p, Math.round(y * px), x1p - x0p,
-                       Math.round((y + 1) * px) - Math.round(y * px));
+          // Padded outward by half a pixel: adjacent runs overlap slightly,
+          // which is now harmless and closes any sub-pixel gap the transform
+          // would otherwise leave.
+          const pad = 0.5 / _g.zoom;
+          const rect = runSeen ? dim : dark;
+          rect.rect(runStart * px - pad, y * px - pad,
+                    (endX + 1 - runStart) * px + pad * 2, px + pad * 2);
           runStart = -1;
         };
         for (let x = x0; x <= x1; x++) {
-          const style = isVisible(sight, x, y) ? ""
-            : isSeen(sight, x, y) ? DIM : DARK;
-          if (style !== runStyle) { flush(x - 1); runStyle = style; }
-          if (style !== "" && runStart < 0) runStart = x;
+          if (isVisible(sight, x, y)) { flush(x - 1); continue; }
+          const seen = isSeen(sight, x, y);
+          if (runStart >= 0 && seen !== runSeen) flush(x - 1);
+          if (runStart < 0) { runStart = x; runSeen = seen; }
         }
         flush(x1);
       }
+      // Filling an empty path is a no-op, so there is nothing to guard.
+      ctx.fillStyle = "#010303";
+      ctx.fill(dark);
+      ctx.fillStyle = "rgba(2,4,4,0.82)";
+      ctx.fill(dim);
     }
     _g.drawFx(px);
     ctx.restore();

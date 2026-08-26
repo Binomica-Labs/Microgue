@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  Recorded at v0.55. The equivalence with the PRE-refactor build was proven
  *  separately, by running the same tracer against both trees outside vitest:
  *  42220 calls, identical. This constant is the in-suite anchor. */
-const GOLDEN = "fcc16279390bb281";
+const GOLDEN = "27ae742e8f7fb330";
 
 const trace: string[] = [];
 
@@ -73,9 +73,15 @@ describe("golden render trace", () => {
     });
     vi.stubGlobal("navigator", {});
     vi.stubGlobal("HTMLCanvasElement", function Stub() { /* marker */ });
+    // Path2D RECORDS. The fog moved to a compound path, and a stub that
+    // silently swallowed its rects would have taken the whole fog layer out of
+    // the golden -- a coverage hole that looks exactly like a passing test.
     vi.stubGlobal("Path2D", class {
-      moveTo(): void { /* */ } lineTo(): void { /* */ }
-      arc(): void { /* */ } closePath(): void { /* */ }
+      moveTo(...a: number[]): void { trace.push(`path.moveTo(${a.map(round).join(",")})`); }
+      lineTo(...a: number[]): void { trace.push(`path.lineTo(${a.map(round).join(",")})`); }
+      arc(...a: number[]): void { trace.push(`path.arc(${a.map(round).join(",")})`); }
+      closePath(): void { trace.push("path.closePath()"); }
+      rect(...a: number[]): void { trace.push(`path.rect(${a.map(round).join(",")})`); }
     });
     vi.stubGlobal("getComputedStyle", () => ({
       top: "0px", right: "0px", bottom: "0px", left: "0px",

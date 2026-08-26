@@ -428,6 +428,29 @@ Tapping a creature sets `strikeAfterTravel`: the walk spends its last step ON
 the target, lands one blow, and stops. One input, one approach, one strike, and
 you decide what happens next.
 
+## Fog seams: ONE fill, not many
+
+Three attempts. The seams are two passes of a semi-transparent black
+compositing over each other -- 62% twice reads as 86% -- and every version that
+kept drawing per-tile or per-run rects kept seaming:
+
+1. Per-tile `fillRect` padded by +1. Overlapped by construction.
+2. Per-row runs with `Math.round`ed edges. Looked right and was not: the fog is
+   drawn inside a FRACTIONAL camera translate, so rounding in TILE space is
+   undone by the transform before anything reaches a pixel.
+3. One `Path2D` per shade, filled once. A single fill composites once per pixel
+   however much its subpaths overlap, and it does not care what transform is
+   active. The rects are deliberately padded OUTWARD by half a pixel so
+   adjacent runs overlap -- which is now free, and closes the sub-pixel gaps a
+   fractional transform would otherwise leave.
+
+Only the third can be correct in principle rather than by arithmetic luck.
+
+**The golden had to learn about paths.** Moving the fog onto `Path2D` took the
+entire fog layer out of the trace, because the stub swallowed its calls -- a
+coverage hole that looks exactly like a passing test. The stub records now, and
+a 2% change to the fog shade fails the golden.
+
 ## Fog had grid lines
 
 Per-tile rects padded by +1 overlapped their neighbours, and two passes of a
