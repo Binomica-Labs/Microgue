@@ -276,12 +276,18 @@ export function drawRing(
 ): void {
   const mid = (g.rInner + g.rOuter) / 2;
   const band = g.rOuter - g.rInner;
-  const step = (Math.PI * 2) / Math.max(Math.min(g.used, SLOTS), 1);
+  // ONE definition of how far around one position sits, used by every angle
+  // below. Two of them still divided by SLOTS while the loop ran `used` times,
+  // so eight wedges were drawn at one-twenty-fourth spacing and the ring came
+  // out as a quarter-circle.
+  const n = Math.max(Math.min(g.used, SLOTS), 1);
+  const step = (Math.PI * 2) / n;
+  const angleOf = (i: number): number => i * step - Math.PI / 2 + g.rot;
 
   // Operon arcs, drawn under the slots so a transcript reads as one sweep.
   for (const op of p.operons()) {
     if (op.genes.length === 0) continue;
-    const a0 = (op.promoter / SLOTS) * Math.PI * 2 - Math.PI / 2 + g.rot;
+    const a0 = angleOf(op.promoter);
     const a1 = a0 + (op.genes.length + 1) * step;
     ctx.strokeStyle = `rgba(255,209,102,${0.25 + 0.45 * Math.min(op.output / 1.4, 1)})`;
     ctx.lineWidth = band + 8 * o.u;
@@ -290,8 +296,8 @@ export function drawRing(
     ctx.stroke();
   }
 
-  for (let i = 0; i < Math.max(Math.min(g.used, SLOTS), 1); i++) {
-    const a0 = (i / SLOTS) * Math.PI * 2 - Math.PI / 2 + g.rot;
+  for (let i = 0; i < n; i++) {
+    const a0 = angleOf(i);
     const part = p.at(i);
     const dragging = o.dragFrom === i;
 

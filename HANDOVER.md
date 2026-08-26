@@ -430,6 +430,13 @@ you decide what happens next.
 
 ## Fog seams: ONE fill, not many
 
+`spec` also bounds the COST: a path is only cheap if what goes into it is, and
+a 96x96 floor is 9216 tiles. Run-length encoding keeps a worst-case frame --
+fully remembered, so visible and dim interleave along every row -- under 400
+rects.
+
+
+
 Three attempts. The seams are two passes of a semi-transparent black
 compositing over each other -- 62% twice reads as 86% -- and every version that
 kept drawing per-tile or per-run rects kept seaming:
@@ -689,6 +696,23 @@ and opening the game bleeding ATP into empty DNA teaches the wrong lesson.
 Baseline fermentation rose from 1.2 to 1.6: the "never dead on arrival"
 invariant was passing with a margin of 0.005, which is not a margin.
 
+## The manifest tracks the chromosome, not the bin
+
+The lab sold eleven constructs to a strain whose chromosome has five free ring
+positions. `STOCK_CAP` was derived from `BIN_CAP`, and the bin is about
+CARRYING while the chromosome is about USING -- so credit went on genes that
+would sit unused for most of a run.
+
+`stockCap(startSites)` derives from the chromosome the lab has paid for, plus
+two spare because swapping one out for a better roll is normal play, still
+bounded by the bin. Buying sites now lets you carry more constructs, which ties
+the two purchases together instead of leaving them independent.
+
+**This broke three tests, correctly.** They bought every offer in one pass and
+then asserted the manifest was full -- but buying a SITE raises the cap, so
+more genes become orderable than that pass had seen. They buy to a FIXED POINT
+now, looping until a whole pass changes nothing.
+
 ## The growth curve has to fit inside the energy budget
 
 Eighty percent of the chromosome system shipped unreachable. Expansion rose at
@@ -748,6 +772,26 @@ that laid an operon at slots 4-9 ran off the end. Growing them all to maximum
 was wrong: it inflates CAPACITY too, which silently removed the burden that
 two of those tests exist to measure. `withOperon` grows only as far as its
 operon needs, and the capacity tests are explicitly NOT grown.
+
+## The ring had THREE angle computations
+
+Reported as "the plasmid inventory is broken": the ring rendered as a
+quarter-circle. Eight wedges were drawn at one-twenty-FOURTH spacing, because
+two of the three places that compute an angle still divided by `SLOTS` while
+the loop ran `used` times. There is one `angleOf` now and everything uses it.
+
+**The existing round-trip test could not have caught this.** `slotAt` and
+`slotCentre` agreed with each other; the DRAWING disagreed with both. A test
+that checks two functions are mutually consistent says nothing about a third.
+
+Two guards, and the second took a correction worth recording:
+
+* `spec` asserts consecutive slot centres are exactly one step apart and that
+  the positions span the whole circle at sizes 8, 12, 16, 20 and 24.
+* The scaling suite records `arc()` calls and measures what is actually DRAWN.
+  My first version summed the wedge sweeps -- which still reads 360 when eight
+  wedges overlap inside a quarter-circle, so it passed against the real bug.
+  It measures their DISTRIBUTION now: the largest gap between wedge starts.
 
 ## The ring is the replicon's, not the array's
 

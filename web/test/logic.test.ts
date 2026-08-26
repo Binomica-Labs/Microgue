@@ -60,8 +60,8 @@ import { BASE_SLOTS, MAX_SLOTS, TRAITS, TRAIT_IDS, atpCeiling, capacityFor,
          copiesFor, expansionCost, slotsFor } from "../src/chromosome.js";
 import { MAX_STRAIN, bonusCapacityKb, bonusSlots, strainLevel }
   from "../src/strain.js";
-import { LEDGER_CAP, STOCK_CAP, buy, creditFor, genePrice, newLab, offers,
-         recordRun, sitesPrice, strainPrice } from "../src/lab.js";
+import { LEDGER_CAP, buy, creditFor, genePrice, newLab, offers,
+         recordRun, sitesPrice, stockCap, strainPrice } from "../src/lab.js";
 import { parseLab } from "../src/lab_save.js";
 import { LYSIS_MS, phaseAt, shards } from "../src/lysis.js";
 import { levelProgress } from "../src/strain.js";
@@ -5247,6 +5247,40 @@ describe("the gene catalogue keeps growing", () => {
 });
 
 describe("nothing ordered is ever lost", () => {
+  /**
+   * Buy to a fixed point.
+   *
+   * A single pass no longer fills the manifest: buying a SITE raises the cap,
+   * so more genes become orderable than the pass had seen. Loop until an
+   * entire pass changes nothing.
+   */
+  const buyAll = (lab: ReturnType<typeof newLab>, seen: bio.GeneId[]): void => {
+    for (let pass = 0; pass < 40; pass++) {
+      const before = lab.credit;
+      for (const o of offers(lab, seen)) buy(lab, o);
+      if (lab.credit === before) return;
+    }
+  };
+
+  it("the manifest tracks the chromosome, not the bin", () => {
+    // The bin is about CARRYING; the chromosome is about USING. A flat cap of
+    // eleven sold eleven constructs to a strain with five free ring positions
+    // -- credit spent on genes that sit in the bin for most of a run.
+    expect(stockCap(0)).toBeLessThan(stockCap(4));
+    for (let s = 0; s <= MAX_SLOTS - BASE_SLOTS; s++) {
+      const cap = stockCap(s);
+      const ring = slotsFor(s, 0);
+      expect(cap, `${String(s)} sites: sells more than the ring can hold`)
+        .toBeLessThanOrEqual(ring - 3 + 2);
+      expect(cap, `${String(s)} sites: the bin cannot hold the manifest`)
+        .toBeLessThanOrEqual(BIN_CAP - STARTING_PARTS);
+      expect(cap).toBeGreaterThanOrEqual(3);
+    }
+    for (const n of [NaN, -9, 1e9]) {
+      expect(Number.isFinite(stockCap(n)), String(n)).toBe(true);
+    }
+  });
+
   it("STARTING_PARTS matches what the vector actually puts in the bin", () => {
     // If these drift, the stock cap is wrong and the surplus is dropped
     // silently at inoculation.
@@ -5257,8 +5291,8 @@ describe("nothing ordered is ever lost", () => {
     const lab = newLab();
     lab.credit = 1e6;
     const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
-    for (let pass = 0; pass < 3; pass++) for (const o of offers(lab, all)) buy(lab, o);
-    expect(lab.stock.length).toBeLessThanOrEqual(STOCK_CAP);
+    buyAll(lab, all);
+    expect(lab.stock.length).toBeLessThanOrEqual(stockCap(lab.startSites));
   });
 
   it("every construct in the manifest reaches a fresh strain", () => {
@@ -5284,7 +5318,7 @@ describe("nothing ordered is ever lost", () => {
     const lab = newLab();
     lab.credit = 1e6;
     const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
-    for (const o of offers(lab, all)) buy(lab, o);
+    buyAll(lab, all);
     const before = lab.credit;
     const more = offers(lab, all).filter((o) => o.id.kind === "gene" && !o.owned);
     for (const o of more) buy(lab, o);
@@ -5295,7 +5329,7 @@ describe("nothing ordered is ever lost", () => {
     const lab = newLab();
     lab.credit = 1e6;
     const all = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
-    for (const o of offers(lab, all)) buy(lab, o);
+    buyAll(lab, all);
     const gene = offers(lab, all).find(
       (o) => o.id.kind === "gene" && !lab.stock.includes((o.id as { gene: bio.GeneId }).gene));
     expect(gene?.owned, "an unbuyable offer looked buyable").toBe(true);
@@ -5807,5 +5841,65 @@ describe("architecture is bought once and kept", () => {
     if (!offer) return;
     expect(buy(lab, offer).ok).toBe(true);
     expect(lab.startSites).toBe(before + 1);
+  });
+});
+
+describe("the ring closes, at every size", () => {
+  // Three separate angle computations existed and two still divided by SLOTS
+  // while the loop ran `used` times, so eight wedges were drawn at
+  // one-twenty-fourth spacing and the ring rendered as a quarter-circle.
+  // Round-tripping a centre back to its index did NOT catch that: slotAt and
+  // slotCentre agreed with each other while the drawing disagreed with both.
+  const geom = (used: number) =>
+    ({ cx: 200, cy: 300, rInner: 80, rOuter: 130, rot: 0, used });
+
+  it("consecutive slot centres are one full step apart", () => {
+    for (const used of [8, 10, 14, 16, 20, 24]) {
+      const g = geom(used);
+      const step = (Math.PI * 2) / used;
+      for (let i = 0; i + 1 < used; i++) {
+        const a = slotCentre(g, i);
+        const b = slotCentre(g, i + 1);
+        const angA = Math.atan2(a.y - g.cy, a.x - g.cx);
+        const angB = Math.atan2(b.y - g.cy, b.x - g.cx);
+        let d = angB - angA;
+        while (d < -Math.PI) d += Math.PI * 2;
+        while (d > Math.PI) d -= Math.PI * 2;
+        expect(d, `${String(used)} slots: gap between ${String(i)} and ${String(i + 1)}`)
+          .toBeCloseTo(step, 6);
+      }
+    }
+  });
+
+  it("the positions span the whole circle, not a fraction of it", () => {
+    for (const used of [8, 12, 16, 24]) {
+      const g = geom(used);
+      // Walking every position must return to where it started.
+      const first = slotCentre(g, 0);
+      const last = slotCentre(g, used - 1);
+      const angFirst = Math.atan2(first.y - g.cy, first.x - g.cx);
+      const angLast = Math.atan2(last.y - g.cy, last.x - g.cx);
+      let span = angLast - angFirst;
+      while (span < 0) span += Math.PI * 2;
+      const expected = ((used - 1) / used) * Math.PI * 2;
+      expect(span, `${String(used)} slots covered only ${(span / Math.PI * 180).toFixed(0)} degrees`)
+        .toBeCloseTo(expected, 5);
+    }
+  });
+
+  it("every direction lands on some position", () => {
+    // If the wedges spanned a fraction of the circle, most angles would map to
+    // a position that is not drawn there.
+    for (const used of [8, 16, 24]) {
+      const g = geom(used);
+      const hit = new Set<number>();
+      for (let a = 0; a < 360; a += 2) {
+        const rad = (a * Math.PI) / 180;
+        const s = slotAt(g, g.cx + Math.cos(rad) * 105, g.cy + Math.sin(rad) * 105);
+        if (s !== null) hit.add(s);
+      }
+      expect(hit.size, `${String(used)} slots: only ${String(hit.size)} reachable`)
+        .toBe(used);
+    }
   });
 });

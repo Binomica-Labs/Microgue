@@ -184,14 +184,34 @@ export const strainPrice = (level: number): number =>
  * DROPPED at inoculation -- credit spent on genes that never arrived, which is
  * the worst kind of bug because nothing anywhere said so.
  */
-export const STOCK_CAP = BIN_CAP - STARTING_PARTS;
+/**
+ * How many constructs a strain can usefully carry down.
+ *
+ * Derived from the CHROMOSOME the lab has paid for, not from the bin. The bin
+ * is about carrying; the chromosome is about using. A flat cap of eleven sold
+ * eleven constructs to a strain with five free ring positions -- credit spent
+ * on genes that sit in the bin for most of a run.
+ *
+ * Two spare, because swapping one out for a better roll is normal play. Still
+ * bounded by the bin, which has to hold them all at once.
+ */
+export function stockCap(startSites: number): number {
+  const ring = slotsFor(startSites, 0);
+  const usable = ring - VECTOR_PARTS + 2;
+  return Math.max(Math.min(usable, BIN_CAP - STARTING_PARTS), 3);
+}
+
+/** Positions the starting vector occupies on the ring: promoter, origin,
+ *  terminator. */
+const VECTOR_PARTS = 3;
 
 export function offers(lab: Lab, seen: readonly GeneId[]): Offer[] {
   const out: Offer[] = [];
   const known = [...new Set(seen)].filter((g) => g !== "ori");
   known.sort((a, b) => GENES[a].tier - GENES[b].tier || a.localeCompare(b));
 
-  const full = lab.stock.length >= STOCK_CAP;
+  const cap = stockCap(lab.startSites);
+  const full = lab.stock.length >= cap;
   for (const gene of known) {
     const have = lab.stock.includes(gene);
     out.push({
@@ -199,7 +219,7 @@ export function offers(lab: Lab, seen: readonly GeneId[]): Offer[] {
       name: GENES[gene].name,
       price: genePrice(gene),
       note: full && !have
-        ? `no room — a strain carries ${String(STOCK_CAP)} constructs`
+        ? `no room — this strain carries ${String(cap)} constructs`
         : GENES[gene].product,
       // A full manifest reads as owned: it cannot be ordered either way, and
       // showing it as affordable would invite spending on nothing.
@@ -243,9 +263,10 @@ export function buy(lab: Lab, offer: Offer): BuyResult {
       if (lab.stock.includes(offer.id.gene)) {
         return { ok: false, err: "already ordered" };
       }
-      if (lab.stock.length >= STOCK_CAP) {
+      if (lab.stock.length >= stockCap(lab.startSites)) {
         return { ok: false,
-                 err: `a strain carries ${String(STOCK_CAP)} constructs; drop one first` };
+                 err: `this strain carries ${String(stockCap(lab.startSites))} `
+                   + "constructs; a bigger chromosome carries more" };
       }
       lab.stock.push(offer.id.gene);
       break;

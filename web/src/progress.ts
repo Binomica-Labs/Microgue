@@ -8,7 +8,7 @@ import * as bio from "./biology.js";
 import { MODIFIERS } from "./parts.js";
 import { TRAITS, atpCeiling, expansionCost, type TraitId }
   from "./chromosome.js";
-import { STOCK_CAP, creditFor, recordRun } from "./lab.js";
+import { creditFor, recordRun, stockCap } from "./lab.js";
 import { writeLab } from "./lab_save.js";
 import { deleteSlot } from "./saves.js";
 import { quality } from "./allele.js";
@@ -49,8 +49,9 @@ export function t_die(_g: Game): void {
   // crosses between organisms, and the one way anything survives a death.
   if (_g.genome.traits.has("mobilisable")) {
     const aboard = [..._g.genome.carried()].filter((g) => g !== "ori");
-    const rescued = aboard.filter((_, i) => i % 2 === 0).slice(0, STOCK_CAP);
-    const room = Math.max(STOCK_CAP - _g.lab.stock.length, 0);
+    const cap = stockCap(_g.lab.startSites);
+    const rescued = aboard.filter((_, i) => i % 2 === 0).slice(0, cap);
+    const room = Math.max(cap - _g.lab.stock.length, 0);
     const taken = rescued.filter((g) => !_g.lab.stock.includes(g)).slice(0, room);
     if (taken.length > 0) {
       _g.lab.stock.push(...taken);

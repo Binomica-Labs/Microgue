@@ -29,6 +29,8 @@ interface Rect { x: number; y: number; w: number; h: number }
 interface Trace {
   rects: Rect[];
   texts: { x: number; y: number; text: string; size: number }[];
+  /** cx, cy, r, a0, a1 -- so a drawn ring can be measured, not inferred. */
+  arcs: number[][];
 }
 
 function stubCtx(t: Trace): CanvasRenderingContext2D {
@@ -61,6 +63,7 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
           const [x, y, w, h] = a as number[];
           t.rects.push({ x: x ?? 0, y: y ?? 0, w: w ?? 0, h: h ?? 0 });
         }
+        if (p === "arc") t.arcs.push(a as number[]);
         if (p === "fillText" || p === "strokeText") {
           const [text, x, y] = a as [string, number, number];
           t.texts.push({ x, y, text, size: parseFloat(font) || 10 });
@@ -134,7 +137,7 @@ describe("layout holds on every form factor", () => {
   beforeEach(() => { vi.resetModules(); });
 
   it.each(VIEWPORTS)("%s (%ix%i): every screen draws in bounds", async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [] };
     const g = await play(W, H, t);
     g.startRun(0);
     for (const screen of ["", "plasmid", "map", "notes", "research"]) {
@@ -150,7 +153,7 @@ describe("layout holds on every form factor", () => {
   });
 
   it.each(VIEWPORTS)("%s (%ix%i): buttons fit and stay tappable", async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [] };
     const g = await play(W, H, t);
     g.startRun(0);
     g.frame(50);
@@ -179,7 +182,7 @@ describe("layout holds on every form factor", () => {
   });
 
   it.each(VIEWPORTS)("%s (%ix%i): the close target is reachable", async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [] };
     const g = await play(W, H, t);
     g.startRun(0);
     for (const screen of ["plasmid", "map", "notes", "research"]) {
@@ -216,7 +219,7 @@ describe("the fog has no seams", () => {
       closePath(): void { /* */ }
       rect(...a: number[]): void { rects.push(a.length); }
     }
-    const t: Trace = { rects: [], texts: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [] };
     const g = await play(400, 800, t);
     // After play(), which replaces the globals wholesale.
     vi.stubGlobal("Path2D", RecordingPath);
@@ -237,7 +240,7 @@ describe("the fog has no seams", () => {
       closePath(): void { /* */ }
       rect(...a: number[]): void { seen.push(a); }
     }
-    const t: Trace = { rects: [], texts: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [] };
     const g = await play(400, 800, t);
     vi.stubGlobal("Path2D", RecordingPath);
     g.startRun(0);
@@ -250,5 +253,79 @@ describe("the fog has no seams", () => {
       expect(r[3] ?? 0, "a fog rect is exactly one tile tall, so it will seam")
         .toBeGreaterThan(tile);
     }
+  });
+});
+
+describe("the ring draws a whole circle", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("wedge arcs cover 360 degrees at every chromosome size", async () => {
+    // The angle maths agreeing with itself is not enough: `slotAt` and
+    // `slotCentre` agreed while the DRAWING disagreed with both, and the ring
+    // rendered as a quarter-circle. This measures what is actually drawn.
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(400, 800, t);
+    g.startRun(0);
+
+    for (const sites of [0, 4, 8, 16]) {
+      t.arcs.length = 0;
+      g.genome.integrated = sites;
+      g.openPlasmid(true);
+      g.frame(100 + sites);
+      g.openPlasmid(false);
+
+      const used = g.genome.usableSlots;
+      // The slot wedges are the arcs whose sweep is one step.
+      const step = (Math.PI * 2) / used;
+      const wedges = t.arcs.filter((a) =>
+        Math.abs(((a[4] ?? 0) - (a[3] ?? 0)) - step) < step * 0.35);
+      expect(wedges.length, `${String(sites)} sites: expected ${String(used)} wedges`)
+        .toBeGreaterThanOrEqual(used - 1);
+
+      // Their DISTRIBUTION, not their total. Summing the sweeps still reads
+      // 360 when eight wedges overlap inside a quarter-circle, which is
+      // exactly the bug -- the sum was never the thing that was wrong.
+      const norm = (a: number): number => ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const starts = wedges.map((a) => norm(a[3] ?? 0)).sort((x, y) => x - y);
+      let biggestGap = starts.length > 0
+        ? (starts[0] ?? 0) + Math.PI * 2 - (starts[starts.length - 1] ?? 0) : Math.PI * 2;
+      for (let i = 1; i < starts.length; i++) {
+        biggestGap = Math.max(biggestGap, (starts[i] ?? 0) - (starts[i - 1] ?? 0));
+      }
+      expect(biggestGap, `${String(sites)} sites: the wedges leave a `
+        + `${((biggestGap / Math.PI) * 180).toFixed(0)} degree gap`)
+        .toBeLessThan(step * 1.6);
+    }
+  });
+});
+
+describe("the fog stays cheap", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("builds a bounded number of rects, not one per tile", async () => {
+    // Run-length encoding is the whole reason this is affordable: a 96x96
+    // floor is 9216 tiles and the visible window alone is hundreds. A path is
+    // only cheap if what goes into it is.
+    let rects = 0;
+    class CountingPath {
+      moveTo(): void { /* */ }
+      lineTo(): void { /* */ }
+      arc(): void { /* */ }
+      closePath(): void { /* */ }
+      rect(): void { rects++; }
+    }
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(400, 800, t);
+    vi.stubGlobal("Path2D", CountingPath);
+    g.startRun(0);
+    g.frame(100);
+    expect(rects, "the fog drew nothing").toBeGreaterThan(0);
+
+    // Fully remembered is the worst case for run-length encoding, because
+    // visible and remembered then interleave along every row.
+    g.level.sight.seen.fill(1);
+    rects = 0;
+    g.frame(200);
+    expect(rects, `${String(rects)} rects for one frame of fog`).toBeLessThan(400);
   });
 });

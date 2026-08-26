@@ -1317,8 +1317,8 @@ describe("a mobilisable plasmid survives its host", () => {
       g.genome.put(free, { kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
     }
     g.die();
-    const { STOCK_CAP } = await import("../src/lab.js");
-    expect(g.lab.stock.length).toBeLessThanOrEqual(STOCK_CAP);
+    const { stockCap } = await import("../src/lab.js");
+    expect(g.lab.stock.length).toBeLessThanOrEqual(stockCap(g.lab.startSites));
     expect(new Set(g.lab.stock).size, "duplicates got in").toBe(g.lab.stock.length);
   });
 });
