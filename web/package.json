@@ -10,7 +10,8 @@
     "lint": "eslint src test",
     "guard": "node --input-type=module -e \"import{readdirSync}from'fs';const bad=['src','test'].flatMap(d=>readdirSync(d,{recursive:true}).filter(f=>/\\\\.(js|jsx|mjs|cjs)$/.test(String(f))));if(bad.length){console.error('hand-written JS found in source:',bad);process.exit(1)}console.log('guard: source is 100% TypeScript')\"",
     "verify": "npm run guard && npm run check && npm run lint && npm test",
-    "verify:clean": "node -e \"['public/microgue.js','public/sw.js','public/BUILD'].forEach(f=>{try{require('fs').unlinkSync(f)}catch{}})\" && npm run build"
+    "verify:clean": "node -e \"['public/microgue.js','public/sw.js','public/BUILD'].forEach(f=>{try{require('fs').unlinkSync(f)}catch{}})\" && npm run build",
+    "shots": "node tools/shoot.mjs public shots"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

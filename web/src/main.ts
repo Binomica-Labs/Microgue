@@ -31,6 +31,8 @@ import {
          type ResearchRow } from "./screens.js";
 import { installUpdater } from "./sw_client.js";
 import { BUILD, VERSION } from "./version.js";
+import { installConsole } from "./debug.js";
+import { x_export } from "./export.js";
 import { type ModifierId } from "./parts.js";
 import type { Part } from "./plasmid.js";
 import { addDrop, 
@@ -46,9 +48,7 @@ import { newLab, type Lab, type RunRecord } from "./lab.js";
 import { readLab, writeLab } from "./lab_save.js";
 import { buy, type Offer } from "./lab.js";
 import type { ShopRow } from "./screens.js";
-import { exportAnnotation, newRun, 
-         type RunState } from "./run.js";
-import { SOURCES, cached, fetchAll } from "./ncbi.js";
+import { newRun, type RunState } from "./run.js";
 import type { Status } from "./status.js";
 import { NAME_POOL, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
@@ -785,64 +785,10 @@ class Game {
   /** The field notebook. "Recording the bugs you find along the way." */
 
   /** Copy the plasmid to the clipboard as FASTA, with real sequences.
-   *
-   *  Fetches anything not already cached. A locus that cannot be retrieved is
-   *  emitted with its Entrez query rather than with invented bases. */
-  exportPlasmid(): void {
-    if (this.exporting) return;
-    const genes = this.genome.slots
-      .flatMap((p) => (p?.kind === "gene" && SOURCES[p.id] ? [p.id] : []));
-    const missing = genes.filter((g) => cached(g) === null);
+   *  The work is in export.ts -- fetching, formatting and the clipboard are a
+   *  feature, not lifecycle, and main.ts is only allowed to hold lifecycle. */
+  exportPlasmid(): void { x_export(this); }
 
-    if (missing.length === 0) { this.emitExport(); return; }
-
-    this.exporting = true;
-    this.toasts.push(
-      `Fetching ${String(missing.length)} sequence${missing.length === 1 ? "" : "s"} from NCBI…`,
-      "info", this.now);
-    void fetchAll(missing, undefined, (p) => {
-      if (!p.ok) {
-        this.toasts.push(`${p.gene}: no record returned.`, "warn", this.now);
-      }
-    }).then((got) => {
-      this.exporting = false;
-      if (got.size === 0 && missing.length > 0) {
-        this.toasts.push(
-          "NCBI unreachable. Exporting queries instead of sequences.", "warn", this.now);
-      }
-      this.emitExport();
-    }).catch(() => {
-      this.exporting = false;
-      this.toasts.push("Sequence fetch failed. Exporting queries instead.", "warn", this.now);
-      this.emitExport();
-    });
-  }
-
-  private emitExport(): void {
-    const seqs = new Map(this.genome.slots
-      .flatMap((p) => {
-        if (p?.kind !== "gene") return [];
-        const rec = cached(p.id);
-        return rec ? [[p.id, rec] as const] : [];
-      }));
-    const text = exportAnnotation(this.runName, this.dungeon.depth,
-                                  this.genome.slots, seqs);
-    const withSeq = seqs.size;
-    // The type says clipboard always exists; on http:// and older browsers it
-    // does not, so the check is real even though TypeScript disbelieves it.
-    const nav: { clipboard?: { writeText(s: string): Promise<void> } } = navigator;
-    if (nav.clipboard !== undefined) {
-      void nav.clipboard.writeText(text)
-        .then(() => {
-          this.toasts.push(
-            `Plasmid copied. ${String(withSeq)} sequence${withSeq === 1 ? "" : "s"} included.`,
-            "info", this.now);
-        })
-        .catch(() => { this.toasts.push("Clipboard refused. Nothing copied.", "warn", this.now); });
-    } else {
-      this.toasts.push("No clipboard available on this browser.", "warn", this.now);
-    }
-  }
 
   /** A lysate opened: its contents as slots, like any RPG container. */
 
@@ -892,6 +838,8 @@ function boot(): void {
       try { localStorage.setItem("microgue:updated", "1"); } catch { /* ignore */ }
     },
   });
+
+  installConsole(game);
 }
 boot();
 
