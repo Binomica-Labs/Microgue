@@ -34,7 +34,7 @@ import { FOOTPRINT_TILES, centreOf, covers, stretchOf, tilesOf }
 import { distanceTo, nextAction } from "../src/pursuit.js";
 import { WEAPONS, lineOfSight } from "../src/weapons.js";
 import { completeness, exportAnnotation, newRun, notebook, recordLocus,
-         recordSighting, resynthesise } from "../src/run.js";
+         recordSighting } from "../src/run.js";
 import { SOURCES, cached, fetchAll, fetchOne, parseFasta, parseFirstId }
   from "../src/ncbi.js";
 import { launch, stepClouds, stepPackets, type Cloud, type Packet }
@@ -2963,24 +2963,6 @@ describe("ranged weapons", () => {
 });
 
 describe("the run, as a roguelike", () => {
-  it("death keeps the loci the lineage has had longest", () => {
-    const carried: bio.GeneId[] = ["ori", "psbA", "cbbL", "katG", "narG", "nosZ", "mtrC"];
-    const kept = resynthesise(carried);
-    expect(kept).not.toContain("ori");            // the origin is always fresh
-    expect(kept).toHaveLength(3);                 // half of six real loci
-    expect(kept).toEqual(["psbA", "cbbL", "katG"]);
-  });
-
-  it("resynthesis is stable, so a lineage does not thrash", () => {
-    const carried: bio.GeneId[] = ["ori", "psbA", "cbbL", "katG", "narG"];
-    expect(resynthesise(carried)).toEqual(resynthesise(carried));
-  });
-
-  it("a first death from a bare plasmid loses nothing it did not have", () => {
-    expect(resynthesise(["ori"])).toEqual([]);
-    expect(resynthesise([])).toEqual([]);
-  });
-
   it("the notebook records each organism once, in column order", () => {
     const run = newRun();
     expect(recordSighting(run, "desulfovibrio")).toBe(true);

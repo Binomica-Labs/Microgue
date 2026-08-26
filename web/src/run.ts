@@ -1,18 +1,16 @@
 // Run state: the roguelike layer.
 //
-// From the original design: "If your character dies, you get resynthesized
-// with some of the genes you acquired in the previous run so you can quickly
-// get to where you left off." So death ends the run and costs you, but it is
-// not a wipe -- the lineage carries part of its genome forward, which is what
-// a culture actually does.
+// The original design said "If your character dies, you get resynthesized with
+// some of the genes you acquired in the previous run." That was built and then
+// deliberately replaced: resynthesising in place made death a setback rather
+// than an ending. What carries forward now is what a LAB keeps -- credit, the
+// notebook, the ledger -- see lab.ts, and the `mobilisable` trait in
+// chromosome.ts is the one way loci themselves survive a death.
 
 import type { Part } from "./transcription.js";
 import { GENES, MICROBES, stratum, type GeneId } from "./biology.js";
 import { SOURCES, type Record_ } from "./ncbi.js";
 import { MODIFIERS, PROMOTERS, TERMINATORS } from "./parts.js";
-
-/** Fraction of acquired loci that survive resynthesis. */
-export const CARRYOVER = 0.5;
 
 export interface RunState {
   /** Deepest stratum reached this lineage, which is the score. */
@@ -35,18 +33,6 @@ export function recordSighting(run: RunState, microbeId: string): boolean {
 
 export function recordLocus(run: RunState, gene: GeneId): void {
   if (!run.library.includes(gene)) run.library.push(gene);
-}
-
-/**
- * Which loci survive death. Deterministic given the order they were acquired,
- * so a run is reproducible and the loss is legible rather than arbitrary: the
- * earliest-acquired half is kept, because that is what the lineage has had
- * longest to stabilise.
- */
-export function resynthesise(carried: readonly GeneId[]): GeneId[] {
-  const real = carried.filter((g) => g !== "ori");
-  const keep = Math.floor(real.length * CARRYOVER);
-  return real.slice(0, keep);
 }
 
 export interface Sighting {
