@@ -92,35 +92,69 @@ fi
 #
 # `gh run watch` with no argument opens a picker, which needs a keystroke and
 # can list a run from an earlier push. Resolving the id from the commit SHA
-# picks the right one every time and needs nothing from you. The run does not
-# exist the instant the push returns, so poll briefly for it.
+# picks the right one every time and needs nothing from you.
+#
+# The run does not exist the instant the push returns, and it can take much
+# longer than a few seconds when another Pages run is still in flight -- the
+# workflow uses a concurrency group, so a new run may not be registered until
+# the previous one lets go. Twenty seconds of silent polling was not enough,
+# and the script then printed the same cheerful "done" as a green deploy.
 if command -v gh >/dev/null 2>&1; then
   # Full SHA: `gh run list --commit` will not resolve an abbreviated one.
   sha="$(git rev-parse HEAD)"
+  short="$(git rev-parse --short HEAD)"
   run=""
-  i=0
-  while [ $i -lt 20 ]; do
+  waited=0
+  limit=90
+  while [ "$waited" -lt "$limit" ]; do
     run="$(gh run list --commit "$sha" --limit 1 \
              --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
     [ -n "$run" ] && break
-    i=$((i + 1))
-    printf '\r==> waiting for the run to appear (%ss)' "$i"
-    sleep 1
+    waited=$((waited + 2))
+    printf '\r==> waiting for a run on %s (%ss of %ss)' "$short" "$waited" "$limit"
+    sleep 2
   done
-  if [ $i -gt 0 ]; then printf '\r\033[K'; fi
+  [ "$waited" -gt 0 ] && printf '\r\033[K'
+
+  # Fall back to the newest run on this branch. If CI is queued behind another
+  # deploy the commit lookup can stay empty while a run for this push is
+  # genuinely pending; watching the newest is better than watching nothing, and
+  # it says plainly that it is a guess.
+  if [ -z "$run" ]; then
+    # ONE call for both fields. Two calls can land either side of a new run
+    # appearing, and then the id and the SHA describe different runs -- which
+    # is exactly the mistake this fallback exists to avoid making.
+    newest="$(gh run list --branch "$(git rev-parse --abbrev-ref HEAD)" --limit 1 \
+                --json databaseId,headSha \
+                --jq '.[0] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)"
+    run="${newest%% *}"
+    head_sha="${newest##* }"
+    if [ -n "$run" ] && [ "$head_sha" = "$sha" ]; then
+      echo "==> run for $short registered late; watching $run"
+    elif [ -n "$run" ]; then
+      echo "==> NO run for $short after ${limit}s."
+      echo "==> newest run on this branch is for ${head_sha:0:7}, which is NOT this push."
+      echo "==> check: gh run list --limit 5"
+      run=""
+    fi
+  fi
 
   if [ -z "$run" ]; then
-    echo "==> no workflow run found for $(git rev-parse --short HEAD)"
+    echo "==> NOT WATCHED: no workflow run appeared for $short in ${limit}s."
+    echo "==> the push succeeded; CI may be queued, or the workflow may not"
+    echo "==> have triggered at all. check with: gh run list --limit 5"
+    echo "==> done pushing, but the deploy is UNVERIFIED."
+    exit 2
+  fi
+
+  echo "==> watching run $run"
+  if gh run watch "$run" --exit-status --interval 3; then
+    echo "==> deploy green"
   else
-    echo "==> watching run $run"
-    if gh run watch "$run" --exit-status --interval 3; then
-      echo "==> deploy green"
-    else
-      echo "==> deploy FAILED. failing step log:"
-      gh run view "$run" --log-failed 2>/dev/null | tail -40
-      echo "==> (sync.sh already updated itself, so a fix can be pushed)"
-      exit 1
-    fi
+    echo "==> deploy FAILED. failing step log:"
+    gh run view "$run" --log-failed 2>/dev/null | tail -40
+    echo "==> (sync.sh already updated itself, so a fix can be pushed)"
+    exit 1
   fi
 fi
 

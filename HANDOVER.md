@@ -1219,6 +1219,31 @@ screen rather than like an old build.
 Shown on the splash screen (`v0.45 · 7c0c03b`), in the notebook header, and in
 the toast after a service worker update.
 
+## sync.sh: an unwatched deploy must not read as a green one
+
+Reported: "I did not see the usual job watcher". The script polled for the run
+for 20 seconds, gave up SILENTLY, and then printed the same
+"done. the app updates itself on next resume." it prints after a green deploy.
+The push had worked and the deploy was simply unverified, but nothing said so.
+
+Three changes:
+
+* Poll for 90s, not 20, with the wait visible. A Pages workflow uses a
+  concurrency group, so a new run may not register until the previous one lets
+  go -- twenty seconds is short when a deploy is already in flight.
+* Fall back to the newest run on the branch, and CHECK ITS SHA. If it belongs
+  to a different push it says so and refuses to watch it, because watching the
+  wrong run is worse than watching none.
+* Exit 2 and say "the deploy is UNVERIFIED" when nothing was watched. The old
+  message was indistinguishable from success.
+
+The fallback resolves the id and the SHA in ONE `gh` call. Two calls can land
+either side of a new run appearing, and then the id and the SHA describe
+different runs -- exactly the mistake the fallback exists to avoid.
+
+All four paths were exercised against a stub `gh`: immediate, late, wrong-run,
+and red.
+
 ## sync.sh
 
 One command: `~/sync.sh "message"`. It finds the newest tarball in Downloads by
