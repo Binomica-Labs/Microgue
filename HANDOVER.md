@@ -2160,6 +2160,85 @@ Every one of these is now a test that fails without the fix. Each was checked
 by running the new test against the old tree first, because the alternative is
 a test that cannot fail -- which this codebase has shipped before.
 
+## There is a browser in the loop now
+
+`npm run shots`. Headless Chrome renders the shipped bundle at four real
+viewports with real device pixel ratios, drives it through six scenes, and
+writes PNGs alongside the game state each was taken in. It exits non-zero if
+any scene raised an error toast.
+
+Zero dependencies, deliberately. Node 22 has `WebSocket` and `fetch` built in,
+so `tools/shoot.mjs` speaks CDP straight to Chrome rather than pulling in
+Playwright and a few hundred megabytes of browsers to take a screenshot. It
+serves `public/` itself, launches Chrome with a throwaway profile, and cleans
+both up. It drives the game through the `microgue` console handle, so what it
+photographs is the real game and not a harness reimplementing half of it.
+
+**Ten minutes after it existed it found four bugs**, all of them live in
+whatever is currently deployed, all of them past a green suite:
+
+* The status line was never measured. "before dawn" rendered as "before da"
+  on every phone.
+* The log was wrapped at `0.86 * size` and drawn at `size` -- the operon
+  readout above it sets that font and the wrap ran before the log set its own
+  back. A 16% underestimate on every wrapped line.
+* The log was also wrapped from the LEFT EDGE while it is drawn at `barX`,
+  indented past the Winogradsky gauge. Too generous by exactly that gauge.
+* `drawHeader`, shared by the notebook, the bench and the lab, drew its
+  subtitle unbounded. "0 ATP · 0 modifiers held · strain L1 · 0 bonus slots ·
+  +0.0 kb headroom" is 62 characters.
+
+**Why the layout suite missed all of them.** `scaling.test.ts` filtered on
+`x.x > W + 4` -- where a string STARTS. Every one of these is left-aligned and
+starts comfortably inside the frame. It measures the EXTENT now, and caught
+all four plus two more on the first run. The lesson is the familiar one in
+this document: the assertion has to be the thing you mean, and "is it on
+screen" is not "does it fit".
+
+Use it after anything that touches layout, text or sprites. It is not a
+substitute for the golden -- the golden catches a one-pixel move that a
+screenshot never would -- it catches the class the golden cannot, which is
+everything the trace records faithfully and wrongly.
+
+## Sprites: what a serious attempt found
+
+The art was seeded by rasterising `shapes.ts` and that pass **threw the roles
+away**. 79% of every visible pixel in the roster is one flat body colour;
+seven sprites carry no shading pixel at all. The morphologies themselves are
+good -- Nitzschia's raphe and striae, Thiobacillus's deposited S0, Beggiatoa's
+granules are all there as `dark` and `hi` shapes that never reached the grids.
+
+**A sprite that rotates cannot carry directional light.** `facing: "rotate"`
+does `ctx.rotate(heading)` on the whole image, so a baked highlight points
+wherever the cell happens to be swimming. That is not a detail, it is the
+explanation for the whole problem:
+
+    facing: none     5 sprites   34.0% mean detail
+    facing: rotate  15 sprites    4.9% mean detail
+
+The five that never rotate are the five that look good, because whoever drew
+them could compose freely. The other fifteen were left flat. Rotating sprites
+need rim definition and interior ANATOMY -- granules, septa, inclusions --
+which is rotation-invariant and also the more diagnostic choice.
+
+**Only four were re-rasterised, and that is the honest result.** Thin
+morphologies -- the spiral, the vibrio's curve, Geobacter's pili -- cannot be
+quantised to a 16px grid with four hard colours without breaking up. Seven
+passes at threshold, rim rule and zoom fit: overall detail went from 20.7% to
+52.5% **and the art got worse**, because the metric was counting rim while the
+pigment was being eaten. That is worth stating plainly, because it is the
+strongest argument in this document against a certain kind of confidence:
+**there is no metric for whether a sprite looks right.** You have to render it
+and look at it, which is what `npm run shots` is for. The remaining seventeen
+need a hand, not a better algorithm.
+
+**16 vs 24 was settled by measurement, not preference.** A tile is 24.6-63 CSS
+px, so at 2x DPR a medium organism is drawn into 45-116 device pixels and 16px
+art is magnified 2.8-7.3x. There is room for 24. But rendered side by side at
+true device size, 16-shaded and 24-shaded are nearly indistinguishable; the
+gain shows in the editing grid, not on the screen. Shading is worth roughly
+three times what resolution is. Stay at 16.
+
 ## Next
 
 The old list here was written around v0.45 and never revised: items 1 and 2 --
