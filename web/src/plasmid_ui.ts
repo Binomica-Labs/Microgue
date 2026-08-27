@@ -286,19 +286,22 @@ export function drawRing(
 
   // Operon arcs, drawn under the slots so a transcript reads as one sweep.
   //
-  // The span is measured from the SLOTS the transcript actually occupies. It
-  // used to be `(genes.length + 1) * step` from the promoter, which assumes
-  // the operon is promoter-then-genes with nothing between and nothing after:
-  // it silently excluded the terminator that closes the transcript, and only
-  // appeared to include one when the arithmetic happened to reach that far.
-  // Pull a terminator out and put it back and the highlight would change,
-  // which is what made it look like a glitch rather than a rule.
+  // PER SLOT, faded by the flow that reaches it. A single bar at one alpha
+  // said "all of this is transcribed" about a run whose genes past a leaky
+  // hairpin sit at 2.5% while the ones in front of it sit at 50 -- so a ring
+  // showed six bright CDSs and a power figure that three of them had barely
+  // contributed to. The attenuation was always in the model; it was not on
+  // screen, and the ring is where the model is supposed to be legible.
+  //
+  // The span runs from the promoter to the terminator that closes the
+  // transcript. It used to be `(genes.length + 1) * step`, which assumes
+  // promoter-then-genes with nothing between and nothing after, so the hairpin
+  // fell outside and only looked included when the arithmetic reached it.
   for (const op of p.operons()) {
     const last = op.genes[op.genes.length - 1];
     if (!last) continue;
     let end = last.slot;
-    // Walk on to the hairpin that ends it. A gap or the next promoter ends
-    // the sweep instead, and neither belongs inside it.
+    // A gap or the next promoter ends the sweep; neither belongs inside it.
     for (let k = 1; k <= n; k++) {
       const at = (end + k) % n;
       const nxt = p.at(at);
@@ -306,17 +309,27 @@ export function drawRing(
       if (nxt.kind === "terminator") { end = at; break; }
     }
     const span = (((end - op.promoter) % n) + n) % n + 1;
-    const a0 = angleOf(op.promoter);
-    const a1 = a0 + span * step;
-    // A colour that belongs to no PART. This was #ffd166, which is exactly the
-    // promoter's own colour, so the annotation and the thing it annotates were
-    // indistinguishable. Magenta sits about 40 degrees from every saturated
-    // colour on the ring and reads as a mark rather than as material.
-    ctx.strokeStyle = `rgba(240,75,144,${0.3 + 0.5 * Math.min(op.output / 1.4, 1)})`;
+    const flowAt = new Map(op.genes.map((x) => [x.slot, x.flow]));
+
     ctx.lineWidth = band + 8 * o.u;
-    ctx.beginPath();
-    ctx.arc(g.cx, g.cy, mid, a0 + 0.01, a1 - 0.01);
-    ctx.stroke();
+    let flow = 1;
+    for (let k = 0; k < span; k++) {
+      const at = (op.promoter + k) % n;
+      flow = flowAt.get(at) ?? flow;
+      // Never invisible: a faint arc still says "in the transcript", which is
+      // a different statement from "not transcribed at all".
+      const alpha = 0.12 + (0.18 + 0.5 * Math.min(op.output / 1.4, 1))
+        * Math.min(Math.max(flow, 0), 1);
+      // A colour that belongs to no PART. This was #ffd166, exactly the
+      // promoter's own colour, so the annotation and the thing it annotates
+      // were indistinguishable. Magenta sits about 40 degrees from every
+      // saturated colour on the ring.
+      ctx.strokeStyle = `rgba(240,75,144,${alpha.toFixed(3)})`;
+      const a0 = angleOf(at);
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, mid, a0 + 0.01, a0 + step - 0.01);
+      ctx.stroke();
+    }
   }
 
   for (let i = 0; i < n; i++) {

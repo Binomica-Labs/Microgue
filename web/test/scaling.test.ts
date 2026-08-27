@@ -335,31 +335,36 @@ describe("the fog has no seams", () => {
 });
 
 describe("the operon highlight says what it means", () => {
-  /** Record the ring's arcs with their sweep and the colour in force. */
+  /** Record the ring's arcs with the colour and line width in force. */
   function arcs(p: Plasmid) {
-    const out: { sweep: number; colour: string }[] = [];
+    const out: { colour: string; width: number }[] = [];
     let colour = "";
+    let width = 0;
     const ctx = new Proxy({} as CanvasRenderingContext2D, {
       get: (_t, k: string) => {
         if (["strokeStyle", "fillStyle", "font", "textAlign", "textBaseline"].includes(k)) {
           return colour;
         }
-        return (...a: unknown[]) => {
-          if (k === "arc") {
-            out.push({ sweep: (a[4] as number) - (a[3] as number), colour });
-          }
+        if (k === "lineWidth") return width;
+        return () => {
+          if (k === "arc") out.push({ colour, width });
           if (k === "measureText") return { width: 20 };
           return undefined;
         };
       },
       set: (_t, k: string, v: unknown) => {
         if (k === "strokeStyle") colour = String(v);
+        if (k === "lineWidth") width = Number(v);
         return true;
       },
     });
     drawRing(ctx, { cx: 200, cy: 200, rInner: 90, rOuter: 130, used: p.usableSlots, rot: 0 }, p,
              { u: 1, depth: 1, dragFrom: null, dragXY: null, selected: null });
-    return out;
+    // The transcript band is drawn wider than the slot band, which is how it
+    // sits UNDER the slots. That is what identifies it -- not its colour,
+    // which is the thing the second test is about.
+    const widest = Math.max(...out.map((a) => a.width));
+    return { all: out, operon: out.filter((a) => a.width === widest) };
   }
 
   const laid = (): Plasmid => {
@@ -377,33 +382,51 @@ describe("the operon highlight says what it means", () => {
     // the operon fell outside it, and only appeared to be inside when the
     // arithmetic happened to reach that far -- so pulling a terminator out and
     // putting it back changed the highlight, which reads as a glitch.
-    const p = laid();
-    const step = (Math.PI * 2) / p.usableSlots;
-    const wide = arcs(p).filter((a) => a.sweep > step * 1.5);
-    expect(wide.length, "no operon arc was drawn at all").toBeGreaterThan(0);
-    expect(wide[0]!.sweep / step, "the arc stops short of the terminator")
-      .toBeGreaterThan(2.5);
+    const { operon } = arcs(laid());
+    expect(operon.length, "the highlight does not cover promoter, gene and terminator")
+      .toBe(3);
   });
 
   it("is a colour no PART uses", () => {
     // It was #ffd166, which is exactly a promoter's own colour, so the
     // annotation and the thing it annotated were indistinguishable.
-    const p = laid();
-    const step = (Math.PI * 2) / p.usableSlots;
-    const all = arcs(p);
-    const operon = all.filter((a) => a.sweep > step * 1.5).map((a) => a.colour);
-    expect(operon.length).toBeGreaterThan(0);
+    const { operon } = arcs(laid());
     const parts = new Set(Object.values(PATHWAY_COLOUR).map((c) => c.toLowerCase()));
     parts.add("#ffd166");                     // promoter
     parts.add("#8a8f96");                     // terminator
-    for (const c of operon) {
-      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
-      expect(m, `operon colour ${c} is not rgba`).not.toBeNull();
+    for (const a of operon) {
+      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(a.colour);
+      expect(m, `operon colour ${a.colour} is not rgba`).not.toBeNull();
       const hex = "#" + [1, 2, 3].map((i) =>
         Number(m?.[i] ?? 0).toString(16).padStart(2, "0")).join("");
       expect(parts.has(hex), `the operon highlight is ${hex}, which is a part colour`)
         .toBe(false);
     }
+  });
+
+  it("fades along the transcript, so attenuation is visible", () => {
+    // A single bar at one alpha said "all of this is transcribed" about a run
+    // whose genes past a leaky hairpin express at 2.5% while the ones in front
+    // of it express at 50. Six bright wedges, and three of them contributing
+    // almost nothing to the power figure beside them.
+    const p = new Plasmid();
+    p.integrated = 4;
+    for (let i = 0; i < p.slots.length; i++) p.put(i, null);
+    p.put(0, { kind: "promoter", id: "j23106" });
+    p.put(1, { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE });
+    p.put(2, { kind: "terminator", id: "rrnbt1" });
+    p.put(3, { kind: "gene", id: "katG", level: 1, mods: [], allele: WILD_TYPE });
+    p.put(4, { kind: "terminator", id: "rrnbt1" });
+
+    const alpha = (c: string): number => Number(/,\s*([\d.]+)\)/.exec(c)?.[1] ?? 0);
+    const { operon } = arcs(p);
+    expect(operon.length, "the transcript was not drawn across its whole span")
+      .toBeGreaterThanOrEqual(4);
+    const first = alpha(operon[1]?.colour ?? "");     // the gene at the promoter
+    const past = alpha(operon[3]?.colour ?? "");      // the gene past the hairpin
+    expect(first, "no alpha recorded").toBeGreaterThan(0);
+    expect(past, "a gene past a 90% terminator is drawn as brightly as one in front of it")
+      .toBeLessThan(first * 0.6);
   });
 });
 
