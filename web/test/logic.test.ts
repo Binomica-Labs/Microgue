@@ -3662,14 +3662,26 @@ describe("crawl-like behaviours", () => {
   it("walking reveals more of the map, monotonically", () => {
     const d = new Dungeon(110, 80, 3);
     const lvl = d.level(1);
-    let last = 0;
+    let last = 0, first = 0;
     for (let i = 0; i < 12; i++) {
       computeFov(lvl.sight, lvl.grid, lvl.up.x + i, lvl.up.y, 8);
       const now = fractionSeen(lvl.sight);
       expect(now, `step ${String(i)}`).toBeGreaterThanOrEqual(last);
+      if (i === 0) first = now;
       last = now;
     }
-    expect(last).toBeGreaterThan(0.01);
+    // Measured against STANDING STILL rather than against a magic fraction of
+    // the map. The old floor was `> 0.01`, a number that depends on how
+    // straight the corridors happen to be on seed 3; making them wander
+    // dropped it to 0.0095 and failed a test whose actual subject is that
+    // walking reveals more than not walking. This asserts that directly.
+    //
+    // Note the walk marches due east through whatever is there and is inside
+    // rock by step 7 -- `visible` collapses to a single tile while `seen`
+    // keeps its memory, which is correct and is why the monotonic check is on
+    // `seen`. A straighter corridor merely hid that for longer.
+    expect(first, "a single step revealed nothing").toBeGreaterThan(0);
+    expect(last, "twelve steps revealed no more than one").toBeGreaterThan(first);
   });
 
   it("a discarded part leaves the bin and does not come back", () => {

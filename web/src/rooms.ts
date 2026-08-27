@@ -67,14 +67,51 @@ const carveDisc = (g: Grid, cx: number, cy: number, r: number): Point[] => {
   return tiles;
 };
 
-/** A straight corridor, carved one tile wide. */
-function carveCorridor(g: Grid, a: Point, b: Point): void {
+/**
+ * A corridor that wanders.
+ *
+ * This used to walk all the way along x and then all the way along y: a pure
+ * L, one tile wide, and between distant rooms that is a ruler-straight passage
+ * fifty tiles long. No amount of contouring at the render layer rescues that
+ * -- the silhouette was being polished over a mask made of straight lines.
+ *
+ * Now it still always closes the distance, but it weaves: while both axes have
+ * ground to cover it picks between them at random, which produces a ragged
+ * diagonal instead of a right angle, and once one axis is done it wanders
+ * perpendicular a fraction of the time. The bias is strong enough that it
+ * always converges -- and the guard is still there.
+ *
+ * The brush varies too. Most steps carve one tile; some open a small pocket,
+ * which is where the nooks come from.
+ */
+function carveCorridor(g: Grid, a: Point, b: Point, rng: Rng): void {
   let x = a.x, y = a.y;
   let guard = 0;
+  const dig = (px: number, py: number): void => {
+    if (px > 0 && py > 0 && px < g.w - 1 && py < g.h - 1) g.set(px, py, FLOOR);
+  };
   while ((x !== b.x || y !== b.y) && guard++ < 4000) {
-    if (x !== b.x) x += Math.sign(b.x - x);
-    else if (y !== b.y) y += Math.sign(b.y - y);
-    if (x > 0 && y > 0 && x < g.w - 1 && y < g.h - 1) g.set(x, y, FLOOR);
+    const dx = Math.sign(b.x - x), dy = Math.sign(b.y - y);
+    const r = rng.next();
+    if (dx !== 0 && dy !== 0) {
+      // Both axes to go: weave between them rather than finishing one first.
+      if (r < 0.5) x += dx; else y += dy;
+    } else if (dx !== 0) {
+      // One axis left. Wander off it sometimes, but mostly close the gap.
+      if (r < 0.82) x += dx;
+      else y += rng.next() < 0.5 ? 1 : -1;
+    } else {
+      if (r < 0.82) y += dy;
+      else x += rng.next() < 0.5 ? 1 : -1;
+    }
+    x = Math.min(Math.max(x, 1), g.w - 2);
+    y = Math.min(Math.max(y, 1), g.h - 2);
+    dig(x, y);
+    // A pocket every so often: a corridor of constant width is still a tube.
+    if (rng.next() < 0.22) {
+      dig(x + 1, y); dig(x, y + 1);
+      if (rng.next() < 0.4) { dig(x + 1, y + 1); dig(x - 1, y); }
+    }
   }
 }
 
@@ -150,7 +187,7 @@ export function carveRooms(g: Grid, rng: Rng, plan: RoomPlan): Room[] {
   // room with it.
   for (let i = 1; i < rooms.length; i++) {
     const a = rooms[i - 1], b = rooms[i];
-    if (a && b) carveCorridor(g, { x: a.cx, y: a.cy }, { x: b.cx, y: b.cy });
+    if (a && b) carveCorridor(g, { x: a.cx, y: a.cy }, { x: b.cx, y: b.cy }, rng);
   }
 
   // Then hang the chain off the largest existing cave, so the rooms and the
@@ -160,7 +197,7 @@ export function carveRooms(g: Grid, rng: Rng, plan: RoomPlan): Room[] {
     const own = new Set(rooms.flatMap((rm) =>
       rm.tiles.map((t) => `${String(t.x)},${String(t.y)}`)));
     const link = nearestFloor(g, { x: first.cx, y: first.cy }, own);
-    if (link) carveCorridor(g, { x: first.cx, y: first.cy }, link);
+    if (link) carveCorridor(g, { x: first.cx, y: first.cy }, link, rng);
   }
   return rooms;
 }
