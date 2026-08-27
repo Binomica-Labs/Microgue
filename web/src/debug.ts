@@ -27,6 +27,8 @@ export function installConsole(game: Game): void {
       hp: game.player.hp, maxhp: game.player.maxhp,
       atp: Math.round(game.player.atp), atpMax: game.player.atpMax,
       strain: game.genome.strain, slots: game.genome.usableSlots,
+      zoom: Math.round(game.zoom * 1000) / 1000,
+      tilesAcross: Math.round(Math.min(innerWidth, innerHeight) / (32 * game.zoom)),
       deepest: game.run.deepest, catalogued: game.run.bestiary.length,
       dead: game.dead, won: game.won,
       toasts: game.toasts.all().map((t) => `${t.level}: ${t.text}`),

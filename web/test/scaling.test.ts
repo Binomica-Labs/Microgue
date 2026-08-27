@@ -168,6 +168,32 @@ describe("layout holds on every form factor", () => {
     }
   });
 
+  it("the world shows the same amount on every platform", async () => {
+    // This is a fairness rule, not a layout one. The default zoom used to show
+    // 13 tiles across the short axis on a coarse pointer and 30 on a fine one
+    // -- 2.3x per axis, about five times the area. More of the level, more
+    // creatures, more targets within reach of a tap. And sight radius reaches
+    // 11, so the lit disc is 23 tiles across: a phone could not show even the
+    // player's own field of view.
+    const seen: number[] = [];
+    for (const [name, W, H] of VIEWPORTS) {
+      for (const coarse of [true, false]) {
+        const t: Trace = { rects: [], texts: [], arcs: [] };
+        vi.stubGlobal("matchMedia", () => ({ matches: coarse }));
+        const g = await play(W, H, t);
+        g.startRun(0);
+        g.frame(50);
+        const across = Math.min(W, H) / (32 * g.zoom);
+        expect(across, `${name}: short axis hides part of the lit disc`)
+          .toBeGreaterThanOrEqual(23);
+        seen.push(across);
+      }
+    }
+    // Identical whatever the pointer, and the same on every viewport.
+    expect(Math.max(...seen) - Math.min(...seen),
+           "the visible world differs between platforms").toBeLessThan(0.01);
+  });
+
   it.each(VIEWPORTS)("%s (%ix%i): overlay content is centred, not shoved left", async (name, W, H) => {
     // `u` comes off the SHORTER dimension, so on a 2000x1200 desktop it is
     // nearly three, and a phone-first single column was drawn at triple size

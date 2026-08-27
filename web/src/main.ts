@@ -65,6 +65,10 @@ function clonePart(p: Part | null): Part | null {
   return p.kind === "gene" ? { ...p, mods: [...p.mods] } : { ...p };
 }
 
+/** Tiles across the SHORT viewport axis at the default zoom. Sight radius
+ *  reaches 11, so the lit disc is 23 across; this fits it on every device. */
+export const TILES_ACROSS = 26;
+
 /** World tile size in CSS pixels before zoom. */
 const TILE = 32;
 
@@ -236,7 +240,7 @@ class Game {
     this.player.ax = p.x; this.player.ay = p.y;
     this.cursor = { x: p.x, y: p.y };
     this.path = null; this.walk = null;
-    this.zoom = this.tileZoom();
+    this.zoom = this.tileZoom() * this.settings.zoom;
     this.spotted.clear();
     this.look();
 
@@ -658,10 +662,39 @@ class Game {
     return lines;
   }
 
+  /**
+   * The default zoom, and it is the SAME on every platform.
+   *
+   * This used to show 13 tiles across the short axis on a coarse pointer and
+   * 30 on a fine one -- 2.3x per axis, about five times the area. That is not
+   * an ergonomic difference, it is an information advantage: more of the level
+   * on screen, more creatures visible, more targets you can reach out and tap.
+   * A phone player could not even see their own field of view, since sight
+   * radius runs to 11 and the lit disc is 23 tiles across against a 13-tile
+   * viewport.
+   *
+   * So the short axis fits the whole lit disc with a margin, whatever the
+   * device. Normalising on the SHORT axis also keeps the total visible area
+   * close across aspect ratios -- a tall phone sees further vertically, a wide
+   * desktop further horizontally, and the two come out within about 10%.
+   *
+   * Ergonomics is handled where it belongs: buttons have their own 44px floor,
+   * and the zoom controls are there for anyone who wants a closer look.
+   */
+  /** Change zoom AND remember it. The default is recomputed per viewport, so
+   *  the preference is stored as a multiple of it -- otherwise zooming in on a
+   *  phone would come back as a different framing on a desktop. */
+  setZoom(z: number): void {
+    const next = Math.min(Math.max(z, 0.3), 8);
+    this.zoom = next;
+    const base = this.tileZoom();
+    this.settings = { ...this.settings,
+                      zoom: Math.min(Math.max(base > 0 ? next / base : 1, 0.35), 4) };
+  }
+
   tileZoom(): number {
     const short = Math.min(innerWidth, innerHeight);
-    const coarse = matchMedia("(pointer: coarse)").matches;
-    return Math.max(short / ((coarse ? 13 : 30) * TILE), 0.3);
+    return Math.max(short / (TILES_ACROSS * TILE), 0.3);
   }
 
   resize(): void {
@@ -675,7 +708,7 @@ class Game {
     this.canvas.style.width = `${innerWidth}px`;
     this.canvas.style.height = `${innerHeight}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.zoom = this.tileZoom();
+    this.zoom = this.tileZoom() * this.settings.zoom;
   }
 
   frame(t: number): void {

@@ -330,7 +330,7 @@ export function i_onKey(_g: Game, e: KeyboardEvent): void {
           break;
         }
         case "zoom":
-          _g.zoom = Math.min(Math.max(_g.zoom * act.factor, 0.3), 8);
+          _g.setZoom(_g.zoom * act.factor);
           break;
         case "togglePlasmid": _g.openPlasmid(true); break;
         case "closePlasmid": _g.openPlasmid(false); break;
@@ -388,7 +388,7 @@ export function i_bindPinch(_g: Game): void {
       const [a, b] = [...pts.values()] as [Point, Point];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (who === "world") {
-        _g.zoom = Math.min(Math.max(z0 * (d / d0), 0.3), 8);
+        _g.setZoom(z0 * (d / d0));
       } else if (_g.view) {
         // Zoom about the midpoint between the fingers, so what you are
         // pinching stays under them.
@@ -484,8 +484,8 @@ export function i_press(_g: Game, id: string): void {
         break;
       case "down": _g.descend(); break;
       case "up": _g.ascend(); break;
-      case "zoomIn": _g.zoom = Math.min(_g.zoom * 1.25, 8); break;
-      case "zoomOut": _g.zoom = Math.max(_g.zoom / 1.25, 0.3); break;
+      case "zoomIn": _g.setZoom(_g.zoom * 1.25); break;
+      case "zoomOut": _g.setZoom(_g.zoom / 1.25); break;
       case "contrast":
         _g.settings = { ..._g.settings, highContrast: !_g.settings.highContrast };
         _g.save();

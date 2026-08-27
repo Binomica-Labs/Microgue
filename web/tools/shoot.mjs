@@ -164,7 +164,8 @@ async function main() {
       const errs = state?.toasts?.filter((t) => t.startsWith("error:")) ?? [];
       console.log(`${v.name.padEnd(12)} ${s.name.padEnd(12)} `
         + (state ? `F${state.floor} turn ${state.turn} hp ${state.hp}/${state.maxhp} `
-                 + `atp ${state.atp}/${state.atpMax} L${state.strain}` : "(no state)")
+                 + `atp ${state.atp}/${state.atpMax} L${state.strain} `
+                 + `${state.tilesAcross} tiles` : "(no state)")
         + (errs.length ? `   ERRORS: ${errs.join(" | ")}` : ""));
       if (errs.length) process.exitCode = 1;
 

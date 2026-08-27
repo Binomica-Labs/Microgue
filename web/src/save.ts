@@ -25,6 +25,10 @@ const isModifierId = (v: unknown): v is ModifierId =>
 import { BIN_CAP, SLOTS, type Part } from "./plasmid.js";
 
 export interface Settings {
+  /** The player's zoom, as a multiple of the platform-independent default.
+   *  Relative rather than absolute so it means the same thing on a phone and
+   *  on a desktop, and so it survives a rotation. */
+  readonly zoom: number;
   readonly uiScale: number;
   readonly highContrast: boolean;
   readonly reduceMotion: boolean;
@@ -67,7 +71,7 @@ export interface SaveData {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true,
+  zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true,
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -204,6 +208,10 @@ function parseRing(v: unknown): (Part | null)[] {
 function parseSettings(v: unknown): Settings {
   if (!isRecord(v)) return DEFAULT_SETTINGS;
   return {
+    // Defaulted, not schema-bumped: an older save simply has no zoom
+    // preference and gets the standard one, which is better than discarding
+    // the save outright.
+    zoom: Math.min(Math.max(num(v["zoom"], 1), 0.35), 4),
     uiScale: Math.min(Math.max(num(v["uiScale"], 1), 0.5), 3),
     highContrast: bool(v["highContrast"], false),
     reduceMotion: bool(v["reduceMotion"], false),
