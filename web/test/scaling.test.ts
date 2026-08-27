@@ -168,6 +168,37 @@ describe("layout holds on every form factor", () => {
     }
   });
 
+  it.each(VIEWPORTS)("%s (%ix%i): overlay content is centred, not shoved left", async (name, W, H) => {
+    // `u` comes off the SHORTER dimension, so on a 2000x1200 desktop it is
+    // nearly three, and a phone-first single column was drawn at triple size
+    // hard against the left edge with half the screen empty beside it.
+    //
+    // Asserted on strings the OVERLAY owns. Every overlay composites over the
+    // living world, so the trace also carries the status line and the log
+    // underneath -- measuring the leftmost text of the whole frame measures
+    // those, which is a false positive I hit before writing it this way.
+    const u = Math.max(Math.min(W, H) / 420, 1);
+    const avail = W - 40;
+    const padded = Math.max((avail - Math.min(avail, 470 * u)) / 2, 0);
+    if (padded < 60) return;                    // narrow enough to fill legitimately
+
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    for (const [screen, own] of [["plasmid", "PARTS BIN"], ["research", "THE BENCH"],
+                                 ["notes", "FIELD NOTEBOOK"]] as const) {
+      t.texts.length = 0;
+      g.press(screen);
+      g.frame(100);
+      const hit = t.texts.find((x) => x.text.startsWith(own));
+      g.press(screen);
+      expect(hit, `${name} ${screen}: "${own}" was never drawn`).toBeDefined();
+      expect(hit?.x ?? 0,
+             `${name} ${screen}: "${own}" hugs the left edge; stage pads ${String(Math.round(padded))}`)
+        .toBeGreaterThan(padded * 0.6);
+    }
+  });
+
   it.each(VIEWPORTS)("%s (%ix%i): buttons fit and stay tappable", async (name, W, H) => {
     const t: Trace = { rects: [], texts: [], arcs: [] };
     const g = await play(W, H, t);

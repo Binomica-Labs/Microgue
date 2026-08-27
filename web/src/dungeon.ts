@@ -236,6 +236,14 @@ export class Dungeon {
     if (kinds.length === 0) return;
     for (const room of lvl.rooms) {
       if (room.kind !== "port" && room.kind !== "enrichment") continue;
+      // Never seal the room you ARRIVE in. `exitReachable` proves a route
+      // still exists from the stairs, and it did -- but a player who
+      // materialises inside the ring is walled in by their own arrival, and on
+      // floor one a fresh strain expresses nothing and cannot open a barrier.
+      // Two floors in 1440 landed like this before this check.
+      const holds = (pt: Point | null): boolean =>
+        pt !== null && Math.hypot(pt.x - room.cx, pt.y - room.cy) <= room.r + 1;
+      if (holds(lvl.up) || holds(lvl.down ?? null)) continue;
       const def = kinds[rng.int(kinds.length)];
       if (!def) continue;
       // Plug the ring one tile outside the room, which is where its corridor
@@ -270,9 +278,17 @@ export class Dungeon {
     if (!this.exitReachable(lvl)) lvl.barriers = [];
   }
 
-  /** Is the way down still reachable with every barrier treated as solid? */
+  /**
+   * Is progress still possible with every barrier treated as solid?
+   *
+   * On any floor with a way down, that is a path to it. On the BOTTOM floor
+   * there is no way down and this used to return true without checking
+   * anything at all -- so barriers on floor 24, the floor the whole run is
+   * for, were never validated. There it asks instead that the arrival still
+   * reaches most of the floor, which is what stops a player being sealed into
+   * a pocket of a level whose remaining goal is to clear it.
+   */
   private exitReachable(lvl: Level): boolean {
-    if (!lvl.down) return true;
     const blocked = new Set(lvl.barriers.map((b) => `${String(b.x)},${String(b.y)}`));
     const open = new mg.Grid(lvl.grid.w, lvl.grid.h, mg.WALL);
     for (let y = 0; y < lvl.grid.h; y++) {
@@ -282,7 +298,30 @@ export class Dungeon {
         }
       }
     }
-    return findPath(open, lvl.up, lvl.down) !== null;
+    if (lvl.down) return findPath(open, lvl.up, lvl.down) !== null;
+    return this.reachFrom(open, lvl.up) >= lvl.grid.countFloor() * 0.7;
+  }
+
+  /** Floor tiles reachable from `from` on an already barrier-masked grid. */
+  private reachFrom(open: mg.Grid, from: Point): number {
+    const seen = new Uint8Array(open.w * open.h);
+    const stack: Point[] = [from];
+    seen[from.y * open.w + from.x] = 1;
+    let n = 0;
+    while (stack.length > 0) {
+      const p = stack.pop();
+      if (!p) break;
+      n++;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = p.x + dx, ny = p.y + dy;
+        if (nx < 0 || ny < 0 || nx >= open.w || ny >= open.h) continue;
+        const i = ny * open.w + nx;
+        if (seen[i] === 1 || !open.isFloor(nx, ny)) continue;
+        seen[i] = 1;
+        stack.push({ x: nx, y: ny });
+      }
+    }
+    return n;
   }
 
   /** Extra microbes in the rooms that warrant them. */

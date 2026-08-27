@@ -55,6 +55,26 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number): string {
   return `${text.slice(0, lo).trimEnd()}\u2026`;
 }
 
+/**
+ * The column an overlay screen draws into.
+ *
+ * Every screen here was laid out phone-first and then simply scaled: `u` comes
+ * off the SHORTER viewport dimension, so on a 2000x1200 desktop it is nearly
+ * three, and a single left-aligned column of triple-size rows sat against the
+ * left edge with half the screen empty beside it.
+ *
+ * Padding the insets symmetrically centres that column, and because the same
+ * insets feed both the drawing and the boxes the input layer hit-tests
+ * against, the taps move with it -- which is the only reason this is a
+ * two-line change rather than a rewrite of every screen.
+ */
+export function stage(W: number, ins: Insets, u: number): Insets {
+  const avail = W - ins.left - ins.right;
+  const want = Math.min(avail, 470 * u);
+  const pad = Math.max((avail - want) / 2, 0);
+  return { ...ins, left: ins.left + pad, right: ins.right + pad };
+}
+
 export function drawHeader(
   ctx: CanvasRenderingContext2D, ins: Insets, u: number,
   title: string, subtitle: string, W = Infinity,
@@ -70,7 +90,10 @@ export function drawHeader(
   // strings -- "0 ATP - 0 modifiers held - strain L1 - 0 bonus slots - +0.0 kb
   // headroom" is 62 characters and ran off every phone. `W` defaults to
   // Infinity so a caller that does not know its width is unchanged.
-  const room = W - ins.left - ins.right - 28 * u;
+  // Minus the close button, which sits in this same top-right corner. On a
+  // wide screen the column is narrow enough that the subtitle reached it and
+  // drew straight under the X.
+  const room = W - ins.left - ins.right - 28 * u - Math.max(46 * u, 44) - 12 * u;
   ctx.fillText(fit(ctx, subtitle, room), ins.left + 14 * u, ins.top + 42 * u);
   return ins.top + 68 * u;
 }

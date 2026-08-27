@@ -15,7 +15,7 @@ import { describe as describeSlot, drawBinList, drawItemCard, drawRing }
   from "./plasmid_ui.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { clampView, drawGraph, fitView, frame, litBounds } from "./kegg_ui.js";
-import { drawClose } from "./chrome.js";
+import { drawClose, stage } from "./chrome.js";
 import { isSeen, isVisible } from "./fov.js";
 import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
@@ -53,7 +53,7 @@ export function r_draw(_g: Game): void {
     // function, the error it queued was never drawn either. Black screen, no
     // diagnostic, which is precisely the failure this was meant to prevent.
     if (_g.showSplash || !_g.started) {
-      _g.closeBox = drawSplash(ctx, W, H, _g.insets(),
+      _g.closeBox = drawSplash(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
         Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, NAME_POOL, _g.lab);
       _g.drawToasts(W, H);
       return;
@@ -376,7 +376,7 @@ export function r_draw(_g: Game): void {
     _g.drawScreenFx(W, H);
     _g.drawHud(W, H);
     if (_g.openDrop) {
-      drawContainer(ctx, W, H, _g.insets(), Math.max(Math.min(W, H) / 420, 1),
+      drawContainer(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)), Math.max(Math.min(W, H) / 420, 1),
                     _g.openDrop, _g.dropBoxes, (t, w) => _g.wrap(t, w));
     }
     _g.drawToasts(W, H);
@@ -406,7 +406,7 @@ export function r_draw(_g: Game): void {
       // Reserve room for however many toasts are up, so the obituary is never
       // hidden behind the very message announcing it.
       const band = _g.toasts.count() * 30 + (_g.toasts.count() > 0 ? 10 : 0);
-      const lab = drawLab(ctx, W, H, _g.insets(), u, _g.lab, _g.deathRecord,
+      const lab = drawLab(ctx, W, H, stage(W, _g.insets(), u), u, _g.lab, _g.deathRecord,
                           _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max),
                           band, _g.shopScroll);
       _g.closeBox = lab.close;
@@ -417,7 +417,7 @@ export function r_draw(_g: Game): void {
     }
     if (_g.showResearch) {
       const u = Math.max(Math.min(W, H) / 420, 1);
-      _g.closeBox = drawResearch(ctx, W, H, _g.insets(), u,
+      _g.closeBox = drawResearch(ctx, W, H, stage(W, _g.insets(), u), u,
         _g.genome.slots.flatMap((p) =>
           p?.kind === "gene" && p.id !== "ori"
             ? [{ id: p.id, level: p.level, mods: p.mods }] : []),
@@ -428,7 +428,7 @@ export function r_draw(_g: Game): void {
       return;
     }
     if (_g.showNotes) {
-      _g.closeBox = drawNotes(ctx, W, H, _g.insets(),
+      _g.closeBox = drawNotes(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
         Math.max(Math.min(W, H) / 420, 1), _g.run,
         (t, w) => _g.wrap(t, w));
       _g.drawToasts(W, H);
@@ -660,8 +660,8 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
 
 export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
-    const ins = _g.insets();
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    const ins = stage(W, _g.insets(), u);
     ctx.fillStyle = "rgba(0,0,0,0.93)";
     ctx.fillRect(0, 0, W, H);
 
@@ -798,8 +798,8 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
 
 export function r_drawMapScreen(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
-    const ins = _g.insets();
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    const ins = stage(W, _g.insets(), u);   // chrome in the column; graph pans free
     ctx.fillStyle = "rgba(4,7,6,0.97)";
     ctx.fillRect(0, 0, W, H);
 

@@ -373,6 +373,67 @@ describe("barriers", () => {
     expect(barriersAt(1).map((b) => b.id)).not.toContain("carbonate");
   });
 
+  // The check above walks from the UP stair, which is where the code already
+  // guaranteed a route. It could not see two things a player can.
+  it("you never arrive inside a room that was then sealed", () => {
+    let found = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const d = new Dungeon(96, 96, seed);
+      for (let f = 1; f <= MAX_FLOOR; f++) {
+        const L = d.level(f);
+        for (const r of L.rooms) {
+          const sealed = L.barriers.some(
+            (b) => Math.hypot(b.x - r.cx, b.y - r.cy) <= r.r + 2);
+          if (!sealed) continue;
+          if (Math.hypot(L.up.x - r.cx, L.up.y - r.cy) <= r.r) found++;
+        }
+      }
+    }
+    // A player who materialises inside the ring is walled in by their own
+    // arrival, and on floor one a fresh strain expresses nothing and cannot
+    // open a barrier. Two floors in 1440 landed like this.
+    expect(found, "arrived inside a sealed room").toBe(0);
+  });
+
+  it("the BOTTOM floor is validated too, though it has no way down", () => {
+    // `exitReachable` returned true without checking anything when there was
+    // no down stair, so barriers on floor 24 -- the floor the whole run is
+    // for -- were never validated at all.
+    //
+    // The claim is NOT that every room stays open; sealing a cache is what a
+    // barrier is for. It is that the arrival still reaches the bulk of the
+    // floor, so nobody is shut into a pocket of a level whose only remaining
+    // goal is to clear it.
+    for (let seed = 1; seed <= 40; seed++) {
+      const L = new Dungeon(96, 96, seed).level(MAX_FLOOR);
+      const blocked = new Set(L.barriers.map((b) => `${String(b.x)},${String(b.y)}`));
+      const open = new mg.Grid(L.grid.w, L.grid.h, mg.WALL);
+      for (let y = 0; y < L.grid.h; y++) {
+        for (let x = 0; x < L.grid.w; x++) {
+          if (L.grid.isFloor(x, y) && !blocked.has(`${String(x)},${String(y)}`)) {
+            open.set(x, y, mg.FLOOR);
+          }
+        }
+      }
+      const seen = new Set<string>([`${String(L.up.x)},${String(L.up.y)}`]);
+      const stack = [L.up];
+      while (stack.length > 0) {
+        const p = stack.pop();
+        if (!p) break;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = p.x + dx, ny = p.y + dy;
+          const k = `${String(nx)},${String(ny)}`;
+          if (seen.has(k) || !open.isFloor(nx, ny)) continue;
+          seen.add(k);
+          stack.push({ x: nx, y: ny });
+        }
+      }
+      expect(seen.size / L.grid.countFloor(),
+             `seed ${String(seed)}: the bottom floor shuts the arrival into a pocket`)
+        .toBeGreaterThan(0.6);
+    }
+  });
+
   it("a barrier NEVER blocks the way down -- they gate caches, not progress", () => {
     for (const seed of [3, 41, 99]) {
       const d = new Dungeon(96, 96, seed);
