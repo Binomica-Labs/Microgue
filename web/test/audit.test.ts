@@ -10,6 +10,10 @@ import * as repair from "../src/repair.js";
 import * as keggUi from "../src/kegg_ui.js";
 import * as lysisMod from "../src/lysis.js";
 import * as chromosome from "../src/chromosome.js";
+import * as keggData from "../src/kegg.js";
+import * as roomsMod from "../src/rooms.js";
+import * as labMod from "../src/lab.js";
+import { buy, newLab } from "../src/lab.js";
 import * as fov from "../src/fov.js";
 import * as cycle from "../src/cycle.js";
 import * as fp from "../src/footprint.js";
@@ -163,9 +167,10 @@ describe("the fuzz reaches the modules it never used to", () => {
     }
   };
 
-  it("no view transform, speed, repair or lysis call returns a non-finite number", () => {
+  it("no pure call in the late-swept modules returns a non-finite number", () => {
     const mods: Record<string, Record<string, unknown>> = {
       speed, repair, kegg: keggUi, lysis: lysisMod, chromosome,
+      keggData, rooms: roomsMod, lab: labMod,
     };
     const bad: string[] = [];
     for (const [mn, mod] of Object.entries(mods)) {
@@ -189,6 +194,32 @@ describe("the fuzz reaches the modules it never used to", () => {
     }
     expect([...new Set(bad)].slice(0, 5), "a pure surface returned a non-finite number")
       .toEqual([]);
+  });
+});
+
+describe("a broken price cannot become free money", () => {
+  it("buy refuses an unpriceable offer instead of granting it", () => {
+    // `credit < NaN` is FALSE, so a non-finite price did not block a purchase,
+    // it unlocked every purchase: the sale went through, `credit -= NaN` made
+    // the credit NaN, and from then on every comparison was false and the
+    // whole shop was free for the rest of the session.
+    const lab = newLab();
+    lab.credit = 10;
+    const bad = { id: { kind: "sites" } as const, name: "x", price: NaN,
+                  note: "", owned: false };
+    expect(buy(lab, bad).ok, "an unpriceable offer was sold").toBe(false);
+    expect(Number.isFinite(lab.credit), "credit went non-finite").toBe(true);
+    expect(lab.credit, "credit was spent on an unpriceable offer").toBe(10);
+    expect(lab.startSites, "a site was granted for free").toBe(0);
+  });
+
+  it("a lab that already holds non-finite credit is repaired, not trusted", () => {
+    const lab = newLab();
+    lab.credit = NaN;
+    const offer = { id: { kind: "sites" } as const, name: "x", price: 160,
+                    note: "", owned: false };
+    expect(buy(lab, offer).ok, "bought on NaN credit").toBe(false);
+    expect(lab.credit).toBe(0);
   });
 });
 

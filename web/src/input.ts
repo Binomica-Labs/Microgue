@@ -17,6 +17,21 @@ import { on } from "./safety.js";
 import type { Point } from "./mapgen.js";
 import type { Game } from "./main.js";
 
+/**
+ * Where the open card's part sits in the bin RIGHT NOW.
+ *
+ * `cardIndex` is captured when the card opens and used when a button on it is
+ * pressed. That is the shape that let `assemble` destroy four genes -- an
+ * index taken before a splice and used after one -- so the index is confirmed
+ * against the part it names before anything irreversible happens, and the part
+ * is re-found by identity if the bin has shifted underneath it.
+ */
+function cardSlot(_g: Game): number {
+  if (_g.card === null) return -1;
+  if (_g.genome.bin[_g.cardIndex] === _g.card) return _g.cardIndex;
+  return _g.genome.bin.indexOf(_g.card);
+}
+
 export function i_pointerDown(_g: Game, x: number, y: number): void {
     if (_g.openDrop) {
       const i = _g.dropBoxes.findIndex((b) => inBoxOf(b, x, y));
@@ -43,17 +58,19 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       _g.gesture = "none";
 
       if (_g.cardConfirm) {
-        if (hit(b.confirm) && _g.cardIndex >= 0) {
-          _g.catabolise(_g.cardIndex);
+        const at = cardSlot(_g);
+        if (hit(b.confirm) && at >= 0) {
+          _g.catabolise(at);
           _g.card = null;
           _g.cardIndex = -1;
         }
         _g.cardConfirm = false;         // cancel, or a tap anywhere else
         return;
       }
-      if (hit(b.eat) && _g.cardIndex >= 0) { _g.cardConfirm = true; return; }
-      if (hit(b.install) && _g.cardIndex >= 0) {
-        _g.installFromBin(_g.cardIndex);
+      if (hit(b.eat) && cardSlot(_g) >= 0) { _g.cardConfirm = true; return; }
+      const inst = cardSlot(_g);
+      if (hit(b.install) && inst >= 0) {
+        _g.installFromBin(inst);
         _g.card = null;
         _g.cardIndex = -1;
         return;
@@ -242,8 +259,7 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
           // A tap that never moved is an inspect, not a failed drag.
           if (_g.panMoved < 8 && target === null) {
             _g.card = _g.genome.bin[_g.dragBin] ?? null;
-          _g.cardIndex = _g.dragBin;
-          _g.cardIndex = _g.dragBin;
+            _g.cardIndex = _g.dragBin;
             _g.dragBin = null;
             _g.dragXY = null;
             _g.gesture = "none";

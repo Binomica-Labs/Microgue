@@ -163,11 +163,25 @@ export function genePrice(gene: GeneId): number {
   return Math.round(30 + g.kb * 22 + g.tier * 18);
 }
 
-export const sitesPrice = (owned: number): number =>
-  Math.round(160 * Math.pow(1.5, Math.max(Number.isFinite(owned) ? owned : 0, 0)));
+/**
+ * Bounded as well as checked.
+ *
+ * This already tested `Number.isFinite(owned)` -- and 1e308 is finite, so
+ * `1.5 ** 1e308` overflowed to Infinity and the shop offered a site at an
+ * infinite price. Same shape as the lysis seed and the map viewport: the
+ * guard has to be on MAGNITUDE, not just on finiteness. Clamped to the range
+ * the chromosome actually has.
+ */
+export const sitesPrice = (owned: number): number => {
+  const n = Math.min(Math.max(Number.isFinite(owned) ? owned : 0, 0), MAX_SLOTS - BASE_SLOTS);
+  return Math.round(160 * Math.pow(1.5, n));
+};
 
-export const strainPrice = (level: number): number =>
-  Math.round(140 * Math.max(level, 1) ** 1.35);
+/** As above, and this one had no guard at all: NaN ** 1.35 is NaN. */
+export const strainPrice = (level: number): number => {
+  const l = Math.min(Math.max(Number.isFinite(level) ? level : 1, 1), MAX_STRAIN);
+  return Math.round(140 * l ** 1.35);
+};
 
 /**
  * The order form.
@@ -255,6 +269,16 @@ export type BuyResult = { ok: true; spent: number } | { ok: false; err: string }
 /** Spend credit. Validates fully before it changes anything. */
 export function buy(lab: Lab, offer: Offer): BuyResult {
   if (offer.owned) return { ok: false, err: "already ordered" };
+  // A non-finite price does not block a purchase, it unlocks every purchase:
+  // `credit < NaN` is FALSE, so the sale goes through, `credit -= NaN` makes
+  // the credit NaN, and from then on every comparison is false and the whole
+  // shop is free for the rest of the session. Defence in depth -- the prices
+  // are guarded at source too, but a future pricing bug must not be able to
+  // turn into free money.
+  if (!Number.isFinite(offer.price) || offer.price < 0) {
+    return { ok: false, err: "that order could not be priced" };
+  }
+  if (!Number.isFinite(lab.credit)) lab.credit = 0;
   if (lab.credit < offer.price) {
     return { ok: false, err: `needs ${String(offer.price)} credit` };
   }

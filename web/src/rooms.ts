@@ -16,6 +16,7 @@
 //             way in, and something has got large in there.
 //   CHAMBER   Plain open ground.
 
+import { MAX_DEPTH } from "./biology.js";
 import { columnRadius, FLOOR, WALL, type Grid, type Point } from "./mapgen.js";
 import type { Rng } from "./rng.js";
 
@@ -204,13 +205,16 @@ export function carveRooms(g: Grid, rng: Rng, plan: RoomPlan): Room[] {
 
 /** Which room kinds a stratum offers. Mats belong at the redox interface. */
 export function planFor(depth: number, boss: boolean): RoomPlan {
+  // A NaN depth made `count` NaN, and a NaN count carves no rooms at all --
+  // a level with no ports, no caches and no landmarks, and nothing saying so.
+  const d = Math.min(Math.max(Number.isFinite(depth) ? Math.round(depth) : 1, 1), MAX_DEPTH);
   const kinds: RoomKind[] = ["chamber", "chamber", "port"];
-  if (depth >= 3 && depth <= 7) kinds.push("mat");
-  if (depth >= 2) kinds.push("bloom");
-  if (depth >= 2) kinds.push("enrichment");
+  if (d >= 3 && d <= 7) kinds.push("mat");
+  if (d >= 2) kinds.push("bloom");
+  if (d >= 2) kinds.push("enrichment");
   // More rooms: they are the landmarks, the caches and the reason to cross a
   // level rather than beeline for the stairs.
-  return { kinds, count: boss ? 5 : 7 + Math.floor(depth / 2) };
+  return { kinds, count: boss ? 5 : 7 + Math.floor(d / 2) };
 }
 
 export function roomAt(rooms: readonly Room[], x: number, y: number): Room | null {
