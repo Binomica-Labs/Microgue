@@ -22,7 +22,7 @@ import { jitter, lungeOffset } from "./fx.js";
 import { drawBody, paintWallMotif, paletteForPigment, playerSprite, sprite }
   from "./paint.js";
 import { squashFor, travel, wake } from "./motion.js";
-import { traceWalls } from "./walls.js";
+import { WALL_SPREAD, traceWalls } from "./walls.js";
 import { timeName } from "./cycle.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
@@ -84,7 +84,12 @@ export function r_draw(_g: Game): void {
     // frame cost 29 us; this halves it and the geometry is identical by
     // construction rather than by hoping the two calls match.
     const wallPath = new Path2D();
-    traceWalls(wallPath, _g.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5);
+    // Per-vertex radius, seeded per floor. One constant radius meant every
+    // convex corner was the same quarter circle, so a one-tile bump was always
+    // a perfect circle and a corridor always a perfect stadium -- a very small
+    // shape vocabulary, repeated, which is what reads as cookie-cutter.
+    traceWalls(wallPath, _g.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5,   // see walls.ts
+               _g.dungeon.seed ^ (_g.level.floor * 9176), hc ? 0 : WALL_SPREAD[s.hatch]);
     const sight = _g.level.sight;
 
     ctx.fillStyle = hc ? "#ffffff" : s.wall;
