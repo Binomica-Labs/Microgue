@@ -44,6 +44,13 @@ const SCENES = [
   { name: "4-pathways", drive: "microgue.start(0); microgue.press('map'); null" },
   { name: "5-notebook", drive: "microgue.start(0); microgue.press('notes'); null" },
   { name: "6-bench", drive: "microgue.start(0); microgue.press('research'); null" },
+  // The whole floor, revealed and zoomed out. Wall contour is the thing this
+  // one is for: FOV normally shows a few tiles and you cannot judge a
+  // silhouette from that.
+  { name: "7-walls", drive:
+    "microgue.start(0);"
+    + "const g = microgue.game; g.level.sight.seen.fill(1); g.level.sight.visible.fill(1);"
+    + "g.zoom = 0.42; g.frame(1000); null" },
 ];
 
 function serve(root) {
@@ -122,6 +129,16 @@ async function main() {
       await cdp.send("Runtime.enable", {}, sessionId);
       await cdp.send("Emulation.setDeviceMetricsOverride", {
         width: v.width, height: v.height, deviceScaleFactor: v.dpr, mobile: v.mobile,
+      }, sessionId);
+      // Pinned BEFORE the page runs. A new run seeds its dungeon from
+      // Date.now(), so without this every screenshot is of a different cave
+      // and two runs cannot be compared -- which is most of what a visual
+      // harness is for. The test suite pins the clock for exactly this reason.
+      // Storage is cleared with it, or scene 2 resumes scene 1's save and the
+      // turn counter climbs across the sheet.
+      await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: "try { localStorage.clear(); } catch {}\n"
+          + "Date.now = () => 1700000000000;",
       }, sessionId);
       await cdp.send("Page.navigate", { url: `http://127.0.0.1:${port}/` }, sessionId);
       await sleep(900);                       // boot, first frames, sprite cache
