@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Plasmid } from "../src/plasmid.js";
+import { WILD_TYPE } from "../src/allele.js";
+import { PATHWAY_COLOUR, drawRing } from "../src/plasmid_ui.js";
 
 /**
  * Layout across every form factor anyone will actually use.
@@ -327,6 +330,79 @@ describe("the fog has no seams", () => {
     for (const r of rows.slice(0, 40)) {
       expect(r[3] ?? 0, "a fog rect is exactly one tile tall, so it will seam")
         .toBeGreaterThan(tile);
+    }
+  });
+});
+
+describe("the operon highlight says what it means", () => {
+  /** Record the ring's arcs with their sweep and the colour in force. */
+  function arcs(p: Plasmid) {
+    const out: { sweep: number; colour: string }[] = [];
+    let colour = "";
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_t, k: string) => {
+        if (["strokeStyle", "fillStyle", "font", "textAlign", "textBaseline"].includes(k)) {
+          return colour;
+        }
+        return (...a: unknown[]) => {
+          if (k === "arc") {
+            out.push({ sweep: (a[4] as number) - (a[3] as number), colour });
+          }
+          if (k === "measureText") return { width: 20 };
+          return undefined;
+        };
+      },
+      set: (_t, k: string, v: unknown) => {
+        if (k === "strokeStyle") colour = String(v);
+        return true;
+      },
+    });
+    drawRing(ctx, { cx: 200, cy: 200, rInner: 90, rOuter: 130, used: p.usableSlots, rot: 0 }, p,
+             { u: 1, depth: 1, dragFrom: null, dragXY: null, selected: null });
+    return out;
+  }
+
+  const laid = (): Plasmid => {
+    const p = new Plasmid();
+    for (let i = 0; i < p.usableSlots; i++) p.put(i, null);
+    p.put(0, { kind: "promoter", id: "j23106" });
+    p.put(1, { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE });
+    p.put(2, { kind: "terminator", id: "rrnbt1" });
+    return p;
+  };
+
+  it("reaches the terminator that closes the transcript", () => {
+    // The span used to be `(genes.length + 1) * step` from the promoter, which
+    // assumes promoter-then-genes with nothing after. The hairpin that ends
+    // the operon fell outside it, and only appeared to be inside when the
+    // arithmetic happened to reach that far -- so pulling a terminator out and
+    // putting it back changed the highlight, which reads as a glitch.
+    const p = laid();
+    const step = (Math.PI * 2) / p.usableSlots;
+    const wide = arcs(p).filter((a) => a.sweep > step * 1.5);
+    expect(wide.length, "no operon arc was drawn at all").toBeGreaterThan(0);
+    expect(wide[0]!.sweep / step, "the arc stops short of the terminator")
+      .toBeGreaterThan(2.5);
+  });
+
+  it("is a colour no PART uses", () => {
+    // It was #ffd166, which is exactly a promoter's own colour, so the
+    // annotation and the thing it annotated were indistinguishable.
+    const p = laid();
+    const step = (Math.PI * 2) / p.usableSlots;
+    const all = arcs(p);
+    const operon = all.filter((a) => a.sweep > step * 1.5).map((a) => a.colour);
+    expect(operon.length).toBeGreaterThan(0);
+    const parts = new Set(Object.values(PATHWAY_COLOUR).map((c) => c.toLowerCase()));
+    parts.add("#ffd166");                     // promoter
+    parts.add("#8a8f96");                     // terminator
+    for (const c of operon) {
+      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
+      expect(m, `operon colour ${c} is not rgba`).not.toBeNull();
+      const hex = "#" + [1, 2, 3].map((i) =>
+        Number(m?.[i] ?? 0).toString(16).padStart(2, "0")).join("");
+      expect(parts.has(hex), `the operon highlight is ${hex}, which is a part colour`)
+        .toBe(false);
     }
   });
 });

@@ -285,11 +285,34 @@ export function drawRing(
   const angleOf = (i: number): number => i * step - Math.PI / 2 + g.rot;
 
   // Operon arcs, drawn under the slots so a transcript reads as one sweep.
+  //
+  // The span is measured from the SLOTS the transcript actually occupies. It
+  // used to be `(genes.length + 1) * step` from the promoter, which assumes
+  // the operon is promoter-then-genes with nothing between and nothing after:
+  // it silently excluded the terminator that closes the transcript, and only
+  // appeared to include one when the arithmetic happened to reach that far.
+  // Pull a terminator out and put it back and the highlight would change,
+  // which is what made it look like a glitch rather than a rule.
   for (const op of p.operons()) {
-    if (op.genes.length === 0) continue;
+    const last = op.genes[op.genes.length - 1];
+    if (!last) continue;
+    let end = last.slot;
+    // Walk on to the hairpin that ends it. A gap or the next promoter ends
+    // the sweep instead, and neither belongs inside it.
+    for (let k = 1; k <= n; k++) {
+      const at = (end + k) % n;
+      const nxt = p.at(at);
+      if (!nxt || nxt.kind === "promoter") break;
+      if (nxt.kind === "terminator") { end = at; break; }
+    }
+    const span = (((end - op.promoter) % n) + n) % n + 1;
     const a0 = angleOf(op.promoter);
-    const a1 = a0 + (op.genes.length + 1) * step;
-    ctx.strokeStyle = `rgba(255,209,102,${0.25 + 0.45 * Math.min(op.output / 1.4, 1)})`;
+    const a1 = a0 + span * step;
+    // A colour that belongs to no PART. This was #ffd166, which is exactly the
+    // promoter's own colour, so the annotation and the thing it annotates were
+    // indistinguishable. Magenta sits about 40 degrees from every saturated
+    // colour on the ring and reads as a mark rather than as material.
+    ctx.strokeStyle = `rgba(240,75,144,${0.3 + 0.5 * Math.min(op.output / 1.4, 1)})`;
     ctx.lineWidth = band + 8 * o.u;
     ctx.beginPath();
     ctx.arc(g.cx, g.cy, mid, a0 + 0.01, a1 - 0.01);
