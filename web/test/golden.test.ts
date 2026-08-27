@@ -26,12 +26,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  descending, and the notebook header read "deepest D1" after three floors.
  *  Nothing else in the frame changed.
  *
+ *  And re-recorded for the wall pass: the corner radius now varies per grid
+ *  vertex and exposed faces bow, so the wall geometry legitimately moved.
+ *
  *  Re-recorded again at the sprite/status-line pass. Diff read first: 117
  *  lines of 77680, and every one of them either a measureText from ellipsising
  *  the status line -- which real Chrome showed running off the right edge of
  *  every phone -- or a fill in Nitzschia's pigment, from the striae its sprite
  *  had been missing. */
-const GOLDEN = "fffd9500e56eb09d";
+const GOLDEN = "8bed6e153b81487a";
 
 const trace: string[] = [];
 
@@ -92,6 +95,11 @@ describe("golden render trace", () => {
     vi.stubGlobal("Path2D", class {
       moveTo(...a: number[]): void { trace.push(`path.moveTo(${a.map(round).join(",")})`); }
       lineTo(...a: number[]): void { trace.push(`path.lineTo(${a.map(round).join(",")})`); }
+      // Recorded in full, not collapsed to its end point. The wall faces bow
+      // with a quadratic; a stub that logged only where the curve ENDS would
+      // take the control point out of the golden entirely -- the same coverage
+      // hole the fog had when Path2D was first stubbed.
+      quadraticCurveTo(...a: number[]): void { trace.push(`path.quad(${a.map(round).join(",")})`); }
       arc(...a: number[]): void { trace.push(`path.arc(${a.map(round).join(",")})`); }
       closePath(): void { trace.push("path.closePath()"); }
       rect(...a: number[]): void { trace.push(`path.rect(${a.map(round).join(",")})`); }

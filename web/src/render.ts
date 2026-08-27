@@ -89,7 +89,7 @@ export function r_draw(_g: Game): void {
     // a perfect circle and a corridor always a perfect stadium -- a very small
     // shape vocabulary, repeated, which is what reads as cookie-cutter.
     traceWalls(wallPath, _g.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5,   // see walls.ts
-               _g.dungeon.seed ^ (_g.level.floor * 9176), hc ? 0 : WALL_SPREAD[s.hatch]);
+      _g.dungeon.seed ^ (_g.level.floor * 9176), hc ? 0 : WALL_SPREAD[s.hatch], hc ? 0 : 0.13);
     const sight = _g.level.sight;
 
     ctx.fillStyle = hc ? "#ffffff" : s.wall;

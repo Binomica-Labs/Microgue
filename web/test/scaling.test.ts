@@ -106,6 +106,7 @@ async function play(W: number, H: number, t: Trace) {
   vi.stubGlobal("HTMLCanvasElement", function S() { /* marker */ });
   vi.stubGlobal("Path2D", class {
     moveTo(): void { /* */ } lineTo(): void { /* */ }
+    quadraticCurveTo(): void { /* */ }
     arc(): void { /* */ } closePath(): void { /* */ }
     rect(): void { /* */ }
   });
@@ -230,6 +231,7 @@ describe("the fog has no seams", () => {
     class RecordingPath {
       moveTo(): void { /* */ }
       lineTo(): void { /* */ }
+      quadraticCurveTo(): void { /* */ }
       arc(): void { /* */ }
       closePath(): void { /* */ }
       rect(...a: number[]): void { rects.push(a.length); }
@@ -251,6 +253,7 @@ describe("the fog has no seams", () => {
     class RecordingPath {
       moveTo(): void { /* */ }
       lineTo(): void { /* */ }
+      quadraticCurveTo(): void { /* */ }
       arc(): void { /* */ }
       closePath(): void { /* */ }
       rect(...a: number[]): void { seen.push(a); }
@@ -325,6 +328,7 @@ describe("the fog stays cheap", () => {
     class CountingPath {
       moveTo(): void { /* */ }
       lineTo(): void { /* */ }
+      quadraticCurveTo(): void { /* */ }
       arc(): void { /* */ }
       closePath(): void { /* */ }
       rect(): void { rects++; }

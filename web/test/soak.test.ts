@@ -54,6 +54,7 @@ function setupEnv(rec: Rec): void {
   vi.stubGlobal("navigator", {});
   vi.stubGlobal("HTMLCanvasElement", function Stub() { /* marker */ });
   vi.stubGlobal("Path2D", class { moveTo(): void { /* */ } lineTo(): void { /* */ }
+    quadraticCurveTo(): void { /* */ }
     arc(): void { /* */ } closePath(): void { /* */ } rect(): void { /* */ } });
   vi.stubGlobal("getComputedStyle", () => ({ top: "0px", right: "0px",
                                              bottom: "0px", left: "0px" }));

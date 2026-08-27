@@ -44,7 +44,7 @@ const HALF_PI = Math.PI / 2;
  * more crystalline -- and `hatch` is already the per-stratum material cue.
  */
 export const WALL_SPREAD: Readonly<Record<0 | 1 | 2 | 3, number>> =
-  { 0: 0.22, 1: 0.62, 2: 0.38, 3: 0.5 };
+  { 0: 0.78, 1: 0.92, 2: 0.6, 3: 0.72 };
 
 /** Deterministic hash. Keyed so the silhouette never shimmers between frames. */
 function hash(a: number, b: number, k: number): number {
@@ -112,6 +112,23 @@ export function traceWalls(
   const round = r > 0;
   const w = (x: number, y: number): boolean => g.isWall(x, y);
 
+  /**
+   * Is there a meniscus fillet at this grid vertex?
+   *
+   * A fillet is an inside corner, which is exactly the case where three of the
+   * four tiles around a vertex are wall and one is floor. It matters because
+   * the fillet is drawn with STRAIGHT edges that assume the tile boundary: bow
+   * a face that ends on one and the two no longer meet, which shows up as an
+   * antialiased seam inside the wall mass. So faces that touch a fillet are
+   * left straight, and the long open runs -- which is where the flatness
+   * actually reads -- are the ones that bow.
+   */
+  const fillet = (vx: number, vy: number): boolean => {
+    const n = (w(vx - 1, vy - 1) ? 1 : 0) + (w(vx, vy - 1) ? 1 : 0)
+      + (w(vx - 1, vy) ? 1 : 0) + (w(vx, vy) ? 1 : 0);
+    return n === 3;
+  };
+
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       if (!w(x, y)) continue;
@@ -134,7 +151,7 @@ export function traceWalls(
       let ax = x, ay = y + (cTL ? rtl : 0);
       const face = (exposed: boolean, side: number,
                     tx: number, ty: number, nx: number, ny: number): void => {
-        if (bw > 0 && exposed) {
+        if (bw > 0 && exposed && !fillet(ax, ay) && !fillet(tx, ty)) {
           const a = bowAt(x, y, side, sd, bw) * 2;
           ctx.quadraticCurveTo((ax + tx) / 2 + nx * a, (ay + ty) / 2 + ny * a, tx, ty);
         } else ctx.lineTo(tx, ty);

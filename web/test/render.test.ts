@@ -77,6 +77,7 @@ describe("the real render path", () => {
     vi.stubGlobal("Path2D", class {
       moveTo(): void { /* recorded via the context stub instead */ }
       lineTo(): void { /* ditto */ }
+      quadraticCurveTo(): void { /* ditto */ }
       arc(): void { /* ditto */ }
       closePath(): void { /* ditto */ }
       rect(): void { /* ditto */ }
