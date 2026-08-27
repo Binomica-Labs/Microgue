@@ -5,6 +5,11 @@ import { Plasmid, SLOTS, type Part } from "../src/plasmid.js";
 import { BASE_SLOTS, MAX_SLOTS } from "../src/chromosome.js";
 import { MAX_STRAIN } from "../src/strain.js";
 import * as motion from "../src/motion.js";
+import * as speed from "../src/speed.js";
+import * as repair from "../src/repair.js";
+import * as keggUi from "../src/kegg_ui.js";
+import * as lysisMod from "../src/lysis.js";
+import * as chromosome from "../src/chromosome.js";
 import * as fov from "../src/fov.js";
 import * as cycle from "../src/cycle.js";
 import * as fp from "../src/footprint.js";
@@ -128,6 +133,62 @@ describe("no pure function returns a non-finite number", () => {
       const g = mg.generate(20, 20, makeRng(1), { density: n, passes: 2 });
       expect(g.countFloor()).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("the fuzz reaches the modules it never used to", () => {
+  // The original sweep covered motion, footprint, fov, cycle, fx and plasmid
+  // and found 62 non-finite results. It did not cover the view transforms, the
+  // speed table, repair or lysis -- and all four had holes, including the one
+  // HANDOVER says is closed: "every view transform sanitises non-finite
+  // input", which `zoomAbout` did and `toScreen`, `toWorld` and `frame` did
+  // not. A NaN View blanks the pathway map with nothing logged.
+  const NASTY = [NaN, Infinity, -Infinity, 1e308, -1e308, 0, -1, 1e-320];
+
+  /** Intentional non-finite results, with the reason. */
+  const ALLOWED = new Set([
+    // The sentinel for "the chromosome is as large as it will get";
+    // `t_expand` tests it with Number.isFinite before spending anything.
+    "expansionCost",
+  ]);
+
+  const scan = (v: unknown, out: string[], path = "", depth = 0): void => {
+    if (depth > 3) return;
+    if (typeof v === "number") { if (!Number.isFinite(v)) out.push(path); return; }
+    if (Array.isArray(v)) { v.forEach((e, i) => { scan(e, out, `${path}[${String(i)}]`, depth + 1); }); return; }
+    if (v !== null && typeof v === "object") {
+      for (const [k, e] of Object.entries(v as Record<string, unknown>)) {
+        scan(e, out, `${path}.${k}`, depth + 1);
+      }
+    }
+  };
+
+  it("no view transform, speed, repair or lysis call returns a non-finite number", () => {
+    const mods: Record<string, Record<string, unknown>> = {
+      speed, repair, kegg: keggUi, lysis: lysisMod, chromosome,
+    };
+    const bad: string[] = [];
+    for (const [mn, mod] of Object.entries(mods)) {
+      for (const [fn, f] of Object.entries(mod)) {
+        if (typeof f !== "function" || ALLOWED.has(fn)) continue;
+        const arity = (f as (...a: unknown[]) => unknown).length;
+        if (arity === 0 || arity > 4) continue;
+        for (const a of NASTY) {
+          for (const b of NASTY) {
+            const args = Array.from({ length: arity }, (_v, i) => (i % 2 === 0 ? a : b));
+            let r: unknown;
+            try { r = (f as (...x: unknown[]) => unknown)(...args); } catch { continue; }
+            const out: string[] = [];
+            scan(r, out);
+            if (out.length > 0) {
+              bad.push(`${mn}.${fn}(${args.map(String).join(",")})${out[0] ?? ""}`);
+            }
+          }
+        }
+      }
+    }
+    expect([...new Set(bad)].slice(0, 5), "a pure surface returned a non-finite number")
+      .toEqual([]);
   });
 });
 

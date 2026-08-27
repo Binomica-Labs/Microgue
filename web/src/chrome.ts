@@ -69,6 +69,10 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number): string {
  * two-line change rather than a rewrite of every screen.
  */
 export function stage(W: number, ins: Insets, u: number): Insets {
+  // A NaN width would hand back NaN insets, and NaN insets reach every screen
+  // in the game: coordinates stop being finite and nothing draws, silently.
+  // Every other pure surface here guards; this one did not.
+  if (!Number.isFinite(W) || !Number.isFinite(u)) return ins;
   const avail = W - ins.left - ins.right;
   const want = Math.min(avail, 470 * u);
   const pad = Math.max((avail - want) / 2, 0);

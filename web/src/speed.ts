@@ -34,7 +34,14 @@ export const SIZE_DRAG: Readonly<Record<Size, number>> = {
 };
 
 export function speedOf(b: Behaviour, s: Size): number {
-  return Math.max(BASE_SPEED[b] * SIZE_DRAG[s], 0);
+  // A miss in either table is `undefined`, and undefined * undefined is NaN --
+  // a NaN speed banks NaN and the creature then never acts again, which is
+  // invisible rather than loud. The types forbid it; a hand-edited save and a
+  // typo in a new organism's size do not.
+  const base = BASE_SPEED[b] as number | undefined;
+  const drag = SIZE_DRAG[s] as number | undefined;
+  if (!Number.isFinite(base) || !Number.isFinite(drag)) return 1;
+  return Math.max((base ?? 1) * (drag ?? 1), 0);
 }
 
 /**

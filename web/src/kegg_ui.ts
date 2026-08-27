@@ -17,11 +17,33 @@ export interface View { x: number; y: number; scale: number; }
 export const NODE_W = 92;
 export const NODE_H = 30;
 
-export const toScreen = (v: View, x: number, y: number): { x: number; y: number } =>
-  ({ x: (x - v.x) * v.scale, y: (y - v.y) * v.scale });
+/**
+ * A view whose numbers are all usable, whatever was handed in.
+ *
+ * HANDOVER says every view transform sanitises its input, because one NaN
+ * reaching a `View` makes every later transform NaN and the map goes blank
+ * with nothing logged. `zoomAbout` did; these did not, and `frame` did not
+ * guard its width or height either -- so `fitView(NaN, NaN)` returned a View
+ * with NaN coordinates and a valid-looking scale.
+ */
+const safeView = (v: View): View => ({
+  x: Number.isFinite(v.x) ? v.x : 0,
+  y: Number.isFinite(v.y) ? v.y : 0,
+  // Never zero: toWorld divides by it.
+  scale: Number.isFinite(v.scale) && v.scale > 1e-6 ? v.scale : 1,
+});
 
-export const toWorld = (v: View, x: number, y: number): { x: number; y: number } =>
-  ({ x: x / v.scale + v.x, y: y / v.scale + v.y });
+export const toScreen = (v: View, x: number, y: number): { x: number; y: number } => {
+  const s = safeView(v);
+  const px = Number.isFinite(x) ? x : 0, py = Number.isFinite(y) ? y : 0;
+  return { x: (px - s.x) * s.scale, y: (py - s.y) * s.scale };
+};
+
+export const toWorld = (v: View, x: number, y: number): { x: number; y: number } => {
+  const s = safeView(v);
+  const px = Number.isFinite(x) ? x : 0, py = Number.isFinite(y) ? y : 0;
+  return { x: px / s.scale + s.x, y: py / s.scale + s.y };
+};
 
 export interface Bounds { minX: number; minY: number; maxX: number; maxY: number; }
 
@@ -49,15 +71,26 @@ export function litBounds(carried: ReadonlySet<string>): Bounds | null {
 
 /** Frame a region: centre it and pick a scale that fits it comfortably. */
 export function frame(w: number, h: number, b: Bounds, pad = 70): View {
+  // The VIEWPORT was never guarded, only the bounds. A non-finite width makes
+  // `x` non-finite while `scale` still looks valid, which is the shape that
+  // blanks the map silently.
+  //
+  // Bounded as well as checked: 1e308 is finite, and 1e308 / 0.35 / 2
+  // overflows to Infinity on the way to `y`. Finiteness alone is not the
+  // guard -- magnitude is, the same way it was for the lysis seed. No display
+  // is a hundred thousand pixels across.
+  const size = (v: number): number =>
+    Number.isFinite(v) ? Math.min(Math.max(v, 1), 100000) : 1;
+  const vw = size(w), vh = size(h);
   const g = graphBounds();
   const minX = num(b.minX, g.minX), maxX = num(b.maxX, g.maxX);
   const minY = num(b.minY, g.minY), maxY = num(b.maxY, g.maxY);
   const gw = Math.max(maxX - minX, 1) + pad * 2;
   const gh = Math.max(maxY - minY, 1) + pad * 2;
-  const scale = Math.min(Math.max(num(Math.min(w / gw, h / gh), 1), 0.35), 1.6);
+  const scale = Math.min(Math.max(num(Math.min(vw / gw, vh / gh), 1), 0.35), 1.6);
   return {
-    x: (minX + maxX) / 2 - w / scale / 2,
-    y: (minY + maxY) / 2 - h / scale / 2,
+    x: (minX + maxX) / 2 - vw / scale / 2,
+    y: (minY + maxY) / 2 - vh / scale / 2,
     scale,
   };
 }

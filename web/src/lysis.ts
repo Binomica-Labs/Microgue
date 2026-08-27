@@ -68,7 +68,10 @@ export function phaseAt(ms: number): Phase {
 export function shards(seed: number, spill: number, n = 18): {
   x: number; y: number; a: number;
 }[] {
-  const s = Number.isFinite(seed) ? seed : 0;
+  // Finiteness is not enough: 1e308 * 12.9898 overflows to Infinity and
+  // Math.sin(Infinity) is NaN, so a shard lands at a NaN coordinate and is
+  // simply never drawn. Wrapped into a range the trig can hold.
+  const s = Number.isFinite(seed) ? seed % 100000 : 0;
   // Guard the spill too, not just the seed: a NaN here produced NaN
   // coordinates, and a shard at a NaN position is simply never drawn.
   const k = Number.isFinite(spill) ? Math.min(Math.max(spill, 0), 1) : 0;

@@ -54,7 +54,8 @@ import { NAME_POOL, listSlots, loadSlot, migrateLegacy,
          saveSlot } from "./saves.js";
 import { makeRng } from "./rng.js";
 import { Toasts } from "./toast.js";
-import { DEFAULT_SETTINGS, SCHEMA, readSave, writeSave,
+import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
+         ZOOM_PREF_MIN, readSave, writeSave,
          type SaveData, type Settings } from "./save.js";
 
 const SAVE_KEY = "microgue:v1";
@@ -240,7 +241,7 @@ class Game {
     this.player.ax = p.x; this.player.ay = p.y;
     this.cursor = { x: p.x, y: p.y };
     this.path = null; this.walk = null;
-    this.zoom = this.tileZoom() * this.settings.zoom;
+    this.zoom = Math.min(Math.max(this.tileZoom() * this.settings.zoom, ZOOM_MIN), ZOOM_MAX);
     this.spotted.clear();
     this.look();
 
@@ -685,11 +686,12 @@ class Game {
    *  the preference is stored as a multiple of it -- otherwise zooming in on a
    *  phone would come back as a different framing on a desktop. */
   setZoom(z: number): void {
-    const next = Math.min(Math.max(z, 0.3), 8);
+    const next = Math.min(Math.max(z, ZOOM_MIN), ZOOM_MAX);
     this.zoom = next;
     const base = this.tileZoom();
     this.settings = { ...this.settings,
-                      zoom: Math.min(Math.max(base > 0 ? next / base : 1, 0.35), 4) };
+                      zoom: Math.min(Math.max(base > 0 ? next / base : 1,
+                                              ZOOM_PREF_MIN), ZOOM_PREF_MAX) };
   }
 
   tileZoom(): number {
@@ -708,7 +710,7 @@ class Game {
     this.canvas.style.width = `${innerWidth}px`;
     this.canvas.style.height = `${innerHeight}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.zoom = this.tileZoom() * this.settings.zoom;
+    this.zoom = Math.min(Math.max(this.tileZoom() * this.settings.zoom, ZOOM_MIN), ZOOM_MAX);
   }
 
   frame(t: number): void {

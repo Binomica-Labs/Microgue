@@ -94,5 +94,10 @@ export function estimate(p: RepairProfile, missing: number): {
   turns: number; atp: number;
 } {
   const m = Math.min(Math.max(Number.isFinite(missing) ? missing : 0, 0), 1e6);
-  return { turns: Math.ceil(m / p.rate), atp: Math.round(m * p.cost) };
+  // The PROFILE was trusted. `profileFor` never yields a zero rate, but this
+  // takes any profile, and dividing by zero here puts "Infinity turns" on a
+  // screen a player reads.
+  const rate = Number.isFinite(p.rate) && p.rate > 1e-6 ? p.rate : BASE_RATE;
+  const cost = Number.isFinite(p.cost) ? p.cost : BASE_COST;
+  return { turns: Math.ceil(m / rate), atp: Math.round(m * cost) };
 }

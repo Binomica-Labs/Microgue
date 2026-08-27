@@ -7,7 +7,8 @@ import { Dungeon, MAX_FLOOR, floorWithin, isBossFloor, strataOf }
 import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
-import { DEFAULT_SETTINGS, SCHEMA, parseSave } from "../src/save.js";
+import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
+         ZOOM_PREF_MIN, parseSave } from "../src/save.js";
 import { ATP_MAX, BIN_CAP, Plasmid, SLOTS, STARTING_PARTS, type Part }
   from "../src/plasmid.js";
 import { MAX_LEVEL, MODIFIERS, PROMOTERS, RARITY, RARITY_IDS, TERMINATORS,
@@ -3333,6 +3334,29 @@ describe("audit regressions", () => {
       run: { deepest: 20, deaths: 0, bestiary: [], library: [] },
     });
     expect(s?.run.deepest, "a floor-20 lineage must not load back as 8").toBe(20);
+  });
+
+  it("the zoom preference survives at both extremes", () => {
+    // Stored as a MULTIPLE of the per-viewport default, so it means the same
+    // on a phone and a desktop. The bound on that multiple has to be wide
+    // enough to express the whole absolute range: the default is floored at
+    // 0.3 and the absolute ceiling is 8, so the ratio runs to about 27. A
+    // hand-picked bound of 4 silently turned "zoomed all the way in on a
+    // phone" into something else entirely on reload.
+    for (const base of [0.3, 0.47, 1.3]) {          // small phone .. desktop
+      for (const target of [0.3, 1, 8]) {           // the full absolute range
+        const ratio = Math.min(Math.max(target / base, ZOOM_PREF_MIN), ZOOM_PREF_MAX);
+        const s = parseSave({
+          version: SCHEMA, depth: 1, seed: 1, px: 1, py: 1, hp: 30, atp: 100,
+          ring: [], bin: [], run: {},
+          settings: { ...DEFAULT_SETTINGS, zoom: ratio },
+        });
+        const back = Math.min(Math.max(base * (s?.settings.zoom ?? 1), ZOOM_MIN), ZOOM_MAX);
+        expect(Math.abs(back - target),
+               `zoom ${String(target)} at base ${String(base)} did not survive`)
+          .toBeLessThan(0.01);
+      }
+    }
   });
 
   it("a developed strain's ATP pool survives the round trip", () => {

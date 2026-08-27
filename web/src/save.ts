@@ -40,6 +40,23 @@ export interface Settings {
  *  read, so the ring/bin rewrite would have fed a gene list into slot code. */
 export const SCHEMA = 11;
 
+/** Absolute world zoom the player may reach. */
+export const ZOOM_MIN = 0.3;
+export const ZOOM_MAX = 8;
+
+/**
+ * Bounds on the STORED preference, which is a multiple of the per-viewport
+ * default rather than an absolute.
+ *
+ * Derived rather than picked. The default is itself floored at ZOOM_MIN and
+ * can reach roughly 5 on a very large display, so the ratio needed to express
+ * the whole absolute range runs from about 0.06 to about 27 -- a hand-chosen
+ * bound of 4 silently turned "zoomed all the way in on a phone" into
+ * something else on reload.
+ */
+export const ZOOM_PREF_MIN = ZOOM_MIN / 8;
+export const ZOOM_PREF_MAX = ZOOM_MAX / ZOOM_MIN;
+
 export interface SaveData {
   readonly version: number;
   readonly depth: number;
@@ -211,7 +228,9 @@ function parseSettings(v: unknown): Settings {
     // Defaulted, not schema-bumped: an older save simply has no zoom
     // preference and gets the standard one, which is better than discarding
     // the save outright.
-    zoom: Math.min(Math.max(num(v["zoom"], 1), 0.35), 4),
+    // Wide enough to REPRESENT any zoom the player can reach; main.ts
+    // re-clamps the absolute value, so a generous bound here is safe.
+    zoom: Math.min(Math.max(num(v["zoom"], 1), ZOOM_PREF_MIN), ZOOM_PREF_MAX),
     uiScale: Math.min(Math.max(num(v["uiScale"], 1), 0.5), 3),
     highContrast: bool(v["highContrast"], false),
     reduceMotion: bool(v["reduceMotion"], false),
