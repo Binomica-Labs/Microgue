@@ -21,6 +21,70 @@ tar xzf "$newest" -C "$tmp"
 src="$tmp/microgue-web"
 [ -f "$src/src/main.ts" ] || { echo "archive looks wrong: no src/main.ts"; exit 1; }
 
+cd "$REPO"
+
+# Pull BEFORE extracting, not after.
+#
+# The tarball is a whole tree, and `cp -r` overwrites whatever it lands on. If
+# the remote has moved on, extracting a tarball built from the older base
+# reverts that work -- and because cp does not delete, any file the newer tree
+# added SURVIVES, leaving a mix of two versions that may not even compile.
+# This happened: the remote reached v0.92 with three modules the tarball had
+# never heard of.
+echo "==> pulling"
+# Git's own diverged-branch hint is six lines of advice about merge strategies
+# and buries the one instruction that matters. Swallow it and say the thing.
+if ! git pull --ff-only --quiet origin "$(git rev-parse --abbrev-ref HEAD)" 2>/dev/null; then
+  echo "==> PULL FAILED: cannot fast-forward."
+  echo "==> the local repo and the remote have BOTH moved on."
+  echo "==>"
+  echo "==> yours:  $(git log --oneline @{u}..HEAD 2>/dev/null | wc -l | tr -d " ") commit(s) not on the remote"
+  git log --oneline @{u}..HEAD 2>/dev/null | sed "s/^/           /"
+  echo "==> theirs: $(git log --oneline HEAD..@{u} 2>/dev/null | wc -l | tr -d " ") commit(s) not here"
+  git log --oneline HEAD..@{u} 2>/dev/null | sed "s/^/           /"
+  echo "==>"
+  echo "==> nothing was extracted or pushed. decide which you want before retrying."
+  exit 1
+fi
+
+# A tarball older than what is already in the repo would revert work. Compare
+# the versions and refuse, because this is the mistake that is invisible until
+# someone notices a feature has vanished.
+# sed, not python3. Termux does not ship python by default, and the failure
+# would have been SILENT: both lookups fall back to 0.0.0, compare equal, and
+# the regression guard quietly does nothing. A guard that disappears when a
+# dependency is missing is worse than no guard, because you think you have one.
+ver() { sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1; }
+have="$(ver web/package.json)"
+want="$(ver "$src/package.json")"
+if [ -z "$have" ] || [ -z "$want" ]; then
+  echo "==> WARNING: could not read a version from package.json."
+  echo "==> the regression guard is NOT active for this run."
+  have=""; want=""
+fi
+if [ -n "$have" ] && [ -n "$want" ] && [ "$have" != "$want" ] && \
+   [ "$(printf '%s\n%s\n' "$have" "$want" | sort -V | head -1)" = "$want" ]; then
+  echo "==> REFUSING: the archive is v$want but the repo is already at v$have."
+  echo "==> extracting it would revert work that is already pushed."
+  echo "==> if you really mean it: FORCE=1 ~/sync.sh \"$MSG\""
+  [ "${FORCE:-0}" = "1" ] || exit 1
+  echo "==> FORCE set; going ahead anyway."
+fi
+
+# Files the repo has and the archive does not. cp leaves these in place, so
+# they end up mixed with an older tree. Listing them is the divergence alarm --
+# they are NOT deleted, because deleting someone else's work automatically is
+# how this goes badly wrong in the other direction.
+extra="$(comm -23 \
+  <(cd "$REPO/web" && find src test -type f -name '*.ts' 2>/dev/null | sort) \
+  <(cd "$src" && find src test -type f -name '*.ts' 2>/dev/null | sort))"
+if [ -n "$extra" ]; then
+  echo "==> WARNING: the repo has files this archive does not:"
+  printf '%s\n' "$extra" | sed 's/^/      /'
+  echo "==> they are being LEFT IN PLACE. if the archive was built without them,"
+  echo "==> the result is two versions mixed together. check it compiles."
+fi
+
 # Mirror the whole extract, not a hand-listed subset. The previous version
 # copied src/ but not test/, which let the repo hold new source against stale
 # tests -- CI caught it, but only after a push.
@@ -31,7 +95,7 @@ if [ -f "$REPO/web/HANDOVER.md" ]; then
   mv "$REPO/web/HANDOVER.md" "$REPO/HANDOVER.md"
 fi
 
-cd "$REPO"
+# (already in $REPO; the pull needed to happen before the extract)
 # "Nothing to push" has to mean nothing LOCAL and nothing UNPUSHED. Checking
 # only the working tree meant a failed push looked identical to being in sync,
 # and the commit sat on the phone indefinitely.

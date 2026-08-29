@@ -9,6 +9,29 @@ Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 
 ---
 
+## sync.sh pulls BEFORE it extracts
+
+The repo reached v0.92 with three modules a tarball had never heard of, while
+a tarball built from an older base sat in Downloads. Extracting it would have
+reverted that work -- and because `cp -r` does not delete, the newer modules
+would have SURVIVED, leaving two versions mixed together in a tree that might
+not even compile.
+
+Four guards, all verified against a scratch repo with a real remote:
+
+* **Pull first**, before the extract, not after. A `--ff-only` pull that fails
+  means local and remote have both moved; it prints BOTH lists of commits and
+  exits 1 without touching anything. Git's own diverged-branch hint is six
+  lines about merge strategies and buries the instruction that matters, so it
+  is swallowed.
+* **Refuse a version regression.** If the archive's version is lower than the
+  repo's, extracting it reverts pushed work. `FORCE=1` overrides, because
+  sometimes you do mean it.
+* **Warn about orphans.** Files the repo has and the archive does not are
+  listed and LEFT IN PLACE -- deleting someone else's work automatically is how
+  this goes badly wrong in the other direction.
+* Exit codes are real: 1 on divergence, 1 on regression.
+
 ## Read this first
 
 Nine things a reasonable-looking change will break. Each of these was arrived
