@@ -4,6 +4,7 @@
 
 import { MORPHOLOGY, type Role, type Shape } from "./shapes.js";
 import { PIXELS, PX_SIZE } from "./pixels.js";
+import type { Phenotype } from "./phenotype.js";
 import type { Facing, Squash } from "./motion.js";
 
 export interface Palette { body: string; dark: string; accent: string; hi: string; }
@@ -127,9 +128,14 @@ function paintPixels(
  * powers of two: at most a handful of entries per organism instead of one per
  * pixel of zoom.
  */
-export function sprite(id: string, size: number, p: Palette): HTMLCanvasElement | null {
-  const art = PIXELS[id];
-  const shapes = MORPHOLOGY[id];
+export function sprite(
+  id: string, size: number, p: Palette, artId = id,
+): HTMLCanvasElement | null {
+  // `artId` lets a caller reuse one drawing under many cache keys -- the
+  // player's body is the same pixels whatever pigment it is expressing, and
+  // giving each palette its own key is how the cache stays correct.
+  const art = PIXELS[artId];
+  const shapes = MORPHOLOGY[artId];
   if (!art && !shapes) return null;
   const want = Math.max(Math.round(size), 4);
   // Pixel art: one entry per organism per palette, whatever the zoom.
@@ -185,8 +191,21 @@ export function sprite(id: string, size: number, p: Palette): HTMLCanvasElement 
   return out;
 }
 
-export function playerSprite(size: number): HTMLCanvasElement | null {
-  return sprite("player", size, PLAYER_PALETTE);
+/**
+ * The player's body, tinted by what it is EXPRESSING.
+ *
+ * Keyed on the phenotype so the offscreen cache is reused between frames --
+ * the palette only changes when the build does, and `Phenotype.key` is
+ * quantised so a drifting expression value does not rasterise a new sprite
+ * every frame.
+ */
+export function playerSprite(
+  size: number, ph?: Phenotype,
+): HTMLCanvasElement | null {
+  if (!ph) return sprite("player", size, PLAYER_PALETTE);
+  return sprite(`player~${ph.key}`, size,
+                { body: ph.body, dark: ph.dark, accent: ph.accent, hi: ph.hi },
+                "player");
 }
 
 // --------------------------------------------------------------- wall motif

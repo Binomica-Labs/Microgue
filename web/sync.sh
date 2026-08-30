@@ -90,9 +90,21 @@ fi
 # tests -- CI caught it, but only after a push.
 cp -r "$src/." "$REPO/web/"
 
-# HANDOVER lives at the repo root: it covers the Lua tree as well as web/.
+# Some files belong at the repo ROOT, not under web/. The archive carries them
+# in web/ because that is all it can carry; they are hoisted here. Each one is
+# announced, because silently overwriting a root file is exactly the kind of
+# thing you want to see in the log when something later goes wrong.
 if [ -f "$REPO/web/HANDOVER.md" ]; then
   mv "$REPO/web/HANDOVER.md" "$REPO/HANDOVER.md"
+fi
+if [ -f "$REPO/web/.gitignore.root" ]; then
+  echo "==> hoisting .gitignore to the repo root"
+  mv "$REPO/web/.gitignore.root" "$REPO/.gitignore"
+fi
+if [ -d "$REPO/web/.github" ]; then
+  echo "==> hoisting .github/ to the repo root"
+  cp -r "$REPO/web/.github/." "$REPO/.github/"
+  rm -rf "$REPO/web/.github"
 fi
 
 # (already in $REPO; the pull needed to happen before the extract)
@@ -109,6 +121,21 @@ if [ -n "$unpushed" ]; then
   printf '%s\n' "$unpushed" | sed 's/^/    /'
 fi
 git status --short
+# Embedded git repositories become a mode-160000 GITLINK: a submodule pointer
+# with no .gitmodules, aimed at a commit that exists only on this machine. The
+# push succeeds, and then CI fails in actions/checkout with "git failed with
+# exit code 128", which says nothing about the cause. Catch it here instead.
+embedded="$(find "$REPO" -mindepth 2 -name .git -not -path "*/node_modules/*" \
+              -printf '%h\n' 2>/dev/null | sed "s|^$REPO/||")"
+if [ -n "$embedded" ]; then
+  echo "==> EMBEDDED GIT REPO(S) inside the tree:"
+  printf '%s\n' "$embedded" | sed 's/^/      /'
+  echo "==> these become dangling submodule pointers and break CI checkout."
+  echo "==> add them to .gitignore, or: git rm --cached <path>"
+  echo "==> nothing was committed."
+  exit 1
+fi
+
 git add -A
 # Only commit if there is something to commit: this may be a retry of a push
 # that failed earlier, with the commit already made.

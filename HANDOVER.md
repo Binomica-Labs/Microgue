@@ -9,6 +9,62 @@ Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 
 ---
 
+## The cell looks like what it expresses
+
+The avatar was a fixed white capsule for the whole game. You spend a run
+assembling pigments, appendages and luciferase and none of it showed -- a
+photoferrotroph and a methanogen looked identical, which threw away the one
+place a build can be read at a glance without opening a screen.
+
+`phenotype.ts` derives the appearance from the plasmid. Every trait is
+something the gene actually does to a real cell: bacteriochlorophyll IS purple,
+sulfur oxidisers DO carry refractile globules, luciferase emits around 490 nm.
+
+* **EXPRESSION, not presence.** A gene on the ring with no promoter upstream
+  makes no protein and changes nothing. Breaking that would make the avatar lie
+  about the build.
+* **Pigment is a weighted argmax, not a blend.** Averaging two strong pigments
+  gave a muddy grey that read as a bug. Pigment saturates; the cell is whichever
+  it makes more of.
+* **Luciferase is an OXYGENASE**, so a cell carrying luxAB into the anoxic
+  strata genuinely goes dark. That falls out of the expression model rather
+  than being special-cased.
+* Pili are drawn short, stiff and around the pole -- they are grappling hooks,
+  not oars, and drawing them as a second flagellum misrepresents pilA.
+
+`sprite()` takes an `artId` so one drawing can be cached under many palettes,
+and `Phenotype.key` is QUANTISED: without that, a drifting supply during a
+brownout rasterised a new sprite sixty times a second. Memoised on revision,
+depth and supply, which took it from 10us a frame to 0.4us. `spec` asserts the
+key is stable under a drifting supply, because that is the failure that would
+never show up as a wrong pixel -- only as a dropped frame.
+
+## An embedded git repo breaks CI, silently
+
+`git add -A` turned a tooling checkout inside the tree into a mode-160000
+GITLINK: a submodule pointer with no `.gitmodules`, aimed at a commit that
+exists only on the machine that made it. The push succeeded. CI then failed
+with `The process '/usr/bin/git' failed with exit code 128`, which says nothing
+about the cause, and the deploy went green anyway because the failure was an
+annotation rather than a step.
+
+`sync.sh` refuses to commit when it finds a `.git` below the top level, listing
+what it found. `.gitignore` covers the known one. Removing an existing gitlink
+is `git rm --cached <path>` -- deleting the directory does NOT do it.
+
+## GitHub Actions: bump only what is verified
+
+The Node 20 deprecation warning is real -- Node 20 is removed from the runners
+in September 2026 -- so `checkout` and `setup-node` are on v5, both confirmed
+to run on node24.
+
+The three Pages actions are deliberately NOT bumped. `upload-pages-artifact`
+has no published v4, and its v3 internally pins `actions/upload-artifact@v4.6.2`
+-- which is where the remaining warning comes from. That pin is inside GitHub's
+action, not this workflow, so it stays until they ship a fix
+(actions/upload-pages-artifact#138). Bumping to a tag that does not exist would
+turn a cosmetic warning into a broken deploy, which is a bad trade.
+
 ## The layout tests were checking a screen they never saw
 
 The scaling stub IGNORED anything drawn inside a `save()`, because the world is

@@ -8,6 +8,7 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { MAX_STACK, countOf, stacks } from "../src/stack.js";
+import { phenotypeOf } from "../src/phenotype.js";
 import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
          ZOOM_PREF_MIN, parseSave } from "../src/save.js";
 import { ATP_MAX, BIN_CAP, Plasmid, SLOTS, STARTING_PARTS, type Part }
@@ -6311,5 +6312,105 @@ describe("duplicate genes stack", () => {
     expect(countOf(s.bin[1]!), "a save minted copies").toBe(MAX_STACK);
     // Unstacked genes round-trip to exactly what they were, with no count.
     expect((s.bin[2] as { count?: number }).count).toBeUndefined();
+  });
+});
+
+describe("the cell looks like what it expresses", () => {
+  const build = (genes: bio.GeneId[]): Plasmid => {
+    const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
+    p.strain = MAX_STRAIN;
+    let s = 4;
+    p.put(s++, { kind: "promoter", id: "j23119" });
+    for (const g of genes) {
+      p.put(s++, { kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.put(s, { kind: "terminator", id: "rrnbt1t2" });
+    return p;
+  };
+
+  it("different metabolisms do not look alike", () => {
+    // The avatar was a fixed white capsule for the whole game. A
+    // photoferrotroph and a methanogen looked identical, which threw away the
+    // one place a build can be read at a glance.
+    // Each at a depth where it can actually express: these genes are
+    // stratum-gated, so testing them all at the surface would only prove that
+    // most of them are switched off there.
+    const bestBody = (genes: bio.GeneId[]): string => {
+      const p = build(genes);
+      let best = phenotypeOf(new Plasmid(), 1).body;
+      for (let d = 1; d <= 8; d++) {
+        const b = phenotypeOf(p, d).body;
+        if (b !== phenotypeOf(new Plasmid(), d).body) best = b;
+      }
+      return best;
+    };
+    const looks = new Set([
+      bestBody(["psbA", "psaA"]),
+      bestBody(["pufM", "pufL"]),
+      bestBody(["fmoA", "csmA"]),
+      bestBody(["mcrA", "hdrB"]),
+      bestBody(["mtrC", "omcS"]),
+      bestBody([]),
+    ]);
+    expect(looks.size, "two builds share a pigment").toBe(6);
+  });
+
+  it("EXPRESSION, not mere presence, changes the look", () => {
+    // A gene sitting on the ring with no promoter upstream makes no protein
+    // and must change nothing. Breaking that here would make the avatar lie
+    // about the build.
+    const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
+    p.put(6, { kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    expect(p.expression("psbA", 1), "the fixture is wrong").toBe(0);
+    expect(phenotypeOf(p, 1).body, "an unexpressed gene changed the colour")
+      .toBe(phenotypeOf(new Plasmid(), 1).body);
+  });
+
+  it("luciferase stops glowing below the oxic zone", () => {
+    // Bacterial luciferase is an OXYGENASE. A cell carrying luxAB into the
+    // anoxic strata genuinely goes dark, and the avatar should show that
+    // rather than glowing all the way down.
+    const p = build(["luxAB"]);
+    expect(phenotypeOf(p, 1).glow, "no glow in the oxic zone").toBeGreaterThan(0.1);
+    expect(phenotypeOf(p, 6).glow, "still glowing without oxygen").toBe(0);
+  });
+
+  it("appendages appear only with the genes that build them", () => {
+    expect(phenotypeOf(build([]), 1).flagellum).toBe(0);
+    expect(phenotypeOf(build(["flhD", "cheA"]), 1).flagellum).toBeGreaterThan(0.2);
+    expect(phenotypeOf(build([]), 1).pili).toBe(0);
+    expect(phenotypeOf(build(["pilA"]), 1).pili).toBeGreaterThan(0);
+  });
+
+  it("the pigment is the dominant one, not a blend", () => {
+    // Averaging two strong pigments gives a muddy grey that reads as a bug.
+    // Pigment saturates; the cell is whichever it makes more of.
+    const both = phenotypeOf(build(["psbA", "psaA", "pufM"]), 1).body;
+    const green = phenotypeOf(build(["psbA", "psaA"]), 1).body;
+    const purple = phenotypeOf(build(["pufM"]), 1).body;
+    expect([green, purple], "the blend is neither of its inputs").toContain(both);
+  });
+
+  it("the cache key is stable under a drifting supply", () => {
+    // It is read once a frame. A key that changed with every brownout tick
+    // would rasterise a new sprite sixty times a second.
+    const p = build(["psbA", "luxAB", "flhD"]);
+    const keys = new Set<string>();
+    for (let i = 0; i < 400; i++) {
+      p.supply = 0.6 + Math.sin(i / 40) * 0.02;
+      keys.add(phenotypeOf(p, 1).key);
+    }
+    expect(keys.size, "the sprite cache would thrash").toBeLessThanOrEqual(2);
+  });
+
+  it("survives a plasmid with nothing on it", () => {
+    const bare = new Plasmid();
+    for (const d of [1, 8]) {
+      const ph = phenotypeOf(bare, d);
+      expect(ph.body).toMatch(/^#[0-9a-f]{6}$/);
+      expect(Number.isFinite(ph.glow)).toBe(true);
+    }
   });
 });

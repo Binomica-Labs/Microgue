@@ -1,10 +1,11 @@
-# Push to main -> verified, built, and live on GitHub Pages.
-# After the one-time setup this is the entire deploy story.
+# Use this INSTEAD of pages.yml if the port lives in web/ inside the existing
+# Microgue repo rather than at the root. Only the two paths differ.
 name: Deploy to Pages
 
 on:
   push:
     branches: [main]
+    paths: ["web/**", ".github/workflows/**"]
   workflow_dispatch:
 
 permissions:
@@ -16,21 +17,35 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+defaults:
+  run:
+    working-directory: web
+
+# Action majors are kept current where a Node 24 major EXISTS and is verified:
+# checkout@v5 and setup-node@v5 both run on node24.
+#
+# The Pages actions are deliberately NOT bumped. `upload-pages-artifact` has no
+# published v4, and its v3 internally pins `actions/upload-artifact@v4.6.2`,
+# which is the Node 20 warning in the build log. That pin is inside GitHub's
+# action, not this workflow, so the warning stays until they ship it -- see
+# actions/upload-pages-artifact#138. Bumping to a tag that does not exist would
+# turn a cosmetic warning into a broken deploy.
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npm run build        # guard + tsc + eslint + tests, then bundle
+      - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: web/public
 
   deploy:
     needs: build

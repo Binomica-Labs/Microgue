@@ -21,6 +21,7 @@ import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
 import { drawBody, paintWallMotif, paletteForPigment, playerSprite, sprite }
   from "./paint.js";
+import { phenotypeOf } from "./phenotype.js";
 import { squashFor, travel, wake } from "./motion.js";
 import { WALL_SPREAD, traceWalls } from "./walls.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
@@ -194,15 +195,22 @@ export function r_draw(_g: Game): void {
 
     const pl = lunges.get("player");
     const lx = pl?.x ?? 0, ly = pl?.y ?? 0;
-    const me = hc ? null : playerSprite(px * 0.92);
+    // The body is tinted by what the plasmid is EXPRESSING, so a
+    // photoferrotroph and a methanogen no longer look alike.
+    const ph = phenotypeOf(_g.genome, _g.dungeon.depth);
+    const me = hc ? null : playerSprite(px * 0.92, ph);
     if (me) {
       const v = travel(_g.player.ax, _g.player.ay, _g.player.x, _g.player.y);
       const sq = squashFor(v);
       // The beat runs always, and faster when swimming. A still flagellum is
       // just a wire; the motion is what makes it read as one.
-      const flag = {
+      // The filament reads as strongly as the cell actually expresses it. A
+      // strain with no flagellar genes should not be trailing one.
+      const flag = ph.flagellum <= 0.02 ? null : {
         phase: _g.now / (_g.settings.reduceMotion ? 1e9 : 130 - v * 60),
-        colour: "#8fe6ff", len: 0.52, amp: 0.15,
+        colour: ph.accent,
+        len: 0.34 + ph.flagellum * 0.3,
+        amp: 0.09 + ph.flagellum * 0.1,
       };
       const bx = (_g.player.ax + lx + 0.5) * px;
       const by = (_g.player.ay + ly + 0.5) * px;
@@ -211,8 +219,43 @@ export function r_draw(_g: Game): void {
         drawBody(ctx, me, bx + w.dx * px, by + w.dy * px, px * 0.92,
                  "rotate", _g.player.heading, sq, w.alpha, "east", 1, null);
       }
+      // Bioluminescence, before the body so the cell sits inside its own
+      // light rather than being washed out by it. Luciferase is an oxygenase,
+      // so this fades on its own as you leave the oxic zone.
+      if (ph.glow > 0.02 && !_g.settings.reduceMotion) {
+        const pulse = 0.85 + Math.sin(_g.now / 620) * 0.15;
+        const r0 = px * (0.5 + ph.glow * 0.7) * pulse;
+        const grad = ctx.createRadialGradient(bx, by, px * 0.1, bx, by, r0);
+        grad.addColorStop(0, `rgba(157,251,255,${String(0.36 * ph.glow)})`);
+        grad.addColorStop(1, "rgba(157,251,255,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(bx, by, r0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       drawBody(ctx, me, bx, by, px * 0.92, "rotate", _g.player.heading, sq,
                1, "east", 1, flag);
+      // Pili: short, stiff, and around the pole rather than trailing. They are
+      // grappling hooks, not oars, and drawing them as a second flagellum
+      // misrepresents what pilA does.
+      if (ph.pili > 0.05) {
+        ctx.strokeStyle = ph.accent;
+        ctx.globalAlpha = 0.4 + ph.pili * 0.4;
+        ctx.lineWidth = Math.max(px * 0.03, 0.8);
+        ctx.lineCap = "round";
+        const n = 3 + Math.round(ph.pili * 3);
+        for (let i = 0; i < n; i++) {
+          const a = (_g.player.heading ?? 0) + (i / n - 0.5) * 1.5;
+          const wob = Math.sin(_g.now / 400 + i * 2.1) * 0.12;
+          const len = px * (0.28 + ph.pili * 0.16);
+          ctx.beginPath();
+          ctx.moveTo(bx + Math.cos(a) * px * 0.3, by + Math.sin(a) * px * 0.3);
+          ctx.lineTo(bx + Math.cos(a + wob) * (px * 0.3 + len),
+                     by + Math.sin(a + wob) * (px * 0.3 + len));
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
     } else {
       ctx.fillStyle = "#0ff";
       ctx.fillRect((_g.player.ax + lx) * px + px * 0.18,
