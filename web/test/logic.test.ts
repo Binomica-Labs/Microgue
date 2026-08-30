@@ -6040,3 +6040,89 @@ describe("the ring closes, at every size", () => {
     }
   });
 });
+
+describe("compound edits are all or nothing", () => {
+  const genes = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+  const snap = (p: Plasmid): string => JSON.stringify({
+    slots: p.slots, bin: p.bin, integrated: p.integrated, traits: [...p.traits],
+  });
+
+  it("a refused assemble leaves the bin exactly as it was", () => {
+    // It splices parts OUT of the bin and then places them, so a refused
+    // `put` partway through destroyed whatever had already been removed.
+    for (let seed = 0; seed < 300; seed++) {
+      const p = new Plasmid();
+      p.integrated = seed % 5;
+      for (let i = 0; i < seed % 6; i++) {
+        const g = genes[(seed * 7 + i) % genes.length];
+        if (g) p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      const want = [genes[seed % genes.length], genes[(seed + 3) % genes.length],
+                    genes[(seed + 7) % genes.length]].filter((g) => g !== undefined);
+      const before = snap(p);
+      const r = p.assemble(want);
+      if (!r.ok) {
+        expect(snap(p), `refused (${r.err}) but changed the plasmid`).toBe(before);
+      }
+    }
+  });
+
+  it("assemble conserves parts: nothing is spliced out and dropped", () => {
+    // Not a regression test -- `norm` wraps at `usableSlots`, so the `put`
+    // this worried about cannot currently refuse. It is a CONSERVATION check:
+    // assemble removes parts from the bin and places them, and the count
+    // across bin and ring must not change. That property is what would break
+    // first if the wrap rule were ever loosened again.
+    for (let sites = 0; sites <= 4; sites++) {
+      const p = new Plasmid();
+      p.integrated = sites;
+      p.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+      const before = p.bin.filter((x) => x.kind === "terminator").length
+        + p.slots.filter((x) => x?.kind === "terminator").length;
+      p.assemble(["psbA"]);
+      const after = p.bin.filter((x) => x.kind === "terminator").length
+        + p.slots.filter((x) => x?.kind === "terminator").length;
+      expect(after, `${String(sites)} sites: a terminator vanished`).toBe(before);
+    }
+  });
+
+  it("a throw inside a transaction rolls back AND is re-raised", () => {
+    // Rolling back is not the same as pretending nothing went wrong.
+    // Swallowing the throw would turn a crash into silent corruption.
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    const before = snap(p);
+    expect(() => p.transact(() => {
+      p.bin.length = 0;
+      p.put(4, { kind: "promoter", id: "j23119" });
+      throw new Error("boom");
+    })).toThrow("boom");
+    expect(snap(p), "a throw left the plasmid half-edited").toBe(before);
+  });
+
+  it("a failing transaction restores both the ring and the bin", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    const before = snap(p);
+    const r = p.transact(() => {
+      p.bin.splice(0, 2);
+      p.put(5, { kind: "terminator", id: "hairpin" });
+      return { ok: false, err: "no" };
+    });
+    expect(r.ok).toBe(false);
+    expect(snap(p)).toBe(before);
+  });
+
+  it("a succeeding transaction keeps its changes", () => {
+    // Atomic must not mean inert.
+    const p = new Plasmid();
+    const before = snap(p);
+    const r = p.transact(() => {
+      p.put(5, { kind: "terminator", id: "hairpin" });
+      return { ok: true };
+    });
+    expect(r.ok).toBe(true);
+    expect(snap(p)).not.toBe(before);
+    expect(p.at(5)?.kind).toBe("terminator");
+  });
+});

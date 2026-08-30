@@ -56,21 +56,48 @@ export function listSlots(): (SlotInfo | null)[] {
   return out;
 }
 
-function writeIndex(list: (SlotInfo | null)[]): void {
+function writeIndex(list: (SlotInfo | null)[]): boolean {
   try {
     localStorage.setItem(INDEX_KEY, JSON.stringify(list.filter((s) => s !== null)));
-  } catch { /* quota or private browsing */ }
+    return true;
+  } catch { return false; }
 }
 
-export function saveSlot(slot: number, name: string, data: SaveData, genes: number): void {
-  if (slot < 0 || slot >= SLOTS) return;
-  writeSave(slotKey(slot), data);
+/**
+ * Write a save and its index entry, or neither.
+ *
+ * Two keys, one outcome. An index without its save shows a slot that will not
+ * load; a save without its index is invisible on the splash. Reporting failure
+ * is not enough on its own -- the half-written state stays on disk.
+ */
+export function saveSlot(
+  slot: number, name: string, data: SaveData, genes: number,
+): boolean {
+  if (slot < 0 || slot >= SLOTS) return false;
+
+  // Even READING throws in some private-browsing modes, and a save routine
+  // that throws is worse than one that fails.
+  let previous: string | null;
+  try { previous = localStorage.getItem(slotKey(slot)); } catch { previous = null; }
+  const previousIndex = listSlots();
+
+  if (!writeSave(slotKey(slot), data)) return false;   // nothing written at all
+
   const list = listSlots();
   list[slot] = {
     slot, name: name.slice(0, 18) || "unnamed",
     depth: data.depth, genes, updated: Date.now(),
   };
-  writeIndex(list);
+  if (writeIndex(list)) return true;
+
+  // The index would not take it, so put the save back as it was. A rollback
+  // that itself fails is the end of what can be done from here.
+  try {
+    if (previous === null) localStorage.removeItem(slotKey(slot));
+    else localStorage.setItem(slotKey(slot), previous);
+    writeIndex(previousIndex);
+  } catch { /* storage is gone; nothing further is possible */ }
+  return false;
 }
 
 export function loadSlot(slot: number): SaveData | null {

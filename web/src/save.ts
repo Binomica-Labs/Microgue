@@ -302,10 +302,19 @@ export function readSave(key: string): SaveData | null {
   }
 }
 
-export function writeSave(key: string, data: SaveData): void {
+/**
+ * Write a save. Returns whether it actually landed.
+ *
+ * Losing a save is better than crashing -- but losing one SILENTLY is worse
+ * than either, and this returned void the whole way up. On a full quota or in
+ * private browsing every save failed, nothing anywhere said so, and the run
+ * vanished when the tab closed.
+ */
+export function writeSave(key: string, data: SaveData): boolean {
   try {
     localStorage.setItem(key, JSON.stringify(data));
+    return true;
   } catch {
-    // Quota or private browsing. Losing a save is better than crashing.
+    return false;
   }
 }

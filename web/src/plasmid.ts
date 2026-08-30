@@ -57,6 +57,7 @@ import { CHLOROSOME, COST_PER_KB, GENERATORS, NEEDS, O2_LABILE, WASTE_PER_UNIT }
   from "./metabolism.js";
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
+import { buildOperon } from "./operon.js";
 import { capacityFor, copiesFor, copyBurden, dosage, slotsFor,
          type TraitId } from "./chromosome.js";
 import { TERMINATORS } from "./parts.js";
@@ -102,6 +103,46 @@ export class Plasmid {
       { kind: "terminator", id: "rrnbt1" },
       { kind: "terminator", id: "rrnbt1" },
     );
+  }
+
+  /**
+   * Run a compound edit, or leave nothing behind.
+   *
+   * Validating everything before touching anything is better where it is
+   * possible -- `expand`, `acquire` and `buy` all do that. But a multi-step
+   * edit that places parts one at a time cannot always know its last failure
+   * in advance: `assemble` splices parts OUT of the bin and then places them,
+   * and a refused `put` partway through destroys whatever it had removed.
+   *
+   * Snapshots the ring and the bin, runs `fn`, and restores both if it returns
+   * a failure OR throws. A throw is re-raised afterwards: rolling back is not
+   * the same as pretending nothing went wrong, and swallowing it would turn a
+   * crash into silent corruption -- which is the failure class this exists to
+   * remove.
+   *
+   * A shallow copy of each array is enough. Parts are replaced wholesale,
+   * never mutated in place; a deep copy would be slower and would HIDE a real
+   * bug if that ever stopped being true.
+   */
+  transact(fn: () => Result): Result {
+    const slots = this.slots.slice();
+    const bin = this.bin.slice();
+    const restore = (): void => {
+      this.slots.length = 0;
+      this.slots.push(...slots);
+      this.bin.length = 0;
+      this.bin.push(...bin);
+      this.touch();
+    };
+    let out: Result;
+    try {
+      out = fn();
+    } catch (e) {
+      restore();
+      throw e;
+    }
+    if (!out.ok) restore();
+    return out;
   }
 
   /** Put a part in the bin rather than on the ring. */
@@ -161,7 +202,9 @@ export class Plasmid {
    * have -- which is how `assemble` stranded parts at 16 on a 16-slot
    * backbone, and why transcription never actually wrapped.
    */
-  private norm(i: number): number {
+  /** @internal: public because operon building lives in operon.ts, and the
+   *  ring's wrap rule is exactly what it needs. */
+  norm(i: number): number {
     const used = this.usableSlots;
     const k = Number.isFinite(i) ? Math.round(i) : 0;
     return ((k % used) + used) % used;
@@ -726,85 +769,8 @@ export class Plasmid {
     return out;
   }
 
-  /** Lay a module out as one operon: promoter, genes in reaction order, then a
-   *  terminator if one is spare.
-   *
-   *  Deliberately NOT a free win. It needs a promoter from the bin and a run of
-   *  contiguous free slots, and it fails with a reason rather than shuffling
-   *  the ring for you. The arrangement puzzle -- promoter strength, polarity
-   *  order, what you displace -- stays yours; this only saves the dragging. */
-  assemble(genes: readonly GeneId[]): Result {
-    const missing = genes.filter((g) => !this.has(g) && !this.inBin(g));
-    if (missing.length > 0) {
-      return { ok: false, err: `missing ${missing.map((g) => GENES[g].name).join(", ")}` };
-    }
-
-    const pi = this.bin.findIndex((p) => p.kind === "promoter");
-    if (pi < 0) return { ok: false, err: "no spare promoter in the bin" };
-
-    // A run long enough for promoter + genes, ignoring slots those genes
-    // already occupy since they are about to move.
-    const movable = new Set<number>();
-    this.slots.forEach((p, i) => {
-      if (p?.kind === "gene" && genes.includes(p.id)) movable.add(i);
-    });
-    const usable = (i: number): boolean =>
-      // A slot past the replicon's last position is not free, it does not
-      // exist. `add` and `install` already refuse those; assemble did not, so
-      // it would happily lay an operon down where nothing could reach it.
-      this.usable(this.norm(i))
-      && (this.slots[this.norm(i)] === null || movable.has(this.norm(i)));
-
-    const need = genes.length + 1;
-    let start = -1;
-    for (let i = 0; i < this.usableSlots; i++) {
-      let ok = true;
-      for (let k = 0; k < need; k++) if (!usable(i + k)) { ok = false; break; }
-      if (ok) { start = i; break; }
-    }
-    if (start < 0) {
-      return { ok: false, err: `needs ${need} contiguous free slots` };
-    }
-
-    // Claimed FIRST, while `pi` still means what it meant. Pulling the genes
-    // splices the bin, and every gene below the promoter shifted it down one:
-    // running this last, `pi` pointed at the wrong part or off the end, and
-    // off the end returned "no spare promoter" AFTER the genes had left the
-    // ring -- destroying all of them on a path that reports a refusal.
-    const promoter = this.bin[pi];
-    if (!promoter) return { ok: false, err: "no spare promoter in the bin" };
-    this.bin.splice(pi, 1);
-
-    // Pull the genes off the ring, then lay everything down in order. Each
-    // lookup is a fresh findIndex, so these splices cannot strand each other.
-    const parts: Part[] = [];
-    for (const g of genes) {
-      const at = this.slots.findIndex((p) => p?.kind === "gene" && p.id === g);
-      if (at >= 0) {
-        const p = this.slots[at];
-        if (p) parts.push(p);
-        this.slots[at] = null;
-      } else {
-        const bi = this.bin.findIndex((p) => p.kind === "gene" && p.id === g);
-        const p = this.bin[bi];
-        if (p) { parts.push(p); this.bin.splice(bi, 1); }
-      }
-    }
-
-    // Wrapped explicitly. `put` no longer wraps for us, and the run really can
-    // cross the end of the ring -- that is what a circular plasmid is.
-    this.put(this.norm(start), promoter);
-    parts.forEach((p, k) => { this.put(this.norm(start + 1 + k), p); });
-
-    // Cap it if a terminator is spare and the next slot is free.
-    const tail = this.norm(start + need);
-    const ti = this.bin.findIndex((p) => p.kind === "terminator");
-    if (ti >= 0 && this.slots[tail] === null) {
-      const t = this.bin[ti];
-      if (t) { this.bin.splice(ti, 1); this.put(tail, t); }
-    }
-    return { ok: true };
-  }
+    /** Lay a whole operon down from the bin. See operon.ts. */
+  assemble(genes: readonly GeneId[]): Result { return buildOperon(this, genes); }
 
   /** Complexes active right now: every gene in one operon and all expressing
    *  at this depth. A kit built for the sulfidic zone is inert at the surface. */

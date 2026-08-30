@@ -9,6 +9,42 @@ Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 
 ---
 
+## Atomicity: three mechanisms, not one
+
+**Validate before you touch.** `expand`, `acquire` and `buy` already do this.
+It is the right pattern wherever the last failure point is knowable in advance.
+
+**Transact where it is not.** `Plasmid.transact` snapshots the ring and the
+bin, runs the edit, and restores both if it returns a failure OR throws -- the
+throw is re-raised, because rolling back is not the same as pretending nothing
+went wrong, and swallowing it turns a crash into silent corruption. `assemble`
+runs inside one: it splices parts OUT of the bin and then places them.
+
+A shallow copy of each array is enough. Parts are replaced wholesale, never
+mutated in place; a deep copy would be slower and would HIDE a real bug if that
+ever stopped being true.
+
+**Roll back a partial write.** `saveSlot` writes TWO keys. An index without its
+save shows a slot that will not load; a save without its index is invisible on
+the splash. The whole chain returned void and swallowed the exception, so on a
+full quota or in private browsing EVERY save failed, nothing said so, and the
+run vanished when the tab closed. It reports now, rolls the save back if the
+index refuses, guards even the READ (`getItem` throws in some private-browsing
+modes), and the game warns ONCE and keeps playing.
+
+**A claim I got wrong, recorded so it is not repeated.** I said the tail
+terminator in `assemble` was being destroyed by a `put` that refuses an
+unusable position. It is not: `norm` wraps at `usableSlots`, so a normalised
+index is ALWAYS usable -- 2720 combinations checked, none unusable. The guard I
+added was dead code and has been removed; a guard for a case that cannot arise
+reads as evidence that it can. The test stayed, reframed as what it actually
+is: a CONSERVATION check that assemble never drops a part, which is the
+property that would break first if the wrap rule were loosened again.
+
+Every guard here was verified by reintroducing its bug and watching the test
+fail. Two of the five did NOT fail on the first attempt, which is exactly why
+that step is not optional.
+
 ## sync.sh pulls BEFORE it extracts
 
 The repo reached v0.92 with three modules a tarball had never heard of, while

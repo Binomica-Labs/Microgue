@@ -1492,3 +1492,102 @@ describe("the chromosome is reachable from play", () => {
       .toBeGreaterThan(0);
   });
 });
+
+describe("a save is two keys but one outcome", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const mkData = async () => {
+    const { parseSave, SCHEMA } = await import("../src/save.js");
+    return parseSave({
+      version: SCHEMA, depth: 3, floor: 3, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [], bin: [], run: {}, settings: {}, heldMods: [], turn: 0,
+      stocked: [], integrated: 0, traits: [],
+    });
+  };
+
+  it("a save the index refuses is rolled back, not left orphaned", async () => {
+    // An index without its save shows a slot that will not load; a save
+    // without its index is invisible on the splash. Reporting failure is not
+    // enough on its own -- the half-written state stays on disk.
+    const { saveSlot, loadSlot } = await import("../src/saves.js");
+    const data = await mkData();
+    expect(data).not.toBeNull();
+    if (!data) return;
+
+    const store = new Map<string, string>();
+    let failIndex = false;
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (failIndex && k.includes("index")) throw new Error("full");
+        store.set(k, v);
+      },
+      removeItem: (k: string) => { store.delete(k); },
+    });
+
+    expect(saveSlot(1, "first", data, 2), "the good write failed").toBe(true);
+    const good = JSON.stringify(loadSlot(1));
+
+    failIndex = true;
+    expect(saveSlot(1, "second", { ...data, floor: 9 }, 2)).toBe(false);
+    expect(JSON.stringify(loadSlot(1)), "the refused save overwrote the old one")
+      .toBe(good);
+  });
+
+  it("nothing is written at all when the save itself is refused", async () => {
+    const { saveSlot, listSlots } = await import("../src/saves.js");
+    const data = await mkData();
+    if (!data) return;
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string) => {
+        if (k.includes("slot")) throw new Error("full");
+        store.set(k, "[]");
+      },
+      removeItem: (k: string) => { store.delete(k); },
+    });
+    expect(saveSlot(2, "nope", data, 1)).toBe(false);
+    expect(listSlots()[2], "an index entry was written for a save that failed")
+      .toBeFalsy();
+  });
+
+  it("saving does not throw when storage refuses even to be read", async () => {
+    const { saveSlot } = await import("../src/saves.js");
+    const data = await mkData();
+    if (!data) return;
+    vi.stubGlobal("localStorage", {
+      getItem: () => { throw new Error("blocked"); },
+      setItem: () => { throw new Error("blocked"); },
+      removeItem: () => { throw new Error("blocked"); },
+    });
+    expect(() => saveSlot(0, "x", data, 0)).not.toThrow();
+    expect(saveSlot(0, "x", data, 0)).toBe(false);
+  });
+
+  it("a full quota is reported to the player, once, and play continues", async () => {
+    // The whole chain returned void, so every save failed, nothing said so,
+    // and the run vanished when the tab closed.
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: () => { throw new Error("QuotaExceededError"); },
+      removeItem: (k: string) => { store.delete(k); },
+    });
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    for (let i = 0; i < 30; i++) { g.press("wait"); g.frame(i * 40); }
+
+    const warned = g.toasts.all().filter((t) => t.text.toLowerCase().includes("storage"));
+    expect(warned.length, "storage failed silently").toBeGreaterThan(0);
+    expect(warned.length, `${String(warned.length)} identical warnings is noise`)
+      .toBeLessThanOrEqual(1);
+    expect(g.dead, "it stopped playing because it could not save").toBe(false);
+  });
+});

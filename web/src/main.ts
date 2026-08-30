@@ -138,6 +138,8 @@ class Game {
   /** Modifiers held but not yet attached to a gene. */
   mods: ModifierId[] = [];
   won = false;
+  /** Set once storage has refused a write, so it is said once. */
+  storageWarned = false;
   /** Set when the strain dies. A dead strain does not act. */
   dead = false;
   deathRecord: RunRecord | null = null;
@@ -558,7 +560,19 @@ class Game {
       settings: this.settings,
     };
     writeSave(SAVE_KEY, data);
-    saveSlot(this.slot, this.runName, data, this.genome.carried().size);
+    // Say so ONCE if the write fails. Every turn would be unusable noise, and
+    // saying nothing at all is how a whole run disappears on tab close. The
+    // game keeps running either way: refusing to play is not an improvement
+    // on refusing to save.
+    if (saveSlot(this.slot, this.runName, data, this.genome.carried().size)) {
+      this.storageWarned = false;
+    } else if (!this.storageWarned) {
+      this.storageWarned = true;
+      this.toasts.push("Cannot save — storage is full or blocked.", "error", this.now);
+      this.note("The lab cannot write to disk. Progress this run will be lost "
+        + "when the page closes. Free some space, or leave private browsing.");
+      this.trace.push(this.clock.turn, "note", "save failed: storage");
+    }
   }
 
   /** Load a parsed save into live state. Shared by slot loading and boot. */
