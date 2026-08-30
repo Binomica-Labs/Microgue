@@ -12,6 +12,7 @@ import { creditFor, recordRun, stockCap } from "./lab.js";
 import { writeLab } from "./lab_save.js";
 import { deleteSlot } from "./saves.js";
 import { quality } from "./allele.js";
+import { countOf } from "./stack.js";
 import { MAX_FLOOR } from "./dungeon.js";
 import type { ResearchRow } from "./screens.js";
 import type { Game } from "./main.js";
@@ -103,15 +104,19 @@ export function t_catabolise(_g: Game, binIndex: number): void {
   // A better allele is more intact DNA and yields more, which keeps the choice
   // honest: eating a good roll costs you the good roll.
   const grade = part.kind === "gene" ? quality(part.allele) : 1;
-  const hp = Math.max(Math.round(kb * 2.4 * grade), 1);
-  const atp = Math.max(Math.round(kb * 5.5 * grade), 1);
+  // The WHOLE stack. Eating one copy of three and leaving two would need the
+  // player to tap three times for one decision, and the confirm already asks.
+  const n = countOf(part);
+  const hp = Math.max(Math.round(kb * 2.4 * grade * n), 1);
+  const atp = Math.max(Math.round(kb * 5.5 * grade * n), 1);
 
   _g.genome.bin.splice(binIndex, 1);
   _g.player.hp = Math.min(_g.player.hp + hp, _g.player.maxhp);
   _g.player.atp = Math.min(_g.player.atp + atp, _g.player.atpMax);
   _g.fx.add({ kind: "ring", t0: _g.now, dur: 460, x: _g.player.x, y: _g.player.y,
               colour: "#a0ffd0", r: 1.8 });
-  _g.note(`You digest the cassette. ${kb.toFixed(1)} kb of nucleotide, `
+  _g.note(`You digest ${n > 1 ? `${String(n)} cassettes` : "the cassette"}. `
+    + `${(kb * n).toFixed(1)} kb of nucleotide, `
     + `recovered as phosphate and base. +${String(hp)} hp, +${String(atp)} ATP.`);
   _g.save();
 }

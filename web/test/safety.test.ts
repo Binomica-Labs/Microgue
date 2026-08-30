@@ -176,12 +176,16 @@ describe("the module split holds", () => {
     // `const { ctx } = this` survived in eighteen places and would have been
     // a runtime error the moment those functions ran.
     for (const f of ["turn.ts", "input.ts", "render.ts"]) {
-      // Strip BLOCK comments as well as line comments: a `/** ... this ... */`
-      // doc comment was flagged as binding `this`, which is a false positive
-      // that teaches you to ignore the test.
+      // Strip comments AND string literals. A doc comment mentioning "this"
+      // was flagged once; then a player-facing string -- "Catabolise this one,
+      // or leave it" -- was flagged too. Every false positive teaches you to
+      // ignore the test, which costs more than the test is worth.
       const code = read(f)
         .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/.*$/gm, "");
+        .replace(/\/\/.*$/gm, "")
+        .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+        .replace(/'(?:[^'\\]|\\.)*'/g, "''");
       const stray = code.split("\n")
         .filter((l) => /(?<![\w.$])this(?![\w$])/.test(l));
       expect(stray, `${f} still binds \`this\``).toEqual([]);

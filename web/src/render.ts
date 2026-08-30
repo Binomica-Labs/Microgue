@@ -5,15 +5,15 @@
 // plasmid, the effect queue and the view all at once, so they take the Game.
 
 export { r_drawFx } from "./fx_render.js";
+export { r_drawHud } from "./hud_render.js";
+import { r_drawOffer } from "./hud_render.js";
 import { BIN_CAP } from "./plasmid.js";
 import { SIZES } from "./behaviour.js";
 import { BARRIERS } from "./barrier.js";
-import { MAX_FLOOR, Dungeon } from "./dungeon.js";
 import { boundsOf, centreOf, stretchOf } from "./footprint.js";
 import { cloudAlpha, cloudTiles } from "./projectile.js";
 import { describe as describeSlot, drawBinList, drawItemCard, drawRing }
   from "./plasmid_ui.js";
-import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { clampView, drawGraph, fitView, frame, litBounds } from "./kegg_ui.js";
 import { drawClose, stage } from "./chrome.js";
 import { isSeen, isVisible } from "./fov.js";
@@ -23,14 +23,11 @@ import { drawBody, paintWallMotif, paletteForPigment, playerSprite, sprite }
   from "./paint.js";
 import { squashFor, travel, wake } from "./motion.js";
 import { WALL_SPREAD, traceWalls } from "./walls.js";
-import { timeName } from "./cycle.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
 import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash, ellipsise }
   from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
-import { MAX_STRAIN, levelProgress } from "./strain.js";
-import { t_visibleHostile } from "./turn.js";
 import { NAME_POOL } from "./saves.js";
 import { Effects, easeOutQuad }
   from "./fx.js";
@@ -375,6 +372,9 @@ export function r_draw(_g: Game): void {
 
     _g.drawScreenFx(W, H);
     _g.drawHud(W, H);
+    // Over the HUD: it is a decision about the tile you are standing on, and
+    // it has to be answerable before anything else is.
+    r_drawOffer(_g, Math.max(Math.min(W, H) / 420, 1), W, H);
     if (_g.openDrop) {
       drawContainer(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)), Math.max(Math.min(W, H) / 420, 1),
                     _g.openDrop, _g.dropBoxes, (t, w) => _g.wrap(t, w));
@@ -518,145 +518,6 @@ export function r_drawEmergency(_g: Game, msg: string): void {
     } catch { /* nothing left to try */ }
   }
 
-export function r_drawHud(_g: Game, W: number, H: number): void {
-    const { ctx } = _g;
-    const ins = _g.insets();
-    const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
-    const pad = 8 * u;
-    const left = ins.left + pad;
-    const s = _g.level.stratum;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-
-    const L: HudLayout = {
-      u, left: ins.left, right: ins.right, top: ins.top, bottom: ins.bottom,
-      w: W, h: H, reserve: _g.barH,
-    };
-
-    // The column gauge: eight bands in their stratum colours, your depth
-    // marked. The game's structure, drawn literally.
-    const gaugeW = drawColumn(ctx, L, _g.dungeon.depth);
-    // A sealed floor must say so, or the blocked stair reads as a bug.
-    const sealed = !Dungeon.isCleared(_g.level);
-    const upBtn = _g.buttons.find((b) => b.id === "up");
-    const downBtn = _g.buttons.find((b) => b.id === "down");
-    if (upBtn) upBtn.enabled = _g.dungeon.depth > 1;
-    if (downBtn) downBtn.enabled = _g.level.down !== null;
-    const pl = _g.buttons.find((b) => b.id === "plasmid");
-    if (pl) pl.active = _g.showPlasmid;
-
-    const barX = left + gaugeW;
-    const barW = Math.min(W - barX - ins.right - pad, 260 * u);
-    // The gauges are capped at 260u; the status LINE gets whatever is actually
-    // there, or it is ellipsised against a width narrower than the screen.
-    const statusW = W - barX - ins.right - pad;
-    const size = Math.min(_g.fitFont(s.name, barW - 12, 13 * u), 13 * u);
-    ctx.font = `${size}px ui-monospace,monospace`;
-    const lh = size * 1.35;
-    const barH = lh * 2.6 + pad;
-    const barTop = H - ins.bottom - barH;
-    _g.barH = barH;
-
-    ctx.fillStyle = "rgba(0,0,0,0.62)";
-    ctx.fillRect(0, barTop, W, barH + ins.bottom);
-
-    ctx.fillStyle = s.accent;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    // MEASURED. Real Chrome showed this running off the right edge of every
-    // phone: "before dawn" arriving as "before da".
-    const status = `F${_g.dungeon.floor}/${MAX_FLOOR}${sealed ? " \u26D4" : ""} ${s.name}  `
-      + `${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV  ${timeName(_g.clock)}`;
-    ctx.fillText(ellipsise(ctx, status, statusW), barX, barTop + lh * 0.9);
-
-    // One row: hp gauge, then plain readouts. A miniature plasmid ring used to
-    // sit here and read as an unexplained circle, so it is gone -- the real
-    // ring is one tap away and legible.
-    const gaugeH = Math.max(lh * 0.8, 12);
-    const hpW = Math.min(barW * 0.44, 150 * u);
-    drawBar(ctx, barX, barTop + lh * 1.15, hpW, gaugeH,
-            _g.player.hp / _g.player.maxhp, "#4fbf6a",
-            `hp ${Math.max(_g.player.hp, 0)}/${_g.player.maxhp}`,
-            `${size * 0.86}px ui-monospace,monospace`);
-
-    const bal = _g.genome.atpBalance(_g.dungeon.depth);
-    drawBar(ctx, barX + hpW + 8 * u, barTop + lh * 1.15, hpW, gaugeH,
-            _g.player.atp / _g.player.atpMax,
-            bal >= 0 ? "#4a9fd8" : "#c86a3a",
-            `atp ${Math.round(_g.player.atp)}  ${bal >= 0 ? "+" : ""}${bal.toFixed(1)}`,
-            `${size * 0.86}px ui-monospace,monospace`);
-
-    // Strain progress. A thin line rather than a third gauge: it advances
-    // slowly and over the whole run, so it should not compete with hp and ATP
-    // for attention.
-    const prog = levelProgress({
-      catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
-    });
-    const sy = barTop + lh * 1.15 + gaugeH + 3 * u;
-    const sw = hpW * 2 + 8 * u;
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.fillRect(barX, sy, sw, Math.max(2 * u, 2));
-    ctx.fillStyle = _g.genome.strain >= MAX_STRAIN ? "#7fe0a4" : "#cfe04a";
-    ctx.fillRect(barX, sy, sw * prog, Math.max(2 * u, 2));
-
-    // Explore is unavailable while anything is in view. Greyed rather than
-    // hidden: a button that vanishes is harder to learn than one that dims.
-    const ex = _g.buttons.find((b) => b.id === "explore");
-    if (ex) ex.enabled = t_visibleHostile(_g) === null;
-
-    const ops = _g.genome.operons().filter((op) => op.genes.length > 0).length;
-    ctx.font = `${size * 0.86}px ui-monospace,monospace`;
-    ctx.fillStyle = "#ffffff";
-    ctx.textBaseline = "middle";
-    // Shortened and measured: the long form clipped off the right edge.
-    const tailX = barX + hpW * 2 + 18 * u;
-    const room = W - ins.right - 6 * u - tailX;
-    const long = `${ops} operon${ops === 1 ? "" : "s"}   ${_g.dungeon.aliveCount()} hostile`;
-    const short = `${ops}op  ${_g.dungeon.aliveCount()}hp`;
-    // The SHORT form was never measured either; on a 320-wide phone it
-    // overflows too, and there is nothing below it to fall back to.
-    const tail = ctx.measureText(long).width <= room ? long
-      : ctx.measureText(short).width <= room ? short : "";
-    if (tail !== "") ctx.fillText(tail, tailX, barTop + lh * 1.15 + gaugeH / 2);
-    ctx.textBaseline = "alphabetic";
-
-    const LIFE = 9000;
-    const FADE = 2000;
-    const now = performance.now();
-    const wrapped: { line: string; alpha: number }[] = [];
-    const logW = W - barX - ins.right - pad;
-    // Wrap at the font the log is DRAWN in. The readout above sets 0.86*size,
-    // so wrapping under it and drawing at full size underestimated by 16%.
-    ctx.font = `${size}px ui-monospace,monospace`;
-    for (const entry of _g.log) {
-      const age = now - entry.t;
-      if (age > LIFE) continue;
-      const alpha = age > LIFE - FADE ? (LIFE - age) / FADE : 1;
-      // Wrapped to where it is DRAWN: the log sits at barX, indented past the
-      // gauge, so wrapping to the full width overran by exactly that gauge.
-      for (const line of _g.wrap(entry.text, logW)) wrapped.push({ line, alpha });
-    }
-    const shown = wrapped.slice(-4);
-    // +lh: text is positioned by baseline, so the top line's ascender sits
-    // ABOVE its y. Sizing the panel to shown.length*lh left it exposed.
-    const logH = shown.length > 0 ? (shown.length + 0.4) * lh + pad * 0.5 : 0;
-    _g.logH = logH;
-
-    if (logH > 0) {
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(0, barTop - logH, W, logH);
-    }
-    ctx.font = `${size}px ui-monospace,monospace`;
-
-    for (let i = shown.length - 1; i >= 0; i--) {
-      const row = shown[i];
-      if (row === undefined) continue;
-      ctx.globalAlpha = row.alpha;
-      ctx.fillStyle = "#cfe8d4";
-      ctx.fillText(row.line, barX, barTop - (shown.length - i) * lh - pad * 0.25);
-    }
-    ctx.globalAlpha = 1;
-  }
 
 export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
@@ -686,24 +547,47 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+
+    // Sized to the RING, not to the screen.
+    //
+    // These were `15 * u`, scaled by the smaller screen dimension, while the
+    // ring hole is sized from `H * 0.46`. On a wide, short screen the hole
+    // shrinks and the text does not, so the readout was drawn straight across
+    // the plasmid -- which is what a landscape phone actually looked like.
+    // 0.86 of the diameter, not the diameter: a chord across a circle is only
+    // that long at the exact middle, and three lines are stacked.
+    const hole = _g.ring.rInner * 2 * 0.86;
+    const fit = (text: string, want: number): number => {
+      let size = want;
+      for (let i = 0; i < 14; i++) {
+        ctx.font = `${size}px ui-monospace,monospace`;
+        if (ctx.measureText(text).width <= hole || size <= 6) break;
+        size = Math.max(size * 0.9, 6);
+      }
+      return size;
+    };
+
     ctx.fillStyle = "#ffffff";
-    ctx.font = `${15 * u}px ui-monospace,monospace`;
-    ctx.fillText(`${_g.genome.used().toFixed(1)}/${_g.genome.capacityKb()} kb`,
-                 _g.ring.cx, _g.ring.cy - 9 * u);
+    // toFixed on BOTH: capacity is a float sum, printed raw as "13.1499999 kb".
+    const kbText = `${_g.genome.used().toFixed(1)}/`
+      + `${_g.genome.capacityKb().toFixed(1)} kb`;
+    const kbSize = fit(kbText, 15 * u);
+    ctx.fillText(kbText, _g.ring.cx, _g.ring.cy - 9 * u);
     const d = _g.dungeon.depth;
     const bal = _g.genome.atpBalance(d);
-    ctx.font = `${11 * u}px ui-monospace,monospace`;
     ctx.fillStyle = bal >= 0 ? "#7fc4e8" : "#e08a5a";
+    const atpText = `ATP ${Math.round(_g.player.atp)}/${_g.player.atpMax}   `
+      + `${bal >= 0 ? "+" : ""}${bal.toFixed(1)}/action`;
+    fit(atpText, Math.min(11 * u, kbSize * 0.75));
     ctx.fillText(
-      `ATP ${Math.round(_g.player.atp)}/${_g.player.atpMax}   ` +
-      `${bal >= 0 ? "+" : ""}${bal.toFixed(1)}/action`,
+      atpText,
       _g.ring.cx, _g.ring.cy + 10 * u);
     ctx.fillStyle = "#8fa89a";
-    ctx.fillText(
-      `power ${_g.genome.power(d).toFixed(1)}` +
-      (_g.genome.burden() > 0 ? `   burden ${(_g.genome.burden() * 100) | 0}%` : "") +
-      (_g.genome.supply < 0.99 ? `   brownout ${(_g.genome.supply * 100) | 0}%` : ""),
-      _g.ring.cx, _g.ring.cy + 27 * u);
+    const powerText = `power ${_g.genome.power(d).toFixed(1)}`
+      + (_g.genome.burden() > 0 ? `   burden ${String((_g.genome.burden() * 100) | 0)}%` : "")
+      + (_g.genome.supply < 0.99 ? `   brownout ${String((_g.genome.supply * 100) | 0)}%` : "");
+    fit(powerText, Math.min(11 * u, kbSize * 0.75));
+    ctx.fillText(powerText, _g.ring.cx, _g.ring.cy + 27 * u);
 
     // Parts bin: everything you hold but have not installed.
     const cell = Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);

@@ -7,6 +7,7 @@ import { Dungeon, MAX_FLOOR, floorWithin, isBossFloor, strataOf }
 import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
+import { MAX_STACK, countOf, stacks } from "../src/stack.js";
 import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
          ZOOM_PREF_MIN, parseSave } from "../src/save.js";
 import { ATP_MAX, BIN_CAP, Plasmid, SLOTS, STARTING_PARTS, type Part }
@@ -976,13 +977,31 @@ describe("parts bin", () => {
     expect(p.expression("mtrC", 4)).toBe(0);          // stashed is not expressed
   });
 
-  it("refuses a duplicate whether it is on the ring or in the bin", () => {
+  it("stacks a duplicate rather than refusing it", () => {
+    // It used to be refused outright, so a better roll of a gene you already
+    // carried was simply unpickupable. It stacks now -- but only up to
+    // MAX_STACK, and never onto a gene already on the chromosome.
     const p = new Plasmid();
-    p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
-    p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
-    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(false);
-    p.install(p.bin.findIndex((x) => x.kind === "gene"), 8);
-    expect(p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE }).ok).toBe(false);
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
+    const copy = (): Part =>
+      ({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    expect(p.stash(copy()).ok).toBe(true);
+    expect(p.stash(copy()).ok, "the second copy did not stack").toBe(true);
+    const rows = p.bin.filter((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(rows.length, "it made a second row instead of stacking").toBe(1);
+    expect(countOf(rows[0]!)).toBe(2);
+
+    // Installing takes ONE off the stack, leaving the spare.
+    p.install(p.bin.findIndex((x) => x.kind === "gene" && x.id === "mtrC"), 8);
+    expect(p.has("mtrC"), "it did not install").toBe(true);
+    expect(countOf(p.bin.find((x) => x.kind === "gene" && x.id === "mtrC")!),
+           "installing consumed the whole stack").toBe(1);
+
+    // And a stack fills to MAX_STACK, then refuses.
+    while (p.stash(copy()).ok) { /* fill it */ }
+    const row = p.bin.find((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(countOf(row!)).toBe(MAX_STACK);
+    expect(p.stash(copy()).ok, "a full stack accepted a fourth").toBe(false);
   });
 
   it("install and uninstall conserve parts -- nothing is destroyed", () => {
@@ -6124,5 +6143,173 @@ describe("compound edits are all or nothing", () => {
     expect(r.ok).toBe(true);
     expect(snap(p)).not.toBe(before);
     expect(p.at(5)?.kind).toBe("terminator");
+  });
+});
+
+describe("the operon is read off the map, never assumed", () => {
+  const genes = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+
+  /** The same ring, computed from scratch by a plasmid with no history. */
+  const fromScratch = (p: Plasmid): string => {
+    const q = new Plasmid();
+    q.integrated = p.integrated;
+    q.strain = p.strain;
+    q.depth = p.depth;
+    q.inducers = p.inducers;
+    for (let i = 0; i < p.slots.length; i++) q.slots[i] = p.slots[i] ?? null;
+    return JSON.stringify(q.operons());
+  };
+
+  it("the cached read always equals a fresh one, after any mutation", () => {
+    // `operons()` is memoised, and a memo is a promise that nothing it depends
+    // on has changed. Its inputs are the ring, the chromosome size, the depth
+    // and the inducers -- a stale one would silently describe a plasmid that
+    // no longer exists, which is the worst kind of wrong because everything
+    // downstream (expression, ATP, power) is built on it.
+    for (let seed = 0; seed < 300; seed++) {
+      const p = new Plasmid();
+      p.integrated = seed % 9;
+      const rng = makeRng(seed);
+      for (let step = 0; step < 25; step++) {
+        const g = genes[rng.int(genes.length)];
+        switch (rng.int(7)) {
+          case 0:
+            if (g) p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+            break;
+          case 1: p.install(rng.int(Math.max(p.bin.length, 1)), rng.int(p.usableSlots)); break;
+          case 2: p.swap(rng.int(p.usableSlots), rng.int(p.usableSlots)); break;
+          case 3: p.rotate(rng.int(20) - 10); break;
+          case 4: p.remove(rng.int(p.usableSlots)); break;
+          case 5: p.depth = 1 + rng.int(8); break;
+          case 6: p.uninstall(rng.int(p.usableSlots)); break;
+        }
+        expect(JSON.stringify(p.operons()),
+               `seed ${String(seed)} step ${String(step)}: cached operon is stale`)
+          .toBe(fromScratch(p));
+      }
+    }
+  });
+
+  it("swapping a part into a position redefines the operon it lands in", () => {
+    const p = new Plasmid();
+    p.integrated = 8;
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    p.put(6, { kind: "terminator", id: "rrnbt1" });
+    const inOperon = (id: bio.GeneId): boolean =>
+      p.operons().some((o) => o.genes.some((g) => g.id === id));
+    expect(inOperon("mtrC")).toBe(true);
+
+    // Move it out from under the promoter. The operon must forget it.
+    p.swap(5, 10);
+    expect(inOperon("mtrC"), "the operon still claims a gene that moved away")
+      .toBe(false);
+    p.swap(5, 10);
+    expect(inOperon("mtrC"), "moving it back did not restore the operon").toBe(true);
+  });
+
+  it("a conditional promoter re-reads the stratum", () => {
+    // PfnrS carries an iron-sulfur cluster that O2 destroys. Its output is not
+    // a property of the ring, so a memo keyed only on the ring would be wrong.
+    const p = new Plasmid();
+    p.integrated = 8;
+    p.put(4, { kind: "promoter", id: "pfnr" });
+    p.put(5, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    p.put(6, { kind: "terminator", id: "rrnbt1" });
+    const out = (): number => p.operons().find((o) => o.promoter === 4)?.output ?? 0;
+    p.depth = 1;
+    const oxic = out();
+    p.depth = 6;
+    expect(out(), "the operon did not notice the oxygen had gone")
+      .toBeGreaterThan(oxic * 5);
+  });
+});
+
+describe("duplicate genes stack", () => {
+  const copy = (id: bio.GeneId, allele = WILD_TYPE): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele });
+
+  it("auto-stacks on pickup, up to the maximum", () => {
+    const p = new Plasmid();
+    p.integrated = 8;
+    for (let i = 0; i < MAX_STACK; i++) {
+      expect(p.stash(copy("mtrC")).ok, `copy ${String(i + 1)}`).toBe(true);
+    }
+    const rows = p.bin.filter((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(rows.length, "it made rows instead of a stack").toBe(1);
+    expect(countOf(rows[0]!)).toBe(MAX_STACK);
+    expect(p.stash(copy("mtrC")).ok, "a fourth was accepted").toBe(false);
+  });
+
+  it("the same gene at a different rarity is a different gene", () => {
+    // Rarity here describes the COPY -- its rolled kinetics and its affixes --
+    // so a rare mtrC and a common one are different objects that share a name.
+    // Merging them would quietly average away the thing you went looking for.
+    const plain = WILD_TYPE;
+    const fancy = { ...WILD_TYPE, kcat: 1.6, km: 0.6, stability: 1.4,
+                    prefix: "hyperactive" as const, suffix: "highCopy" as const,
+                    rarity: "legendary" as const };
+    expect(alleleRarity("mtrC", plain)).not.toBe(alleleRarity("mtrC", fancy));
+
+    const p = new Plasmid();
+    p.integrated = 8;
+    p.stash(copy("mtrC", plain));
+    p.stash(copy("mtrC", fancy));
+    const rows = p.bin.filter((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(rows.length, "two rarities were merged into one stack").toBe(2);
+    for (const r of rows) expect(countOf(r)).toBe(1);
+  });
+
+  it("stacking never downgrades what you already had", () => {
+    // The stack keeps one allele. It must not be the worse one.
+    const p = new Plasmid();
+    p.integrated = 8;
+    const worked: Part = { kind: "gene", id: "mtrC", level: 3,
+                           mods: ["codon"], allele: WILD_TYPE };
+    p.stash(worked);
+    p.stash(copy("mtrC"));
+    const row = p.bin.find((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(row?.kind).toBe("gene");
+    if (row?.kind !== "gene") return;
+    expect(row.level, "the evolved copy was replaced by a fresh one").toBe(3);
+    expect(row.mods, "the modifier was lost").toEqual(["codon"]);
+    expect(countOf(row)).toBe(2);
+  });
+
+  it("installing takes ONE copy, leaving the rest", () => {
+    const p = new Plasmid();
+    p.integrated = 8;
+    for (let i = 0; i < 3; i++) p.stash(copy("mtrC"));
+    const at = p.bin.findIndex((x) => x.kind === "gene" && x.id === "mtrC");
+    p.install(at, 5);
+    expect(p.has("mtrC"), "it did not install").toBe(true);
+    const left = p.bin.find((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(countOf(left!), "installing ate the whole stack").toBe(2);
+  });
+
+  it("the origin never stacks", () => {
+    // There is exactly one. A stack of them would imply a spare.
+    const a: Part = { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE };
+    const b: Part = { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE };
+    expect(stacks(a, b)).toBe(false);
+  });
+
+  it("a stack round-trips through a save, and cannot be inflated", () => {
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [], bin: [
+        { kind: "gene", id: "mtrC", level: 1, mods: [], count: 2 },
+        { kind: "gene", id: "psbA", level: 1, mods: [], count: 99 },
+        { kind: "gene", id: "katG", level: 1, mods: [] },
+      ],
+      run: {}, settings: {}, heldMods: [], turn: 0, stocked: [],
+      integrated: 0, traits: [],
+    });
+    expect(s).not.toBeNull();
+    if (!s) return;
+    expect(countOf(s.bin[0]!)).toBe(2);
+    expect(countOf(s.bin[1]!), "a save minted copies").toBe(MAX_STACK);
+    // Unstacked genes round-trip to exactly what they were, with no count.
+    expect((s.bin[2] as { count?: number }).count).toBeUndefined();
   });
 });

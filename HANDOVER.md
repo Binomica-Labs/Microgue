@@ -9,6 +9,95 @@ Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 
 ---
 
+## The layout tests were checking a screen they never saw
+
+The scaling stub IGNORED anything drawn inside a `save()`, because the world is
+drawn under a camera transform in tile coordinates and those readings are
+meaningless in screen space. But the plasmid screen's own readout is also drawn
+inside a save -- so the suite was recording nine texts of world HUD, checking
+those, and passing on a landscape layout that was visibly broken.
+
+The stub TRACKS translate and scale now, so every recording is in screen
+coordinates and nothing has to be excluded. Nine texts became thirty-one.
+Rotated text is flagged rather than dropped (ring labels are rotated by
+design), and the nesting depth is recorded so the bounds checks can still tell
+screen FURNITURE from world drawing, which really is camera-clipped.
+
+**The bug it was missing:** the ring's centre readout was sized `15 * u` --
+scaled by the smaller screen dimension -- while the ring hole is sized from
+`H * 0.46`. On a wide, short screen the hole shrinks and the text does not, so
+the readout was drawn straight across the plasmid. It is fitted to the hole
+now.
+
+**And the guard needed the WORST case, not the opening one.** A fresh strain
+reads "0.7/9.0 kb", which fits anywhere. The readout that actually overflowed
+was a grown chromosome carrying burden and a brownout. Driving the default
+state is how a test passes on a screen it is visibly wrong about. With the
+worst case driven, removing the fix fails twelve assertions.
+
+## Persistence is checked, not remembered
+
+Adding a system means four coordinated edits: a field on `Game`, a delegate, a
+line in the save writer, a line in `applySave`. The last has been forgotten
+three times, and each time the symptom was an inventory or a setting that
+silently reset.
+
+`spec` now enumerates every field on `Game` and requires each to either
+round-trip or appear in a `TRANSIENT` map with a reason. A new field fails the
+suite until someone makes the decision explicitly.
+
+It found one immediately: **`autoAttack` was a bare field, so toggling it and
+reloading silently turned it back off.** It lives in `settings` now, which is
+where every other player toggle already was.
+
+## Duplicate genes stack
+
+A second copy of a gene you already carried was REFUSED outright, so a better
+roll of something you owned was simply unpickupable. Now it stacks, to
+`MAX_STACK` (3).
+
+Two copies stack only if they are the same gene AND the same rarity. That is
+not a technicality: rarity describes the COPY -- its rolled kinetics and its
+affixes -- so a rare mtrC and a common one are different objects that share a
+name, and merging them would quietly average away the thing you went looking
+for.
+
+* `install` takes ONE copy off the stack. Splicing the row out put three copies
+  on one position and lost two.
+* `betterOf` keeps the more worked copy when two merge -- an evolved, modified
+  gene is never replaced by a fresh one, because that work is not recoverable.
+* Catabolising eats the WHOLE stack for proportional yield. Eating one of three
+  would need three taps for one decision, and the confirm already asks.
+* The origin never stacks: there is exactly one, and a stack would imply a
+  spare.
+* Save clamps `count` to MAX_STACK and OMITS it when it is one, so an unstacked
+  gene round-trips to exactly what it was.
+
+**A full stack is a CHOICE, not a refusal.** The copy on the floor is still
+DNA, so the prompt offers catabolise-or-leave. A full BIN is still a plain
+refusal -- "you have enough of this" and "there is no room" are different
+answers and `spec` asserts they stay different.
+
+## The operon is read off the map, not assumed
+
+Checked rather than trusted: 7500 random mutations -- install, swap, rotate,
+remove, uninstall, depth changes -- comparing the memoised `operons()` against
+a from-scratch recomputation off the same ring. Zero disagreements. It is
+genuinely a condensate.
+
+The memo depends on the ring, the chromosome size, the depth AND the inducers,
+which is why a conditional promoter re-reading the stratum is its own test: a
+memo keyed only on the ring would be wrong for PfnrS, whose output is not a
+property of the ring at all.
+
+## The `this` guard has to strip strings too
+
+The extraction guard flagged `"Catabolise this one, or leave it"` -- a
+player-facing string. It already stripped comments after a doc-comment false
+positive; it strips string literals now as well. Every false positive teaches
+you to ignore the test, which costs more than the test is worth. Verified it
+still catches a real `const { ctx } = this`.
+
 ## Atomicity: three mechanisms, not one
 
 **Validate before you touch.** `expand`, `acquire` and `buy` already do this.

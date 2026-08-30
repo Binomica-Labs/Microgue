@@ -13,6 +13,7 @@ import { MAX_STRAIN } from "./strain.js";
 import { RARITY, type Rarity } from "./parts.js";
 import { PREFIXES, SUFFIXES, WILD_TYPE, type Allele, type PrefixId,
          type SuffixId } from "./allele.js";
+import { MAX_STACK } from "./stack.js";
 import { MAX_LEVEL, MODIFIERS, PROMOTERS, TERMINATORS, modifierSlots,
          type ModifierId, type PromoterId, type TerminatorId } from "./parts.js";
 
@@ -25,6 +26,9 @@ const isModifierId = (v: unknown): v is ModifierId =>
 import { BIN_CAP, SLOTS, type Part } from "./plasmid.js";
 
 export interface Settings {
+  /** Auto-attack. A toggle the player sets, so it belongs with the other
+   *  settings -- as a bare field on Game it silently reset on reload. */
+  readonly autoAttack: boolean;
   /** The player's zoom, as a multiple of the platform-independent default.
    *  Relative rather than absolute so it means the same thing on a phone and
    *  on a desktop, and so it survives a rotation. */
@@ -88,6 +92,7 @@ export interface SaveData {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  autoAttack: false,
   zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true,
 };
 
@@ -157,11 +162,16 @@ function parsePart(v: unknown): Part | null {
       ? [...new Set((v["mods"] as unknown[]).filter(isModifierId))]
       : legacyOptimised ? ["codon" as ModifierId] : [];
     const level = Math.min(Math.max(Math.round(num(v["level"], 1)), 1), MAX_LEVEL);
+    const count = Math.min(Math.max(Math.round(num(v["count"], 1)), 1), MAX_STACK);
     // Never keep more modifiers than the level allows, or a hand-edited save
     // would out-perform anything reachable in play.
     return { kind: "gene", id: v["id"], level,
              mods: mods.slice(0, modifierSlots(level)),
-             allele: parseAllele(v["allele"]) };
+             allele: parseAllele(v["allele"]),
+             // Omitted when it is one, so an unstacked gene round-trips to
+             // exactly what it was. Clamped otherwise: a hand-edited save must
+             // not mint copies that play cannot produce.
+             ...(count > 1 ? { count } : {}) };
   }
   return null;
 }
@@ -225,6 +235,7 @@ function parseRing(v: unknown): (Part | null)[] {
 function parseSettings(v: unknown): Settings {
   if (!isRecord(v)) return DEFAULT_SETTINGS;
   return {
+    autoAttack: v["autoAttack"] === true,
     // Defaulted, not schema-bumped: an older save simply has no zoom
     // preference and gets the standard one, which is better than discarding
     // the save outright.

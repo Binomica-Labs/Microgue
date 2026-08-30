@@ -1591,3 +1591,203 @@ describe("a save is two keys but one outcome", () => {
     expect(g.dead, "it stopped playing because it could not save").toBe(false);
   });
 });
+
+describe("a surplus cassette is a choice, not a refusal", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  /** Stand on a cassette of a gene whose stack is already full. */
+  const setup = async () => {
+    const { MAX_STACK } = await import("../src/stack.js");
+    const g = await game();
+    g.startRun(0);
+    g.genome.integrated = 8;
+    for (let i = 0; i < MAX_STACK; i++) {
+      g.genome.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.drops.push({ x: g.player.x, y: g.player.y,
+                   items: [{ kind: "cassette", gene: "mtrC", allele: WILD_TYPE }] });
+    // Arriving on the TILE, not on the level: `enter` is the level transition.
+    g.onTile(g.player.x, g.player.y);
+    return g;
+  };
+
+  it("offers rather than silently refusing", async () => {
+    const g = await setup();
+    expect(g.offer, "no offer was made").not.toBeNull();
+    g.frame(40);
+    expect(g.offerBoxes, "the offer has no targets, so it is unanswerable")
+      .not.toBeNull();
+  });
+
+  it("catabolising it pays, and takes it off the floor", async () => {
+    const g = await setup();
+    g.frame(40);
+    g.player.hp = 1;
+    const boxes = g.offerBoxes;
+    expect(boxes).not.toBeNull();
+    if (!boxes) return;
+    g.pointerDown(boxes.eat.x + 4, boxes.eat.y + 4);
+    g.pointerUp(boxes.eat.x + 4, boxes.eat.y + 4);
+    expect(g.player.hp, "eating it healed nothing").toBeGreaterThan(1);
+    expect(g.offer, "the offer stayed open").toBeNull();
+    const here = g.drops.find((d) => d.x === g.player.x && d.y === g.player.y);
+    expect(here?.items.some((i) => i.kind === "cassette"),
+           "it was eaten but is still lying there").toBeFalsy();
+  });
+
+  it("leaving it keeps it on the floor and closes the prompt", async () => {
+    const g = await setup();
+    g.frame(40);
+    const boxes = g.offerBoxes;
+    if (!boxes) return;
+    g.pointerDown(boxes.leave.x + 4, boxes.leave.y + 4);
+    g.pointerUp(boxes.leave.x + 4, boxes.leave.y + 4);
+    expect(g.offer).toBeNull();
+    const here = g.drops.find((d) => d.x === g.player.x && d.y === g.player.y);
+    expect(here?.items.length, "leaving it destroyed it").toBeGreaterThan(0);
+  });
+
+  it("a full BIN is still a plain refusal, not an offer", async () => {
+    // The distinction matters: a full stack means "you have enough of this",
+    // which is a choice. A full bin means "no room", which is not.
+    const g = await game();
+    g.startRun(0);
+    while (g.genome.stash({ kind: "terminator", id: "rrnbt1" }).ok) { /* fill */ }
+    g.drops.push({ x: g.player.x, y: g.player.y,
+                   items: [{ kind: "cassette", gene: "psbA", allele: WILD_TYPE }] });
+    g.onTile(g.player.x, g.player.y);
+    expect(g.offer, "a full bin produced an offer").toBeNull();
+  });
+});
+
+describe("state that should persist, does", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  /**
+   * Fields deliberately NOT persisted, with the reason.
+   *
+   * Adding a system means four coordinated edits: a field on Game, a delegate,
+   * a line in the save writer, a line in `applySave`. The last has been
+   * forgotten three times, and each time the symptom was an inventory or a
+   * setting that silently reset. This test makes the omission explicit: a new
+   * field either round-trips, or it is listed here with a reason.
+   */
+  const TRANSIENT: Record<string, string> = {
+    // Rebuilt on load.
+    level: "regenerated from the seed", dungeon: "rebuilt from depth and seed",
+    genome: "rebuilt from the ring", ctx: "the canvas context",
+    canvas: "the canvas", buttons: "laid out per frame",
+    // Presentation only.
+    fx: "in-flight effects", toasts: "transient messages", trace: "flight recorder",
+    ring: "geometry, recomputed per frame", bin: "geometry, recomputed per frame",
+    view: "camera, recomputed per frame", boxes: "hit boxes, per frame",
+    binRows: "hit boxes, per frame", shopRows: "hit boxes, per frame",
+    researchRows: "hit boxes, per frame", dropBoxes: "hit boxes, per frame",
+    closeBox: "hit box, per frame", cardBoxes: "hit boxes, per frame",
+    offerBoxes: "hit boxes, per frame",
+    // Momentary interaction state: meaningless after a reload.
+    gesture: "a pointer gesture in progress", gestureBtn: "ditto",
+    dragFrom: "a drag in progress", dragBin: "ditto", dragXY: "ditto",
+    binFrom: "ditto", binAnchor: "ditto", shopFrom: "ditto", shopAnchor: "ditto",
+    shopMoved: "ditto", panFrom: "ditto", panMoved: "ditto", pinching: "ditto",
+    spinFrom: "a spin in progress", walk: "a path being walked",
+    path: "a computed path", cursor: "the tap target", target: "the current quarry",
+    strikeAfterTravel: "a pending strike", chaseLegs: "a chase in progress",
+    exploring: "auto-explore in progress", offer: "an unanswered prompt",
+    card: "an open card", cardIndex: "ditto", cardConfirm: "ditto",
+    openDrop: "an open container", selected: "the selected slot",
+    // Screens: you come back to the world, not to a menu.
+    showPlasmid: "a screen", showMap: "a screen", showLab: "a screen",
+    showNotes: "a screen", showResearch: "a screen", showSplash: "a screen",
+    showHelp: "a screen", started: "set by startRun", dead: "a run outcome",
+    // Timing and derived.
+    now: "wall clock", last: "wall clock", autoAt: "wall clock",
+    deathAt: "wall clock", lysisAt: "wall clock", clock: "turn counter, saved separately",
+    storageWarned: "a warning already given", repairDebt: "sub-hp accumulator",
+    lastAttacker: "for the obituary only", deathRecord: "written to the lab",
+    inRoom: "derived from position", drops: "part of the level",
+    lab: "its own storage key", slot: "which slot this IS",
+    runName: "written with the slot", seed: "saved as part of the run",
+    binScroll: "a scroll position", binMaxScroll: "derived",
+    shopScroll: "a scroll position", shopMaxScroll: "derived",
+    mapScale: "a view setting", zoom: "a view setting",
+    // Mirrors settings.autoAttack, which IS saved. Kept as a field because the
+    // turn loop reads it every frame.
+    autoAttack: "mirrors settings.autoAttack",
+    // Presentation and derived state with no meaning after a reload.
+    log: "the message log", slotBoxes: "hit boxes, per frame",
+    spinStart: "a spin in progress", barH: "layout, per frame",
+    logH: "layout, per frame", turnSeed: "derived from the turn",
+    exporting: "an export in flight", spotted: "who has been noticed this run",
+    researchPick: "a bench selection", packets: "in-flight effects",
+    clouds: "in-flight effects", insetCache: "a cached measurement",
+  };
+
+  it("every field on Game either round-trips or is listed as transient", async () => {
+    const { Game } = await import("../src/main.js");
+    const mk = () => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+
+    const g = mk();
+    g.startRun(0);
+    const fields = Object.keys(g) as (keyof typeof g)[];
+    const unexplained = fields.filter(
+      (f) => !(f in TRANSIENT) && typeof g[f] !== "function");
+
+    // Anything not listed must be something the save actually carries.
+    const { SCHEMA } = await import("../src/save.js");
+    void SCHEMA;
+    const carried = ["player", "run", "settings", "mods", "won", "turn"];
+    const missing = unexplained.filter((f) => !carried.includes(f));
+    expect(missing,
+           "new field(s) on Game with no persistence decision recorded -- add "
+           + "them to the save, or to TRANSIENT with a reason")
+      .toEqual([]);
+  });
+
+  it("the things that DO persist actually survive a reload", async () => {
+    const { Game } = await import("../src/main.js");
+    const mk = () => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+
+    const a = mk();
+    a.startRun(0);
+    a.genome.integrated = 5;
+    (a.genome.traits as Set<"partitioned">).add("partitioned");
+    a.genome.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    a.genome.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    a.settings = { ...a.settings, diagonal: !a.settings.diagonal };
+    a.autoAttack = true;
+    a.settings = { ...a.settings, autoAttack: true };
+    a.player.hp = 7;
+    a.save();
+
+    const b = mk();
+    b.startRun(0);
+    expect(b.genome.integrated, "chromosome growth").toBe(5);
+    expect([...b.genome.traits], "architecture").toEqual(["partitioned"]);
+    expect(b.settings.diagonal, "settings").toBe(a.settings.diagonal);
+    expect(b.player.hp, "hp").toBe(7);
+    expect(b.autoAttack, "auto-attack silently reset").toBe(true);
+    const row = b.genome.bin.find((x) => x.kind === "gene" && x.id === "mtrC");
+    expect(row, "the stashed gene").toBeDefined();
+  });
+});

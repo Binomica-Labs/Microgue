@@ -105,9 +105,13 @@ describe("every failing mutation is atomic", () => {
     JSON.stringify({ slots: p.slots, bin: p.bin, supply: p.supply });
 
   const cases: [string, () => Plasmid, (p: Plasmid) => { ok: boolean }][] = [
-    ["stash a duplicate", () => {
+    ["stash a fourth copy onto a full stack", () => {
+      // Three stack; the fourth has nowhere to go. Duplicates are no longer
+      // refused outright -- they stack, up to MAX_STACK.
       const p = new Plasmid();
-      p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+      for (let i = 0; i < 3; i++) {
+        p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+      }
       return p;
     }, (p) => p.stash({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE })],
 

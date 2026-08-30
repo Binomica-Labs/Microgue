@@ -5,6 +5,7 @@
 // is as large as the ring is wide.
 
 import type { Box } from "./chrome.js";
+import { countOf } from "./stack.js";
 import { GENES, type Pathway } from "./biology.js";
 import { SLOTS, type Part, type Plasmid } from "./plasmid.js";
 import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, type Rarity } from "./parts.js";
@@ -140,7 +141,9 @@ export function drawBinList(
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#ffffff";
     ctx.font = `${11 * u}px ui-monospace,monospace`;
-    ctx.fillText(fitInto(ctx, partTitle(p), box.w - 74 * u, 11 * u, 7 * u),
+    const n = countOf(p);
+    ctx.fillText(fitInto(ctx, partTitle(p) + (n > 1 ? `  \u00d7${String(n)}` : ""),
+                         box.w - 74 * u, 11 * u, 7 * u),
                  box.x + 10 * u, box.y + 13.5 * u);
 
     ctx.fillStyle = "#8fa89a";

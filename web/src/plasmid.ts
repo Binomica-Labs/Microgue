@@ -58,6 +58,8 @@ import { CHLOROSOME, COST_PER_KB, GENERATORS, NEEDS, O2_LABILE, WASTE_PER_UNIT }
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
 import { buildOperon } from "./operon.js";
+import { MAX_STACK, betterOf, countOf, fullStackIndex, stackIndex }
+  from "./stack.js";
 import { capacityFor, copiesFor, copyBurden, dosage, slotsFor,
          type TraitId } from "./chromosome.js";
 import { TERMINATORS } from "./parts.js";
@@ -146,14 +148,54 @@ export class Plasmid {
   }
 
   /** Put a part in the bin rather than on the ring. */
+  /**
+   * Put a part in the bin, stacking a duplicate rather than refusing it.
+   *
+   * A second copy of a gene you already carry used to be turned away, so a
+   * better roll of something you owned was simply unpickupable. It stacks now,
+   * up to MAX_STACK, and only with a copy of the SAME RARITY -- rarity here
+   * describes the copy, so a rare mtrC and a common one are different objects
+   * that share a name.
+   */
   stash(part: Part): Result {
-    if (part.kind === "gene" && (this.has(part.id) || this.inBin(part.id))) {
-      return { ok: false, err: `${GENES[part.id].name} already carried` };
+    const at = stackIndex(this.bin, part);
+    if (at >= 0) {
+      const held = this.bin[at];
+      if (held?.kind === "gene" && part.kind === "gene") {
+        const keep = betterOf(held, part);
+        this.bin[at] = { ...keep, count: countOf(held) + countOf(part) };
+        this.touch();
+        return { ok: true };
+      }
     }
+    if (fullStackIndex(this.bin, part) >= 0 && part.kind === "gene") {
+      return { ok: false, err: `already carrying ${String(MAX_STACK)} of `
+        + GENES[part.id].name };
+    }
+    // No "already carried" refusal any more. Having one installed and a spare
+    // in the bin is the POINT of stacking -- you want a second copy to put in
+    // another operon, or a better roll to swap in. The only thing that turns a
+    // pickup away now is a full stack or a full bin.
     if (this.bin.length >= BIN_CAP) return { ok: false, err: "parts bin is full" };
     this.bin.push(part);
     this.touch();
     return { ok: true };
+  }
+
+  /** Take ONE copy off a stack, leaving the rest. Returns what came off. */
+  takeOne(binIndex: number): Part | null {
+    const held = this.bin[binIndex];
+    if (!held) return null;
+    const n = countOf(held);
+    if (n <= 1) {
+      this.bin.splice(binIndex, 1);
+      this.touch();
+      return held;
+    }
+    if (held.kind !== "gene") return held;      // only genes stack
+    this.bin[binIndex] = { ...held, count: n - 1 };
+    this.touch();
+    return { ...held, count: 1 };
   }
 
   inBin(id: GeneId): boolean {
@@ -173,9 +215,12 @@ export class Plasmid {
     if (displaced?.kind === "gene" && displaced.id === "ori") {
       return { ok: false, err: "cannot displace the origin" };
     }
-    this.bin.splice(binIndex, 1);
-    this.put(slot, part);
-    if (displaced) this.bin.push(displaced);
+    // ONE copy off the stack, not the whole row. Splicing the row out put
+    // three copies onto a single position and lost two of them.
+    const one = this.takeOne(binIndex);
+    if (!one) return { ok: false, err: "no such part" };
+    this.put(slot, one);
+    if (displaced) this.stash(displaced);
     return { ok: true };
   }
 

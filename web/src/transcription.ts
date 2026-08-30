@@ -19,6 +19,9 @@ import { MODIFIERS, PROMOTERS, TERMINATORS, levelMultiplier,
 
 export type Part =
   | { kind: "gene"; id: GeneId; level: number; mods: ModifierId[];
+      /** Copies held. A stack, so a second find of a gene you already carry
+       *  is not a second row in the bin. Absent means one. */
+      count?: number;
       /** The rolled variant. Two copies of a gene are not the same enzyme. */
       allele: Allele }
   | { kind: "promoter"; id: PromoterId }

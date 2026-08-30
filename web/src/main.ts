@@ -1,9 +1,9 @@
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 
+import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
-import { strainLevel } from "./strain.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
          r_drawPlasmid, r_drawScreenFx, r_drawToasts } from "./render.js";
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
@@ -11,7 +11,8 @@ import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,
          t_look, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
          t_take, t_takeTurn, t_upkeep, t_win, t_world, t_catabolise,
-         t_expand, t_acquire, t_explore } from "./turn.js";
+         t_expand, t_acquire, t_explore, t_eatOffered, t_declineOffered }
+  from "./turn.js";
 import * as bio from "./biology.js";
 import { Dungeon, type Level, type Mob } from "./dungeon.js";
 import { ATP_MAX, Plasmid } from "./plasmid.js";
@@ -50,21 +51,11 @@ import { buy, type Offer } from "./lab.js";
 import type { ShopRow } from "./screens.js";
 import { newRun, type RunState } from "./run.js";
 import type { Status } from "./status.js";
-import { NAME_POOL, listSlots, loadSlot, migrateLegacy,
-         saveSlot } from "./saves.js";
+import { NAME_POOL, listSlots, loadSlot, migrateLegacy } from "./saves.js";
 import { makeRng } from "./rng.js";
 import { Toasts } from "./toast.js";
-import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
-         ZOOM_PREF_MIN, readSave, writeSave,
-         type SaveData, type Settings } from "./save.js";
+import { DEFAULT_SETTINGS, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX, ZOOM_PREF_MIN, readSave, type SaveData, type Settings } from "./save.js";
 
-const SAVE_KEY = "microgue:v1";
-
-/** A part copied so nothing shares an array with the original. */
-function clonePart(p: Part | null): Part | null {
-  if (p === null) return null;
-  return p.kind === "gene" ? { ...p, mods: [...p.mods] } : { ...p };
-}
 
 /** Tiles across the SHORT viewport axis at the default zoom. Sight radius
  *  reaches 11, so the lit disc is 23 across; this fits it on every device. */
@@ -123,6 +114,8 @@ class Game {
   turnSeed = 1;
   /** The microbe being chased, if any. Cleared when it dies or is lost. */
   target: Mob | null = null;
+  /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
+   *  turn loop reads it every frame. */
   autoAttack = false;
   /** @internal: public only because the turn engine lives in turn.ts */
   autoAt = 0;
@@ -140,6 +133,9 @@ class Game {
   won = false;
   /** Set once storage has refused a write, so it is said once. */
   storageWarned = false;
+  /** A cassette that would not fit on a full stack, awaiting a choice. */
+  offer: { part: Part; at: { x: number; y: number } } | null = null;
+  offerBoxes: { eat: Box; leave: Box } | null = null;
   /** Set when the strain dies. A dead strain does not act. */
   dead = false;
   deathRecord: RunRecord | null = null;
@@ -394,6 +390,10 @@ class Game {
   /** Eat a cassette from the bin: DNA is food as well as information. */
   catabolise(i: number): void { t_catabolise(this, i); }
 
+  /** Eat, or leave, a copy that would not fit on a full stack. */
+  eatOffered(): void { t_eatOffered(this); }
+  declineOffered(): void { t_declineOffered(this); }
+
   /**
    * Put a part from the bin onto the first free ring position.
    *
@@ -526,88 +526,12 @@ class Game {
 
 
   // ------------------------------------------------------------ persist
-  save(): void {
-    if (this.showSplash || !this.started) return;
-    // A dead strain must never be written back. `die()` deletes the slot and
-    // `mobTurn` called save() on the very next line, recreating it -- so
-    // permadeath was not permanent at all.
-    if (this.dead) return;
-    const data = {
-      version: SCHEMA,
-      depth: this.dungeon.depth,
-      floor: this.dungeon.floor,
-      seed: this.dungeon.seed,
-      px: this.player.x,
-      py: this.player.y,
-      hp: this.player.hp,
-      atp: this.player.atp,
-      // Deep. `{ ...p }` copies a gene's `mods` array BY REFERENCE, so the
-      // snapshot kept mutating along with the live plasmid after it was taken.
-      ring: this.genome.slots.map(clonePart),
-      bin: this.genome.bin.flatMap((p) => {
-        const c = clonePart(p);
-        return c === null ? [] : [c];
-      }),
-      heldMods: [...this.mods],
-      turn: this.clock.turn,
-      integrated: this.genome.integrated,
-      traits: [...this.genome.traits],
-      stocked: this.dungeon.visitedLevels()
-        .map((l): [number, number] => [l.floor, l.stockedAt]),
-      won: this.won,
-      run: { deepest: this.run.deepest, deaths: this.run.deaths,
-             bestiary: [...this.run.bestiary], library: [...this.run.library] },
-      settings: this.settings,
-    };
-    writeSave(SAVE_KEY, data);
-    // Say so ONCE if the write fails. Every turn would be unusable noise, and
-    // saying nothing at all is how a whole run disappears on tab close. The
-    // game keeps running either way: refusing to play is not an improvement
-    // on refusing to save.
-    if (saveSlot(this.slot, this.runName, data, this.genome.carried().size)) {
-      this.storageWarned = false;
-    } else if (!this.storageWarned) {
-      this.storageWarned = true;
-      this.toasts.push("Cannot save — storage is full or blocked.", "error", this.now);
-      this.note("The lab cannot write to disk. Progress this run will be lost "
-        + "when the page closes. Free some space, or leave private browsing.");
-      this.trace.push(this.clock.turn, "note", "save failed: storage");
-    }
-  }
+  save(): void { p_save(this); }
+
 
   /** Load a parsed save into live state. Shared by slot loading and boot. */
-  applySave(s: SaveData): void {
-    this.dungeon = new Dungeon(96, 96, s.seed);
-    this.dungeon.floor = s.floor;
-    this.genome = new Plasmid();
-    // The chromosome's SIZE first. `put` refuses positions it does not have,
-    // and the saved array runs to the maximum -- so writing the ring before
-    // knowing how far the chromosome was grown drops everything past the
-    // base eight positions.
+  applySave(s: SaveData): void { p_applySave(this, s); }
 
-    this.genome.integrated = s.integrated;
-    this.genome.setTraits(s.traits);
-    // Same floor as `upkeep`: the lab's purchased start is a minimum, not a
-    // starting value, or reloading a save undid what credit had bought.
-    this.genome.strain = Math.max(
-      strainLevel({ catalogued: s.run.bestiary.length, deepest: s.run.deepest }),
-      this.lab.startStrain);
-    s.ring.forEach((p, i) => { this.genome.put(i, p); });
-    this.genome.bin.length = 0;
-    for (const p of s.bin) this.genome.bin.push({ ...p });
-    this.settings = s.settings;
-    this.enter(this.dungeon.current(), { x: s.px, y: s.py });
-    this.player.hp = s.hp;
-    this.player.atp = s.atp;
-    this.mods = [...s.heldMods];
-    this.clock.turn = s.turn;
-    for (const [floor, at] of s.stocked) this.dungeon.level(floor).stockedAt = at;
-    this.won = s.won;
-    this.run = {
-      deepest: s.run.deepest, deaths: s.run.deaths,
-      bestiary: [...s.run.bestiary], library: [...s.run.library],
-    };
-  }
 
   load(): boolean {
     migrateLegacy();

@@ -31,18 +31,36 @@ interface Rect { x: number; y: number; w: number; h: number }
 /** Every rect and text position a frame produced. */
 interface Trace {
   rects: Rect[];
-  texts: { x: number; y: number; text: string; size: number; align: string }[];
+  texts: { x: number; y: number; text: string; size: number; align: string;
+           rotated: boolean;
+           /** Nesting depth when drawn. The WORLD is drawn inside a save, in
+            *  tile coordinates under a camera; screen furniture is not. */
+           depth: number }[];
   /** cx, cy, r, a0, a1 -- so a drawn ring can be measured, not inferred. */
   arcs: number[][];
 }
 
+/**
+ * A context stub that TRACKS THE TRANSFORM.
+ *
+ * The first version simply ignored anything drawn inside a `save()`, because
+ * the world is drawn under a camera transform in tile coordinates and those
+ * readings are meaningless in screen space. That silently excluded the plasmid
+ * screen's own readout, which is also drawn inside a save -- so the layout
+ * tests were checking the world's HUD and passing on a screen they never saw.
+ *
+ * Tracking translate and scale means every recording is in screen coordinates
+ * and nothing has to be excluded. Rotated text is flagged rather than dropped:
+ * the ring labels are rotated by design and their bounding box is not the
+ * thing any of these tests are about.
+ */
 function stubCtx(t: Trace): CanvasRenderingContext2D {
   let font = "10px x";
   const state: { align: string } = { align: "left" };
-  // The world is drawn inside a camera transform, in TILE coordinates. Only
-  // record while no transform is active, which is where the HUD, the screens
-  // and everything else that must fit on the display are drawn.
-  let depth = 0;
+  interface Xf { tx: number; ty: number; sx: number; sy: number; rot: boolean }
+  const stack: Xf[] = [{ tx: 0, ty: 0, sx: 1, sy: 1, rot: false }];
+  const top = (): Xf => stack[stack.length - 1] ?? { tx: 0, ty: 0, sx: 1, sy: 1, rot: false };
+
   return new Proxy({} as CanvasRenderingContext2D, {
     get: (_o, p: string) => {
       if (p === "font") return font;
@@ -50,26 +68,36 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
       if (["fillStyle", "strokeStyle", "textBaseline", "globalAlpha", "lineWidth",
            "lineCap", "lineJoin", "filter", "imageSmoothingEnabled"].includes(p)) return "";
       return (...a: unknown[]) => {
-        if (p === "save") depth++;
-        if (p === "restore") depth = Math.max(depth - 1, 0);
-        if (depth > 0) {
-          if (p === "measureText") {
-            const s = parseFloat(font) || 10;
-            return { width: (typeof a[0] === "string" ? a[0].length : 0) * s * 0.6 };
-          }
-          if (p === "createRadialGradient" || p === "createLinearGradient") {
-            return { addColorStop: () => undefined };
-          }
-          return undefined;
+        const x0 = top();
+        if (p === "save") stack.push({ ...x0 });
+        if (p === "restore" && stack.length > 1) stack.pop();
+        if (p === "translate") {
+          const [dx, dy] = a as number[];
+          x0.tx += (dx ?? 0) * x0.sx;
+          x0.ty += (dy ?? 0) * x0.sy;
+        }
+        if (p === "scale") {
+          const [sx, sy] = a as number[];
+          x0.sx *= sx ?? 1;
+          x0.sy *= sy ?? 1;
+        }
+        if (p === "rotate") x0.rot = true;
+        if (p === "setTransform" || p === "resetTransform") {
+          stack.length = 1;
+          stack[0] = { tx: 0, ty: 0, sx: 1, sy: 1, rot: false };
         }
         if (p === "fillRect" || p === "strokeRect") {
           const [x, y, w, h] = a as number[];
-          t.rects.push({ x: x ?? 0, y: y ?? 0, w: w ?? 0, h: h ?? 0 });
+          t.rects.push({ x: (x ?? 0) * x0.sx + x0.tx, y: (y ?? 0) * x0.sy + x0.ty,
+                         w: (w ?? 0) * x0.sx, h: (h ?? 0) * x0.sy });
         }
         if (p === "arc") t.arcs.push(a as number[]);
         if (p === "fillText" || p === "strokeText") {
           const [text, x, y] = a as [string, number, number];
-          t.texts.push({ x, y, text, size: parseFloat(font) || 10, align: state.align });
+          t.texts.push({ x: x * x0.sx + x0.tx, y: y * x0.sy + x0.ty, text,
+                         size: (parseFloat(font) || 10) * Math.abs(x0.sx),
+                         align: state.align, rotated: x0.rot,
+                         depth: stack.length - 1 });
         }
         if (p === "measureText") {
           const s = parseFloat(font) || 10;
@@ -149,7 +177,12 @@ describe("layout holds on every form factor", () => {
       if (screen !== "") g.press(screen);
       g.frame(100);
       // Nothing may be drawn off the right or bottom by more than a hair.
-      const off = t.texts.filter((x) => x.x > W + 4 || x.y > H + 4 || x.x < -80);
+      // The WORLD scrolls under a camera, so a marker on a tile outside the
+      // view is legitimately off-screen -- the canvas clips it. Only screen
+      // FURNITURE has to stay in bounds, and that is what is drawn at the
+      // outermost level rather than inside the camera's save.
+      const off = t.texts.filter((x) => x.depth === 0
+        && (x.x > W + 4 || x.y > H + 4 || x.x < -80));
       expect(off.slice(0, 3).map((x) => `${x.text} at ${Math.round(x.x)},${Math.round(x.y)} in ${W}x${H}`),
              `${name} ${screen}: text off-screen`).toEqual([]);
 
@@ -159,6 +192,7 @@ describe("layout holds on every form factor", () => {
       // real Chrome rendered "before dawn" as "before da". Measured the same
       // way the stub measures, so a string that overflows is a failure here.
       const over = t.texts.filter((x) => {
+        if (x.depth !== 0) return false;      // world-space, camera-clipped
         const w = x.text.length * x.size * 0.6;
         const right = x.align === "center" ? x.x + w / 2
           : x.align === "right" ? x.x : x.x + w;
@@ -502,5 +536,67 @@ describe("the fog stays cheap", () => {
     rects = 0;
     g.frame(200);
     expect(rects, `${String(rects)} rects for one frame of fog`).toBeLessThan(400);
+  });
+});
+
+describe("text stays inside the thing it is drawn in", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each(VIEWPORTS)("%s (%ix%i): the ring readout fits the ring's hole",
+    async (name, W, H) => {
+    // The suite checked text was ON SCREEN and that buttons did not overlap
+    // each other. It never checked that text stayed inside its CONTAINER, so
+    // it passed on a landscape phone where the readout was drawn straight
+    // across the plasmid: the text was sized `15 * u`, scaled by the smaller
+    // screen dimension, while the ring hole is sized from `H * 0.46`. On a
+    // wide, short screen the hole shrinks and the text does not.
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+
+    // The WORST case, not the opening one. A fresh strain reads "0.7/9.0 kb",
+    // which fits anywhere; the readout that actually overflowed in play was a
+    // grown chromosome carrying burden and a brownout. Testing the default
+    // state is how this passed on a screen it was visibly broken on.
+    g.genome.integrated = 16;
+    g.genome.strain = 8;
+    g.player.atp = 143;
+    g.player.atpMax = 350;
+    for (let i = 0; i < g.genome.usableSlots; i++) {
+      if (g.genome.at(i) === null) {
+        g.genome.put(i, { kind: "gene", id: "cdhA", level: 1, mods: [],
+                          allele: WILD_TYPE });
+      }
+    }
+    g.openPlasmid(true);
+    t.texts.length = 0;
+    g.frame(100);
+
+    const { cx, cy, rInner } = g.ring;
+    expect(rInner, `${name}: no ring`).toBeGreaterThan(0);
+    // Anything centred in the hole: within a line-height of the middle.
+    const inHole = t.texts.filter(
+      (x) => Math.abs(x.x - cx) < 4 && Math.abs(x.y - cy) < rInner);
+    expect(inHole.length, `${name}: nothing drawn in the ring`).toBeGreaterThan(0);
+    for (const x of inHole) {
+      const width = x.text.length * x.size * 0.6;   // the stub's metric
+      expect(width, `${name}: "${x.text}" is ${Math.round(width)}px wide `
+        + `in a ${Math.round(rInner * 2)}px hole`)
+        .toBeLessThanOrEqual(rInner * 2);
+    }
+  });
+
+  it.each(VIEWPORTS)("%s (%ix%i): the parts list does not run under the ring",
+    async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(100);
+    const ringBottom = g.ring.cy + g.ring.rOuter;
+    for (const row of g.binRows) {
+      expect(row.box.y, `${name}: a bin row starts above the ring's bottom edge`)
+        .toBeGreaterThanOrEqual(ringBottom - 2);
+    }
   });
 });

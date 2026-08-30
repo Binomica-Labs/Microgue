@@ -52,6 +52,15 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     // Catabolising is irreversible so it ASKS first, and the confirm sits
     // where the eat button was not -- a second tap in the same place should
     // never be able to destroy something.
+    // The surplus prompt is modal over the world and answered before anything
+    // else: it is a decision about the tile you are standing on, and leaving
+    // it hanging while the player walks off would strand the state.
+    if (_g.offer !== null && _g.offerBoxes !== null) {
+      if (inBoxOf(_g.offerBoxes.eat, x, y)) _g.eatOffered();
+      else _g.declineOffered();
+      _g.gesture = "none";
+      return;
+    }
     if (_g.card !== null && !_g.inClose(x, y)) {
       const b = _g.cardBoxes;
       const hit = (box: Box | null): boolean => box !== null && inBoxOf(box, x, y);
@@ -472,6 +481,8 @@ export function i_press(_g: Game, id: string): void {
       case "auto": {
         _g.exploring = false;
         _g.autoAttack = !_g.autoAttack;
+        // Persist it: as a bare field it silently reset on reload.
+        _g.settings = { ..._g.settings, autoAttack: _g.autoAttack };
         const btn = _g.buttons.find((b) => b.id === "auto");
         if (btn) btn.active = _g.autoAttack;
         if (_g.autoAttack) { _g.walk = null; _g.note("Auto-attack engaged."); }
