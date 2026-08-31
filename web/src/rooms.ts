@@ -14,13 +14,24 @@
 //   BLOOM     A single species that has run away with a layer's chemistry.
 //   ENRICHMENT A pocket that has been growing undisturbed. Sealed but for one
 //             way in, and something has got large in there.
+//   RELICT    A slumped horizon. Sediment on a slope fails and carries a whole
+//             upper-column community downward, burying it metres below where
+//             it lived, instantly and in the wrong chemistry. The cells die.
+//             The DNA does not: extracellular DNA adsorbs to clay minerals and
+//             persists in sediment for a very long time, and that sedimentary
+//             DNA pool is a real reservoir for horizontal gene transfer.
+//
+//             So a relict pocket is a piece of a SHALLOWER floor, sealed in a
+//             deeper one, holding the genes of organisms that never lived
+//             here. It is the only way to carry a surface metabolism down.
 //   CHAMBER   Plain open ground.
 
 import { MAX_DEPTH } from "./biology.js";
 import { columnRadius, FLOOR, WALL, type Grid, type Point } from "./mapgen.js";
 import type { Rng } from "./rng.js";
 
-export type RoomKind = "port" | "mat" | "bloom" | "enrichment" | "chamber";
+export type RoomKind = "port" | "mat" | "bloom" | "enrichment" | "relict"
+  | "chamber";
 
 export interface Room {
   readonly kind: RoomKind;
@@ -31,6 +42,9 @@ export interface Room {
   readonly tiles: Point[];
   /** Set once its contents have been placed. */
   stocked: boolean;
+  /** For a relict: which stratum the buried layer came from. Set when the
+   *  pocket is stocked, because that is when the slump depth is rolled. */
+  from?: number;
 }
 
 export interface RoomStyle {
@@ -42,6 +56,10 @@ export interface RoomStyle {
 }
 
 export const ROOM_STYLE: Readonly<Record<RoomKind, RoomStyle>> = {
+  relict: { name: "slumped horizon", loot: 4, guard: 0,
+    note: "A piece of a shallower layer, carried down by a slope failure and "
+      + "buried where it could not live. The cells died. Their DNA is still "
+      + "here, held on the clay." },
   port: { name: "sampling port", loot: 3, guard: 0,
     note: "A port cut through the glass. Someone has been taking material out here." },
   mat: { name: "microbial mat", loot: 2, guard: 2,
@@ -146,7 +164,11 @@ export function carveRooms(g: Grid, rng: Rng, plan: RoomPlan): Room[] {
 
   for (let i = 0; i < plan.count; i++) {
     const kind = plan.kinds[rng.int(plan.kinds.length)] ?? "chamber";
-    const r = kind === "enrichment" ? 3 + rng.int(2)
+    // A relict is small: it is a POCKET of another layer, not a chamber of
+    // its own. Making it room-sized read as "a room you cannot enter" rather
+    // than "something buried".
+    const r = kind === "relict" ? 2 + rng.int(2)
+            : kind === "enrichment" ? 3 + rng.int(2)
             : kind === "port" ? 3
             : 4 + rng.int(3);
 
@@ -162,8 +184,10 @@ export function carveRooms(g: Grid, rng: Rng, plan: RoomPlan): Room[] {
     // Do not stack rooms on top of one another.
     if (rooms.some((o) => (o.cx - cx) ** 2 + (o.cy - cy) ** 2 < (o.r + r + 2) ** 2)) continue;
 
-    // An enrichment is sealed: wall it, then punch exactly one way in.
-    if (kind === "enrichment") {
+    // A relict is sealed COMPLETELY -- no mouth at all. The only way in is
+    // through the crust that buried it, which means expressing the right gene
+    // rather than finding the right corridor.
+    if (kind === "enrichment" || kind === "relict") {
       carveDisc(g, cx, cy, r + 1);
       for (let y = Math.floor(cy - r - 1); y <= Math.ceil(cy + r + 1); y++) {
         for (let x = Math.floor(cx - r - 1); x <= Math.ceil(cx + r + 1); x++) {
@@ -212,6 +236,10 @@ export function planFor(depth: number, boss: boolean): RoomPlan {
   if (d >= 3 && d <= 7) kinds.push("mat");
   if (d >= 2) kinds.push("bloom");
   if (d >= 2) kinds.push("enrichment");
+  // A slump has to have had something above it to carry down, so no relict on
+  // the first stratum. Rarer deeper: the column has had longer to bury them,
+  // but there is also more sediment on top and fewer survive intact.
+  if (d >= 3) kinds.push("relict");
   // More rooms: they are the landmarks, the caches and the reason to cross a
   // level rather than beeline for the stairs.
   return { kinds, count: boss ? 5 : 7 + Math.floor(d / 2) };

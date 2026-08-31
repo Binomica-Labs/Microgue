@@ -286,10 +286,24 @@ class Game {
           }
           // A port or an enrichment is worth crossing the level for.
           if (style.loot >= 3 && lootRng.next() < 0.55) {
-            const genes = bio.microbesAt(s.depth).flatMap((p) => [...p.genes]);
+            // A RELICT holds a shallower layer, so its genes are the ones that
+            // lived UP THERE -- the whole point of it. Everything else is
+            // stocked from the stratum it is actually in.
+            //
+            // This is the only source of off-stratum genes in the game, and so
+            // the only way to carry a surface metabolism down. Without it a
+            // build tracks its depth and every deep run converges.
+            const from = room.kind === "relict"
+              ? 1 + lootRng.int(Math.max(s.depth - 1, 1))
+              : s.depth;
+            if (room.kind === "relict") room.from = from;
+            const genes = bio.microbesAt(from).flatMap((p) => [...p.genes]);
             const g = genes[lootRng.int(Math.max(genes.length, 1))];
             if (g !== undefined && !this.genome.has(g) && !this.genome.inBin(g)) {
-              items.push({ kind: "cassette", gene: g, allele: rollAllele(lootRng, s.depth) });
+              // Rolled at the depth it CAME from: a surface organism buried deep
+              // did not become a deep organism, and its alleles are what the
+              // shallow column produced.
+              items.push({ kind: "cassette", gene: g, allele: rollAllele(lootRng, from) });
             }
           }
           addDrop(this.drops, t.x, t.y, items);

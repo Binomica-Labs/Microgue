@@ -235,7 +235,8 @@ export class Dungeon {
     const kinds = barriersAt(lvl.depth);
     if (kinds.length === 0) return;
     for (const room of lvl.rooms) {
-      if (room.kind !== "port" && room.kind !== "enrichment") continue;
+      if (room.kind !== "port" && room.kind !== "enrichment"
+          && room.kind !== "relict") continue;
       // Never seal the room you ARRIVE in. `exitReachable` proves a route
       // still exists from the stairs, and it did -- but a player who
       // materialises inside the ring is walled in by their own arrival, and on

@@ -625,7 +625,15 @@ export function t_onTile(_g: Game, x: number, y: number): void {
     const room = roomAt(_g.level.rooms, x, y);
     if (room && room !== _g.inRoom) {
       _g.inRoom = room;
-      _g.note(`${ROOM_STYLE[room.kind].name}. ${ROOM_STYLE[room.kind].note}`);
+      // A relict says WHICH layer it is, because that is the whole reason to
+      // break into one: it tells you what metabolism you are about to be
+      // handed, several strata out of place.
+      const where = room.kind === "relict" && room.from !== undefined
+        ? ` This came from the ${bio.STRATA[
+            Math.min(Math.max(room.from - 1, 0), bio.STRATA.length - 1)
+          ]?.name ?? "column above"}.`
+        : "";
+      _g.note(`${ROOM_STYLE[room.kind].name}. ${ROOM_STYLE[room.kind].note}${where}`);
     } else if (!room) {
       _g.inRoom = null;
     }

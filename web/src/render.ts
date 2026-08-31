@@ -97,7 +97,40 @@ export function r_draw(_g: Game): void {
     ctx.fill(wallPath);
     ctx.restore();
 
-    if (!hc && px >= 40) {
+    // Depth, so the wall is a MASS rather than a shape.
+    //
+    // One flat fill reads as a cut-out however good the outline is: nothing
+    // says which side is solid. A rim lit from above and a darker interior is
+    // the cheapest thing that does -- one clipped gradient, no per-tile work,
+    // and it survives any zoom because it is drawn in screen space.
+    if (!hc) {
+      ctx.save();
+      ctx.scale(px, px);
+      ctx.clip(wallPath);
+      ctx.scale(1 / px, 1 / px);
+
+      // Sediment settles in layers, so the shading runs horizontally: light
+      // catches the upper face of every bank.
+      const top = y0 * px, bot = (y1 + 1) * px;
+      const g2 = ctx.createLinearGradient(0, top, 0, bot);
+      g2.addColorStop(0, "rgba(255,255,255,0.10)");
+      g2.addColorStop(0.35, "rgba(255,255,255,0.02)");
+      g2.addColorStop(1, "rgba(0,0,0,0.22)");
+      ctx.fillStyle = g2;
+      ctx.fillRect((x0 - 1) * px, top, (x1 - x0 + 3) * px, bot - top);
+      ctx.restore();
+
+      // And a lip along the boundary itself: the edge where wall meets floor
+      // is where a real bank catches the most light.
+      ctx.save();
+      ctx.scale(px, px);
+      ctx.strokeStyle = "rgba(255,255,255,0.13)";
+      ctx.lineWidth = Math.max(2 / px, 0.02);
+      ctx.stroke(wallPath);
+      ctx.restore();
+    }
+
+    if (!hc && px >= 10) {
       ctx.save();
       ctx.scale(px, px);
       ctx.clip(wallPath);
@@ -316,6 +349,7 @@ export function r_draw(_g: Game): void {
     // where you have actually been.
     for (const room of _g.level.rooms) {
       ctx.fillStyle = room.kind === "port" ? "rgba(120,200,255,0.07)"
+        : room.kind === "relict" ? "rgba(150,190,255,0.09)"
         : room.kind === "enrichment" ? "rgba(255,200,120,0.08)"
         : room.kind === "mat" ? "rgba(220,190,90,0.07)"
         : "rgba(255,255,255,0.035)";

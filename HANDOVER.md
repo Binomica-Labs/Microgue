@@ -1,3 +1,45 @@
+# v1.2.0 — relict pockets, and walls with mass
+
+## The relict pocket
+
+Loot was `microbesAt(depth)` -- strictly stratum-locked. So a build tracked its
+depth, and every deep run converged on the same deep genes. There was no way to
+carry a surface metabolism down, which is the single biggest limit on build
+variety.
+
+A RELICT is a slumped horizon. Sediment on a slope fails and carries a whole
+upper-column community downward, burying it metres below where it lived,
+instantly and in the wrong chemistry. The cells die. The DNA does not:
+extracellular DNA adsorbs to clay minerals and persists in sediment for a very
+long time, and that sedimentary pool is a real reservoir for horizontal gene
+transfer.
+
+So a relict holds the genes of organisms that never lived there, from a
+stratum ABOVE, and it is the only source of off-stratum genes in the game.
+Measured: 0.88 per floor from depth 3 down, 209 of 210 sealed behind a
+gene-gated barrier, and 62 genes reachable at depth only this way.
+
+Small on purpose -- a pocket, not a chamber. Room-sized read as "a room you
+cannot enter" rather than "something buried". Alleles are rolled at the depth
+it CAME from: a surface organism buried deep did not become a deep organism.
+
+## Walls: a second `px >= 40` gate
+
+The motif fix in v1.1.0 was still dead. There were TWO gates -- one inside
+`paintWallMotif` and another around the clipped block that calls it -- and only
+the first was found. A tile is about 15px at the default zoom (the view sits at
+0.47), so a threshold of 40 was nearly three times what the game ever shows.
+
+Walls also had no depth: one flat fill reads as a cut-out however good the
+outline is, because nothing says which side is solid. There is a clipped
+vertical gradient now -- light on the upper face, dark below, which is how
+settled sediment actually catches light -- and a lit lip along the boundary.
+One gradient per frame, no per-tile work, skipped entirely in high contrast
+where flat is the point.
+
+`spec` asserts a gradient reaches the frame at the DEFAULT zoom, which is the
+assertion that would have caught both gates.
+
 # v1.1.0 — minimap, and walls you can actually see
 
 ## The stacking work left its old invariant behind

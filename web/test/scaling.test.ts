@@ -38,6 +38,7 @@ interface Trace {
            depth: number }[];
   /** cx, cy, r, a0, a1 -- so a drawn ring can be measured, not inferred. */
   arcs: number[][];
+  gradients: number;
 }
 
 /**
@@ -92,6 +93,7 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
                          w: (w ?? 0) * x0.sx, h: (h ?? 0) * x0.sy });
         }
         if (p === "arc") t.arcs.push(a as number[]);
+        if (p === "createLinearGradient") t.gradients++;
         if (p === "fillText" || p === "strokeText") {
           const [text, x, y] = a as [string, number, number];
           t.texts.push({ x: x * x0.sx + x0.tx, y: y * x0.sy + x0.ty, text,
@@ -169,7 +171,7 @@ describe("layout holds on every form factor", () => {
   beforeEach(() => { vi.resetModules(); });
 
   it.each(VIEWPORTS)("%s (%ix%i): every screen draws in bounds", async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     for (const screen of ["", "plasmid", "map", "notes", "research"]) {
@@ -215,7 +217,7 @@ describe("layout holds on every form factor", () => {
     const seen: number[] = [];
     for (const [name, W, H] of VIEWPORTS) {
       for (const coarse of [true, false]) {
-        const t: Trace = { rects: [], texts: [], arcs: [] };
+        const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
         vi.stubGlobal("matchMedia", () => ({ matches: coarse }));
         const g = await play(W, H, t);
         g.startRun(0);
@@ -245,7 +247,7 @@ describe("layout holds on every form factor", () => {
     const padded = Math.max((avail - Math.min(avail, 470 * u)) / 2, 0);
     if (padded < 60) return;                    // narrow enough to fill legitimately
 
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     for (const [screen, own] of [["plasmid", "PARTS BIN"], ["research", "THE BENCH"],
@@ -263,7 +265,7 @@ describe("layout holds on every form factor", () => {
   });
 
   it.each(VIEWPORTS)("%s (%ix%i): buttons fit and stay tappable", async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     g.frame(50);
@@ -292,7 +294,7 @@ describe("layout holds on every form factor", () => {
   });
 
   it.each(VIEWPORTS)("%s (%ix%i): the close target is reachable", async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     for (const screen of ["plasmid", "map", "notes", "research"]) {
@@ -330,7 +332,7 @@ describe("the fog has no seams", () => {
       closePath(): void { /* */ }
       rect(...a: number[]): void { rects.push(a.length); }
     }
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(400, 800, t);
     // After play(), which replaces the globals wholesale.
     vi.stubGlobal("Path2D", RecordingPath);
@@ -352,7 +354,7 @@ describe("the fog has no seams", () => {
       closePath(): void { /* */ }
       rect(...a: number[]): void { seen.push(a); }
     }
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(400, 800, t);
     vi.stubGlobal("Path2D", RecordingPath);
     g.startRun(0);
@@ -471,7 +473,7 @@ describe("the ring draws a whole circle", () => {
     // The angle maths agreeing with itself is not enough: `slotAt` and
     // `slotCentre` agreed while the DRAWING disagreed with both, and the ring
     // rendered as a quarter-circle. This measures what is actually drawn.
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(400, 800, t);
     g.startRun(0);
 
@@ -523,7 +525,7 @@ describe("the fog stays cheap", () => {
       closePath(): void { /* */ }
       rect(): void { rects++; }
     }
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(400, 800, t);
     vi.stubGlobal("Path2D", CountingPath);
     g.startRun(0);
@@ -550,7 +552,7 @@ describe("text stays inside the thing it is drawn in", () => {
     // across the plasmid: the text was sized `15 * u`, scaled by the smaller
     // screen dimension, while the ring hole is sized from `H * 0.46`. On a
     // wide, short screen the hole shrinks and the text does not.
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
 
@@ -588,7 +590,7 @@ describe("text stays inside the thing it is drawn in", () => {
 
   it.each(VIEWPORTS)("%s (%ix%i): the parts list does not run under the ring",
     async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     g.openPlasmid(true);
@@ -608,7 +610,7 @@ describe("the minimap fits beside the controls", () => {
     async (name, W, H) => {
     // The right edge already belongs to the button column. A decoration drawn
     // on top of a control is worse than no decoration.
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     g.frame(100);
@@ -626,7 +628,7 @@ describe("the minimap fits beside the controls", () => {
 
   it.each(VIEWPORTS)("%s (%ix%i): it is readable or absent, never a sliver",
     async (name, W, H) => {
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(W, H, t);
     g.startRun(0);
     g.frame(100);
@@ -646,7 +648,7 @@ describe("the minimap costs one rasterise, not one per frame", () => {
     // not affordable, and it does not change per frame: it changes when you
     // uncover something.
     let created = 0;
-    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
     const g = await play(393, 852, t);
     const doc = (globalThis as unknown as { document: { createElement: () => unknown } }).document;
     const real = doc.createElement.bind(doc);
@@ -658,5 +660,38 @@ describe("the minimap costs one rasterise, not one per frame", () => {
     expect(created - afterFirst,
            `${String(created - afterFirst)} canvases for 60 still frames`)
       .toBeLessThanOrEqual(1);
+  });
+});
+
+describe("the walls are a mass, not a cut-out", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("depth shading and stratum texture both reach the frame", async () => {
+    // Both were gated behind `px >= 40` while a tile is 32px at the default
+    // zoom, so neither drew for anyone playing normally -- eight hand-written
+    // stratum textures and the entire sense of solidity, invisible.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.startRun(0);
+    g.frame(100);
+    // A tile is ~15px at the default zoom on a phone, not 32: the view is
+    // zoomed out to about 0.47 so you can see the room you are in. The old
+    // gate wanted 40px, which is nearly three times what the game ever shows.
+    expect(g.zoom * 32, "the fixture is at an unexpected tile size")
+      .toBeLessThan(40);
+    expect(t.gradients, "no gradient: the walls are still one flat fill")
+      .toBeGreaterThan(0);
+  });
+
+  it("shading is skipped in high contrast, where flat is the point", async () => {
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.startRun(0);
+    g.settings = { ...g.settings, highContrast: true };
+    g.frame(100);
+    const after = t.gradients;
+    g.frame(140);
+    expect(t.gradients - after,
+           "high contrast should not be paying for gradients").toBe(0);
   });
 });

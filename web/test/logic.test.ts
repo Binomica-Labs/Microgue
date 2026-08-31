@@ -6632,3 +6632,44 @@ describe("a pack does not move as one body", () => {
       .toBeGreaterThan(0.7);
   });
 });
+
+describe("a relict pocket is another layer, buried", () => {
+  it("appears below the first stratum, sealed, and holds shallower genes", () => {
+    // A slump has to have had something above it to carry down, so none on
+    // the first stratum. And it is sealed COMPLETELY -- the way in is through
+    // the crust that buried it, which means expressing a gene rather than
+    // finding a corridor.
+    let found = 0, sealed = 0;
+    for (let seed = 0; seed < 25; seed++) {
+      const d = new Dungeon(96, 96, seed);
+      for (const f of [1, 6, 12, 20]) {
+        const lvl = d.level(f);
+        for (const r of lvl.rooms) {
+          if (r.kind !== "relict") continue;
+          found++;
+          expect(lvl.depth, "a relict on the first stratum has nothing above it")
+            .toBeGreaterThan(1);
+          if (lvl.barriers.some((b) =>
+              Math.hypot(b.x - r.cx, b.y - r.cy) <= r.r + 1.6)) sealed++;
+        }
+      }
+    }
+    expect(found, "no relict pockets generated at all").toBeGreaterThan(10);
+    expect(sealed / found, "relicts are not being sealed").toBeGreaterThan(0.8);
+  });
+
+  it("its genes come from ABOVE, which is the only way to carry one down", () => {
+    // Loot is otherwise `microbesAt(depth)` -- strictly stratum-locked, which
+    // is what makes every deep build converge on the same deep genes.
+    const deep = 20;
+    const here = new Set(bio.microbesAt(deep).flatMap((m) => [...m.genes]));
+    const above = new Set<bio.GeneId>();
+    for (let up = 1; up < deep; up++) {
+      for (const m of bio.microbesAt(up)) for (const g of m.genes) above.add(g);
+    }
+    const onlyAbove = [...above].filter((g) => !here.has(g));
+    expect(onlyAbove.length,
+           "nothing is exclusive to the shallow column, so a relict adds nothing")
+      .toBeGreaterThan(20);
+  });
+});
