@@ -45,6 +45,7 @@ import { installGlobalHandlers, on } from "./safety.js";
 import { capacityAt, describeStock, restockAmount } from "./production.js";
 import { WILD_TYPE,rollAllele } from "./allele.js";
 import type { TraitId } from "./chromosome.js";
+import type { MiniBox } from "./minimap.js";
 import { newLab, type Lab, type RunRecord } from "./lab.js";
 import { readLab, writeLab } from "./lab_save.js";
 import { buy, type Offer } from "./lab.js";
@@ -136,6 +137,9 @@ class Game {
   /** A cassette that would not fit on a full stack, awaiting a choice. */
   offer: { part: Part; at: { x: number; y: number } } | null = null;
   offerBoxes: { eat: Box; leave: Box } | null = null;
+  /** Where the minimap was drawn, for hit-testing. Null when there is
+   *  no room for a readable one. */
+  miniBox: MiniBox | null = null;
   /** Set when the strain dies. A dead strain does not act. */
   dead = false;
   deathRecord: RunRecord | null = null;

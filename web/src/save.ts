@@ -29,6 +29,9 @@ export interface Settings {
   /** Auto-attack. A toggle the player sets, so it belongs with the other
    *  settings -- as a bare field on Game it silently reset on reload. */
   readonly autoAttack: boolean;
+  /** The glanceable map in the corner. A setting because it costs screen,
+   *  and on a small phone that is a real trade. */
+  readonly minimap: boolean;
   /** The player's zoom, as a multiple of the platform-independent default.
    *  Relative rather than absolute so it means the same thing on a phone and
    *  on a desktop, and so it survives a rotation. */
@@ -92,7 +95,7 @@ export interface SaveData {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  autoAttack: false,
+  autoAttack: false, minimap: true,
   zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true,
 };
 
@@ -236,6 +239,9 @@ function parseSettings(v: unknown): Settings {
   if (!isRecord(v)) return DEFAULT_SETTINGS;
   return {
     autoAttack: v["autoAttack"] === true,
+    // Defaulted ON: absent in an older save means the player never turned
+    // it off, not that they wanted it off.
+    minimap: v["minimap"] !== false,
     // Defaulted, not schema-bumped: an older save simply has no zoom
     // preference and gets the standard one, which is better than discarding
     // the save outright.

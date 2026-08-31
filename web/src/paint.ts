@@ -225,44 +225,55 @@ export function paintWallMotif(
   depth: number, tx: number, ty: number,
   rx: number, ry: number, px: number, floor: string,
 ): void {
-  // Below about 40px a tile has no room for texture and the marks merge into
-  // stripes -- exactly what the hatch ticks did before. Skip it entirely.
-  if (px < 40) return;
+  // A tile is 32px at the default zoom, and this used to skip below 40 -- so
+  // the motif never drew unless you had deliberately zoomed in, and the walls
+  // were a flat colour for everyone playing normally. The original worry was
+  // sound (small marks merge into stripes); the answer is FEWER, BIGGER marks
+  // rather than none.
+  if (px < 10) return;
+  const tight = px < 44;
+  // Drop the count and grow each mark as the tile shrinks, so the texture
+  // stays legible instead of turning into noise.
+  const count = (n: number): number => tight ? Math.max(Math.round(n * 0.55), 1) : n;
+  const scale = tight ? 1.7 : 1;
 
   ctx.save();
   ctx.fillStyle = floor;
   const dot = (fx: number, fy: number, r: number): void => {
     ctx.beginPath();
-    ctx.arc(rx + fx * px, ry + fy * px, r * px, 0, Math.PI * 2);
+    ctx.arc(rx + fx * px, ry + fy * px, Math.max(r * scale * px, 0.6), 0, Math.PI * 2);
     ctx.fill();
   };
 
+  // A faint mark on a small tile reads as nothing at all.
+  const A = tight ? 1.5 : 1;
+
   switch (depth) {
     case 1: { // oxygen bubbles
-      ctx.globalAlpha = 0.16;
-      for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.16 * A;
+      for (let i = 0; i < count(3); i++) {
         dot(0.2 + hash(tx, ty, i) * 0.6, 0.2 + hash(tx, ty, i + 9) * 0.6, 0.05);
       }
       break;
     }
     case 2: { // fine sediment grain
-      ctx.globalAlpha = 0.18;
-      for (let i = 0; i < 5; i++) {
+      ctx.globalAlpha = 0.18 * A;
+      for (let i = 0; i < count(5); i++) {
         dot(0.12 + hash(tx, ty, i) * 0.76, 0.12 + hash(tx, ty, i + 5) * 0.76, 0.035);
       }
       break;
     }
     case 3: { // Beggiatoa mat: horizontal filament streaks
-      ctx.globalAlpha = 0.22;
-      for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.22 * A;
+      for (let i = 0; i < count(3); i++) {
         const y = 0.2 + i * 0.3 + hash(tx, ty, i) * 0.06;
         ctx.fillRect(rx + 0.1 * px, ry + y * px, 0.8 * px, Math.max(0.035 * px, 1));
       }
       break;
     }
     case 4: { // angular rust mottling
-      ctx.globalAlpha = 0.2;
-      for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.2 * A;
+      for (let i = 0; i < count(3); i++) {
         const cx = 0.18 + hash(tx, ty, i) * 0.64;
         const cy = 0.2 + hash(tx, ty, i + 3) * 0.6;
         const s = 0.05 + hash(tx, ty, i + 7) * 0.045;
@@ -277,34 +288,38 @@ export function paintWallMotif(
       break;
     }
     case 5: { // sulfur globules
-      ctx.globalAlpha = 0.18;
-      for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.18 * A;
+      for (let i = 0; i < count(3); i++) {
         dot(0.18 + hash(tx, ty, i) * 0.64, 0.18 + hash(tx, ty, i + 4) * 0.64, 0.042);
       }
       break;
     }
     case 6: { // dense stipple -- light-starved, packed cells
-      ctx.globalAlpha = 0.17;
-      for (let i = 0; i < 7; i++) {
+      ctx.globalAlpha = 0.17 * A;
+      for (let i = 0; i < count(7); i++) {
         dot(0.1 + hash(tx, ty, i) * 0.8, 0.1 + hash(tx, ty, i + 11) * 0.8, 0.03);
       }
       break;
     }
     case 7: { // framboidal pyrite: tight clusters of microcrystals
-      ctx.globalAlpha = 0.3;
-      for (let f = 0; f < 2; f++) {
+      ctx.globalAlpha = 0.3 * A;
+      // A framboid is a raspberry of microcrystals, so it is drawn as a ring
+      // of them -- but seven dots on a 32px tile is a smudge. One framboid of
+      // five when the tile is small, two of seven when there is room.
+      const crystals = tight ? 5 : 7;
+      for (let f = 0; f < count(2); f++) {
         const fx = 0.25 + hash(tx, ty, f) * 0.5;
         const fy = 0.25 + hash(tx, ty, f + 6) * 0.5;
-        for (let i = 0; i < 7; i++) {
-          const a = (i / 7) * Math.PI * 2;
-          dot(fx + Math.cos(a) * 0.055, fy + Math.sin(a) * 0.055, 0.021);
+        for (let i = 0; i < crystals; i++) {
+          const a = (i / crystals) * Math.PI * 2;
+          dot(fx + Math.cos(a) * 0.06, fy + Math.sin(a) * 0.06, 0.021);
         }
       }
       break;
     }
     case 8: { // methane vesicles
-      ctx.globalAlpha = 0.17;
-      for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.17 * A;
+      for (let i = 0; i < count(3); i++) {
         const cx = 0.18 + hash(tx, ty, i) * 0.64;
         const cy = 0.18 + hash(tx, ty, i + 8) * 0.64;
         ctx.beginPath();

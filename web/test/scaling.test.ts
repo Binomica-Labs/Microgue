@@ -600,3 +600,63 @@ describe("text stays inside the thing it is drawn in", () => {
     }
   });
 });
+
+describe("the minimap fits beside the controls", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each(VIEWPORTS)("%s (%ix%i): it never overlaps a button",
+    async (name, W, H) => {
+    // The right edge already belongs to the button column. A decoration drawn
+    // on top of a control is worse than no decoration.
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.frame(100);
+    const box = g.miniBox;
+    if (!box) return;              // too little room: it declines to draw
+    for (const b of g.buttons) {
+      const apart = box.x + box.w <= b.x + 1 || b.x + b.w <= box.x + 1
+        || box.y + box.h <= b.y + 1 || b.y + b.h <= box.y + 1;
+      expect(apart, `${name}: the minimap covers ${b.id}`).toBe(true);
+    }
+    expect(box.x, `${name}: off the left edge`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.w, `${name}: off the right edge`).toBeLessThanOrEqual(W + 1);
+    expect(box.y + box.h, `${name}: off the bottom`).toBeLessThanOrEqual(H + 1);
+  });
+
+  it.each(VIEWPORTS)("%s (%ix%i): it is readable or absent, never a sliver",
+    async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.frame(100);
+    const box = g.miniBox;
+    if (!box) return;
+    expect(Math.min(box.w, box.h),
+           `${name}: ${Math.round(box.w)}x${Math.round(box.h)} is too small to read`)
+      .toBeGreaterThanOrEqual(56);
+  });
+});
+
+describe("the minimap costs one rasterise, not one per frame", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("the terrain is cached and reused while nothing is uncovered", async () => {
+    // A floor is 96x96 -- 9216 tiles. Redrawing that sixty times a second is
+    // not affordable, and it does not change per frame: it changes when you
+    // uncover something.
+    let created = 0;
+    const t: Trace = { rects: [], texts: [], arcs: [] };
+    const g = await play(393, 852, t);
+    const doc = (globalThis as unknown as { document: { createElement: () => unknown } }).document;
+    const real = doc.createElement.bind(doc);
+    doc.createElement = () => { created++; return real(); };
+    g.startRun(0);
+    g.frame(50);
+    const afterFirst = created;
+    for (let i = 0; i < 60; i++) g.frame(100 + i * 16);
+    expect(created - afterFirst,
+           `${String(created - afterFirst)} canvases for 60 still frames`)
+      .toBeLessThanOrEqual(1);
+  });
+});

@@ -22,6 +22,7 @@ import { jitter, lungeOffset } from "./fx.js";
 import { drawBody, paintWallMotif, paletteForPigment, playerSprite, sprite }
   from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
+import { drawMinimap, makeCanvas, miniBox, seenCount } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
 import { WALL_SPREAD, traceWalls } from "./walls.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
@@ -415,6 +416,26 @@ export function r_draw(_g: Game): void {
 
     _g.drawScreenFx(W, H);
     _g.drawHud(W, H);
+    // The glanceable version of the map screen: where am I, and which way is
+    // down. Left of the button column, which already owns the right edge.
+    {
+      const bs = _g.buttons;
+      const bl = bs.length > 0 ? Math.min(...bs.map((b) => b.x)) : W;
+      const bt = bs.length > 0 ? Math.min(...bs.map((b) => b.y)) : H;
+      const box = miniBox(W, H, _g.insets(), bl, bt);
+      _g.miniBox = box;
+      if (box && _g.settings.minimap && !_g.showMap) {
+        const down = _g.level.down;
+        drawMinimap(ctx, _g.level.grid, _g.level.sight, box, _g.level.floor,
+                    seenCount(_g.level.sight),
+                    { player: { x: _g.player.x, y: _g.player.y },
+                      stairs: down ?? null,
+                      hostiles: _g.level.mobs.filter(
+                        (m) => m.alive && isVisible(_g.level.sight, m.x, m.y)) },
+                    Math.max(Math.min(W, H) / 420, 1),
+                    () => makeCanvas());
+      }
+    }
     // Over the HUD: it is a decision about the tile you are standing on, and
     // it has to be answerable before anything else is.
     r_drawOffer(_g, Math.max(Math.min(W, H) / 420, 1), W, H);

@@ -21,6 +21,35 @@ tar xzf "$newest" -C "$tmp"
 src="$tmp/microgue-web"
 [ -f "$src/src/main.ts" ] || { echo "archive looks wrong: no src/main.ts"; exit 1; }
 
+# The self-update is the FIRST thing after the archive is opened.
+#
+# It used to sit after the guards, which made a bad guard permanently
+# unfixable: the guard refused, the script never replaced itself, and the
+# corrected script -- sitting right there in the extracted tree -- could not
+# install. The only way out was knowing to copy it by hand.
+#
+# Moving it ahead of the gitlink checks alone was not enough: the PULL runs
+# before those, and a pull that cannot fast-forward blocks just as hard. So it
+# goes here, ahead of everything that can refuse.
+#
+# A script that gates its own replacement behind its own checks cannot be
+# repaired by the mechanism that delivers repairs.
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+# Never self-update when running from inside a checkout: exercising this script
+# against a scratch repo would otherwise copy the packaged sync.sh back over
+# the one being edited, silently reverting work in progress. It happened.
+if [ -f "$self" ] && [ -f "$(dirname "$self")/package.json" ]; then
+  echo "==> running from a source tree; skipping self-update"
+elif [ -f "$src/sync.sh" ] && ! cmp -s "$src/sync.sh" "$self"; then
+  if cp "$src/sync.sh" "$self.new" && chmod +x "$self.new" \
+     && mv -f "$self.new" "$self"; then
+    echo "==> sync.sh updated itself; the next run uses the new version"
+  else
+    rm -f "$self.new"
+    echo "==> could not update sync.sh (continuing with this one)"
+  fi
+fi
+
 cd "$REPO"
 
 # Pull BEFORE extracting, not after.
@@ -90,21 +119,9 @@ fi
 # tests -- CI caught it, but only after a push.
 cp -r "$src/." "$REPO/web/"
 
-# Some files belong at the repo ROOT, not under web/. The archive carries them
-# in web/ because that is all it can carry; they are hoisted here. Each one is
-# announced, because silently overwriting a root file is exactly the kind of
-# thing you want to see in the log when something later goes wrong.
+# HANDOVER lives at the repo root: it covers the Lua tree as well as web/.
 if [ -f "$REPO/web/HANDOVER.md" ]; then
   mv "$REPO/web/HANDOVER.md" "$REPO/HANDOVER.md"
-fi
-if [ -f "$REPO/web/.gitignore.root" ]; then
-  echo "==> hoisting .gitignore to the repo root"
-  mv "$REPO/web/.gitignore.root" "$REPO/.gitignore"
-fi
-if [ -d "$REPO/web/.github" ]; then
-  echo "==> hoisting .github/ to the repo root"
-  cp -r "$REPO/web/.github/." "$REPO/.github/"
-  rm -rf "$REPO/web/.github"
 fi
 
 # (already in $REPO; the pull needed to happen before the extract)
@@ -121,45 +138,6 @@ if [ -n "$unpushed" ]; then
   printf '%s\n' "$unpushed" | sed 's/^/    /'
 fi
 git status --short
-# A mode-160000 GITLINK is the actual harm: a submodule pointer with no
-# .gitmodules, aimed at a commit that exists only on this machine. CI then
-# fails in actions/checkout with "git failed with exit code 128", which says
-# nothing about the cause.
-#
-# Two different situations, and the first version conflated them -- it refused
-# on the mere PRESENCE of a nested .git, which meant that once the damage was
-# done the guard blocked the very sync that would have delivered the fix. A
-# guard that cannot be got past is worse than the bug it prevents.
-
-# 1. Already TRACKED as a gitlink. This is broken right now, and only
-#    `git rm --cached` clears it -- deleting the directory does not.
-tracked_links="$(git ls-files -s | awk '$1 == "160000" { print $4 }')"
-if [ -n "$tracked_links" ]; then
-  echo "==> TRACKED GITLINK(S) -- this is what breaks CI checkout:"
-  printf '%s\n' "$tracked_links" | sed 's/^/      /'
-  echo "==> fix with:"
-  printf '%s\n' "$tracked_links" | sed "s|^|      git rm --cached |"
-  echo "==> then run sync.sh again. nothing was committed."
-  exit 1
-fi
-
-# 2. Present but not tracked. Harmless IF git is ignoring it; a warning if not,
-#    because `git add -A` would turn it into case 1 on this very run.
-embedded="$(find "$REPO" -mindepth 2 -name .git -not -path "*/node_modules/*" \
-              -printf '%h\n' 2>/dev/null | sed "s|^$REPO/||")"
-unignored=""
-for e in $embedded; do
-  git check-ignore -q "$e" 2>/dev/null || unignored="$unignored$e
-"
-done
-if [ -n "$unignored" ]; then
-  echo "==> EMBEDDED GIT REPO(S) that git is NOT ignoring:"
-  printf '%s' "$unignored" | sed 's/^/      /'
-  echo "==> git add -A would turn these into dangling submodule pointers."
-  echo "==> add them to .gitignore. nothing was committed."
-  exit 1
-fi
-
 git add -A
 # Only commit if there is something to commit: this may be a retry of a push
 # that failed earlier, with the commit already made.
@@ -186,21 +164,6 @@ echo "==> pushed $(git rev-parse --short HEAD)"
 # it resumes mid-line in the new contents, running fragments of comments as
 # commands. A rename swaps the directory entry and leaves the running shell on
 # the original inode, so it finishes the version it started.
-self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-# Never self-update when running from inside a checkout: exercising this script
-# against a scratch repo would otherwise copy the packaged sync.sh back over
-# the one being edited, silently reverting work in progress. It happened.
-if [ -f "$self" ] && [ -f "$(dirname "$self")/package.json" ]; then
-  echo "==> running from a source tree; skipping self-update"
-elif [ -f "$src/sync.sh" ] && ! cmp -s "$src/sync.sh" "$self"; then
-  if cp "$src/sync.sh" "$self.new" && chmod +x "$self.new" \
-     && mv -f "$self.new" "$self"; then
-    echo "==> sync.sh updated itself; the next run uses the new version"
-  else
-    rm -f "$self.new"
-    echo "==> could not update sync.sh (continuing with this one)"
-  fi
-fi
 
 
 # Watch the run this push actually started.

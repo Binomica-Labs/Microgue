@@ -1,7 +1,74 @@
+# v1.1.0 — minimap, and walls you can actually see
+
+## The wall motif never drew
+
+`paintWallMotif` opened with `if (px < 40) return;`. A tile is 32px at the
+default zoom, so the motif was skipped for everyone playing normally and the
+walls were a flat colour -- you had to deliberately zoom past 1.25x to see any
+of the eight strata's textures.
+
+The original worry was sound: small marks merge into stripes. The answer is
+FEWER, BIGGER marks, not none. It scales now -- mark count drops and each mark
+grows as the tile shrinks, alpha lifts because a faint mark on a small tile
+reads as nothing, and the framboids draw one cluster of five instead of two of
+seven. Floor at 10px, below which there genuinely is no room.
+
+Worth recording: the wall TOPOLOGY was already clean. No isolated tiles, no
+stubs, no one-tile holes, no diagonal-only pinches, measured on a real floor.
+The walls did not need filling in; they needed to be visible.
+
+## The minimap
+
+`minimap.ts`. Square, top right, LEFT of the button column -- that column owns
+the right edge, and a decoration drawn over a control is worse than no
+decoration.
+
+The first version also refused to extend below where the buttons START, which
+on most phones is 56px down, so it produced a 140x56 letterbox. The constraint
+is horizontal only: the buttons own the right EDGE, not the right half. Square
+96px to 273px across every viewport tested, and it declines to draw at all
+below 56px rather than showing a sliver.
+
+It frames the EXPLORED bounds, not the whole grid -- a floor is mostly
+untouched rock, and fitting all 96x96 leaves the player as a speck.
+
+**A floor is 9216 tiles, so the terrain is rasterised once and blitted.** Keyed
+on the count of seen tiles, which rises monotonically within a floor and so
+changes exactly when there is something new to draw. `spec` asserts sixty still
+frames allocate at most one canvas.
+
+Only VISIBLE hostiles are marked. A minimap showing every creature on the floor
+is a cheat sheet, not a map.
+
 # v1.0.0
 
 74 modules, 15500 lines of source against 11100 lines of test, 882 tests, 78 kB
 gzipped. Two clean-checkout verifies.
+
+## The self-update must run before anything that can refuse
+
+The gitlink guard refused, so the script never replaced itself, so the
+CORRECTED script -- extracted into the tree on that very run -- could not
+install. The only way out was knowing to copy it by hand. A script that gates
+its own replacement behind its own checks cannot be repaired by the mechanism
+that delivers repairs.
+
+Moving it ahead of the gitlink checks was NOT enough: the pull runs before
+those, and a pull that cannot fast-forward blocks just as hard. It now sits
+immediately after the archive is opened, ahead of everything.
+
+Verified by installing a refusing version and confirming the newer script still
+lands.
+
+Two mistakes worth recording from doing it:
+
+* The first attempt moved the COMMENT and left the code behind, and duplicated
+  the prose while it was at it. `bash -n` passed, because a comment in the
+  wrong place is still valid shell.
+* Before that, the scratch harness cut the script at the literal `git add -A`,
+  which now also appears inside a guard's own message -- so two of three cases
+  were silently untested and appeared to pass. Anchor such cuts to the start
+  of a line.
 
 ## A guard you cannot get past is worse than the bug
 

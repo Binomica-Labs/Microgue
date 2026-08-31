@@ -1694,7 +1694,7 @@ describe("state that should persist, does", () => {
     binRows: "hit boxes, per frame", shopRows: "hit boxes, per frame",
     researchRows: "hit boxes, per frame", dropBoxes: "hit boxes, per frame",
     closeBox: "hit box, per frame", cardBoxes: "hit boxes, per frame",
-    offerBoxes: "hit boxes, per frame",
+    offerBoxes: "hit boxes, per frame", miniBox: "layout, per frame",
     // Momentary interaction state: meaningless after a reload.
     gesture: "a pointer gesture in progress", gestureBtn: "ditto",
     dragFrom: "a drag in progress", dragBin: "ditto", dragXY: "ditto",
