@@ -2138,11 +2138,19 @@ describe("motility behaviours", () => {
     }
   });
 
-  it("a chaser closes distance", () => {
+  it("a chaser closes distance ON AVERAGE, not every single step", () => {
+    // Pursuit is a biased random walk now, so a single step may tumble the
+    // wrong way. Asserting one step always closes was asserting PERFECT
+    // tracking -- which is what made a pack move as one body.
     const at = { x: 2, y: 2 };
-    const step = decideStep("chase", at, sensed(8, 8, at), open(), makeRng(1), noOne);
-    expect(step).not.toBeNull();
-    expect(chebyshev(step!.x, step!.y, 8, 8)).toBeLessThan(chebyshev(2, 2, 8, 8));
+    let closer = 0;
+    const n = 200;
+    for (let s = 0; s < n; s++) {
+      const step = decideStep("chase", at, sensed(8, 8, at), open(), makeRng(s), noOne);
+      if (step && chebyshev(step.x, step.y, 8, 8) < chebyshev(2, 2, 8, 8)) closer++;
+    }
+    expect(closer / n, `only ${String(closer)}/${String(n)} steps closed`)
+      .toBeGreaterThan(0.6);
   });
 
   it("a chaser out of sensing range holds still", () => {
@@ -2359,12 +2367,13 @@ describe("the microbe turn", () => {
   });
 
   it("a chaser closes and then strikes", () => {
+    // Given ENOUGH turns. A single step may tumble the wrong way now, so
+    // asserting the first one always closes was asserting perfect tracking.
     const m = mob({ x: 8, y: 5 });
     const w = world([m]);
-    microbeTurn(w);
-    expect(m.x).toBeLessThan(8);
-    for (let i = 0; i < 6; i++) microbeTurn(w);
-    expect(w.player.hp).toBeLessThan(30);
+    for (let i = 0; i < 14; i++) microbeTurn(w);
+    expect(m.x, "it never got any closer at all").toBeLessThan(8);
+    expect(w.player.hp, "it never landed a blow").toBeLessThan(30);
   });
 
   it("a sessile microbe never moves but still strikes on contact", () => {
@@ -6535,5 +6544,91 @@ describe("shrinking the chromosome strands nothing", () => {
       expect(p.usableSlots).toBeLessThanOrEqual(SLOTS);
       expect(p.usableSlots).toBeGreaterThanOrEqual(BASE_SLOTS);
     }
+  });
+});
+
+describe("a pack does not move as one body", () => {
+  /** Four identical chasers in a row, same bearing to the player. */
+  const pack = (turns: number): { lockstep: number; turns: number } => {
+    const d = new Dungeon(96, 96, 5);
+    const lvl = d.level(1);
+    const proto = lvl.mobs[0];
+    if (!proto) return { lockstep: 0, turns: 0 };
+    let row = -1;
+    for (let y = 5; y < 80 && row < 0; y++) {
+      let open = true;
+      for (let x = 32; x <= 40; x++) if (!lvl.grid.isFloor(x, y)) { open = false; break; }
+      if (open) row = y;
+    }
+    if (row < 0) return { lockstep: 0, turns: 0 };
+    lvl.mobs.length = 0;
+    for (let i = 0; i < 4; i++) {
+      lvl.mobs.push({ ...proto, behaviour: "chase", x: 33 + i, y: row,
+                      ax: 33 + i, ay: row, alive: true, hp: 9 });
+    }
+    // Inside senseRange("chase"), which is 9. Outside it they simply do not
+    // move, and "all moved identically" is trivially true of standing still --
+    // which is how a first attempt at this measured 60/60 and proved nothing.
+    const player = { x: 40, y: row, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
+                     status: [] };
+    let lockstep = 0;
+    for (let t = 0; t < turns; t++) {
+      const before = lvl.mobs.map((m) => [m.x, m.y] as [number, number]);
+      microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
+                    player: player,
+                    rng: makeRng(7000 + t), armour: 0, packets: [], clouds: [] });
+      const moves = lvl.mobs.map((m, i) =>
+        `${String(m.x - (before[i]?.[0] ?? 0))},${String(m.y - (before[i]?.[1] ?? 0))}`);
+      if (new Set(moves).size === 1) lockstep++;
+    }
+    return { lockstep, turns };
+  };
+
+  it("chasers at the same bearing take different paths", () => {
+    // Perfect tracking made every chaser at a similar bearing pick the same
+    // step, so a group moved in flawless lockstep -- which reads as one
+    // creature drawn several times.
+    const r = pack(60);
+    expect(r.turns, "the fixture found no open row").toBeGreaterThan(0);
+    expect(r.lockstep / r.turns,
+           `${String(r.lockstep)}/${String(r.turns)} turns moved as one body`)
+      .toBeLessThan(0.6);
+  });
+
+  it("but they still close on the player", () => {
+    // Chemotaxis is a biased random walk: the right way on average, never in
+    // a straight line. If the bias is too weak it stops being pursuit.
+    const d = new Dungeon(96, 96, 5);
+    const lvl = d.level(1);
+    const proto = lvl.mobs[0];
+    if (!proto) return;
+    let row = -1;
+    for (let y = 5; y < 80 && row < 0; y++) {
+      let open = true;
+      for (let x = 32; x <= 42; x++) if (!lvl.grid.isFloor(x, y)) { open = false; break; }
+      if (open) row = y;
+    }
+    if (row < 0) return;
+    let reached = 0;
+    const trials = 20;
+    for (let s = 0; s < trials; s++) {
+      lvl.mobs.length = 0;
+      lvl.mobs.push({ ...proto, behaviour: "chase", x: 34, y: row,
+                      ax: 34, ay: row, alive: true, hp: 9 });
+      const player = { x: 41, y: row, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
+                       status: [] };
+      for (let t = 0; t < 40; t++) {
+        microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
+                      player: player,
+                      rng: makeRng(s * 97 + t), armour: 0, packets: [], clouds: [] });
+        const m = lvl.mobs[0];
+        if (m && Math.abs(m.x - player.x) + Math.abs(m.y - player.y) <= 1) {
+          reached++;
+          break;
+        }
+      }
+    }
+    expect(reached / trials, `only ${String(reached)}/${String(trials)} reached`)
+      .toBeGreaterThan(0.7);
   });
 });

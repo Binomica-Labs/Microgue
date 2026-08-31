@@ -51,6 +51,11 @@ export const chebyshev = (ax: number, ay: number, bx: number, by: number): numbe
   Math.max(Math.abs(ax - bx), Math.abs(ay - by));
 
 /** How far a behaviour can notice you. Sessile things still sense contact. */
+/** How often a pursuing cell re-orients instead of holding its heading. */
+export const TUMBLE = 0.35;
+/** How often it tumbles in place, losing a step. */
+export const PAUSE = 0.12;
+
 export function senseRange(b: Behaviour): number {
   switch (b) {
     case "chase": return 9;
@@ -84,9 +89,51 @@ export function decideStep(
     return true;
   };
 
+  /**
+   * Toward the player, as a BIASED RANDOM WALK rather than a straight line.
+   *
+   * Perfect tracking made every chaser at a similar bearing pick the same step,
+   * so a group moved in flawless lockstep -- which reads as one creature drawn
+   * several times, and was the single most artificial thing on screen.
+   *
+   * The fix is also what actually happens. Chemotaxis is run-and-tumble: a
+   * cell cannot steer, it swims straight and randomly re-orients, suppressing
+   * the tumble while conditions improve. It goes the right way on average and
+   * never in a straight line, and two cells side by side take different paths.
+   */
   const toward = (): Point | null => {
     const dx = Math.sign(s.px - at.x);
     const dy = Math.sign(s.py - at.y);
+
+    // A tumble re-orients to ANY free neighbour, weighted toward the player.
+    //
+    // Shuffling the three candidates toward the player was not enough and
+    // measuring said so: for a cell directly left of the player, [dx,dy] and
+    // [dx,0] are the SAME step and [0,dy] is a no-op, so the shuffle had
+    // nothing to choose between and four cells in a row still moved as one,
+    // sixty turns out of sixty.
+    if (rng.next() < TUMBLE) {
+      const opts: { p: Point; w: number }[] = [];
+      for (let cy = -1; cy <= 1; cy++) {
+        for (let cx = -1; cx <= 1; cx++) {
+          if (cx === 0 && cy === 0) continue;
+          if (!free(at.x + cx, at.y + cy)) continue;
+          // Weight by agreement with the bearing: a step the right way is
+          // several times likelier than one the wrong way, so it still closes
+          // distance without ever tracking perfectly.
+          const agree = (cx === dx ? 1 : cx === 0 ? 0 : -1)
+            + (cy === dy ? 1 : cy === 0 ? 0 : -1);
+          opts.push({ p: { x: at.x + cx, y: at.y + cy }, w: 1 + agree * 1.6 });
+        }
+      }
+      const total = opts.reduce((a, o) => a + Math.max(o.w, 0.05), 0);
+      let r = rng.next() * total;
+      for (const o of opts) {
+        r -= Math.max(o.w, 0.05);
+        if (r <= 0) return o.p;
+      }
+    }
+
     for (const [cx, cy] of [[dx, dy], [dx, 0], [0, dy]] as const) {
       if ((cx !== 0 || cy !== 0) && free(at.x + cx, at.y + cy)) {
         return { x: at.x + cx, y: at.y + cy };
@@ -101,7 +148,10 @@ export function decideStep(
       return null;                                  // anchored
 
     case "chase":
-      return s.dist <= senseRange(b) ? toward() : null;
+      if (s.dist > senseRange(b)) return null;
+      // A pause is a tumble too: a cell that re-orients loses ground. Without
+      // it a pack stays in perfect formation however much the steps vary.
+      return rng.next() < PAUSE ? null : toward();
 
     case "swarm":
       // Quorum: only commits once enough of its own kind are around.

@@ -1,0 +1,8 @@
+
+
+# Tooling checked out INSIDE the repo. Without this, `git add -A` turns it into
+# a mode-160000 gitlink with no .gitmodules -- a submodule pointer to a commit
+# that exists only on the machine that made it. CI then fails in
+# actions/checkout with "git failed with exit code 128", which says nothing
+# about the cause.
+claude-code-termux/

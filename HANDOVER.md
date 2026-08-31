@@ -1,5 +1,43 @@
 # v1.1.0 — minimap, and walls you can actually see
 
+## The stacking work left its old invariant behind
+
+`no gene is carried twice` fired as a red error toast in ordinary play. It
+enforced exactly the rule stacking REMOVED -- one installed plus spares in the
+bin is now the point, and two rows at different rarities are two different
+things. Replaced with what still holds: no stack over MAX_STACK, and no gene
+installed twice on the ring (two copies would be double-counted by every
+dosage figure).
+
+The lesson is the shape, not the specifics: removing a RULE means finding the
+invariant that encoded it. The meta-test that every invariant needs a breaker
+caught the rename immediately, which is the only reason the replacement got a
+breaker of its own.
+
+## A pack moved as one body
+
+`toward()` was deterministic, so every chaser at the same bearing picked the
+same step. Four in a row moved identically on 52 turns out of 60 -- which
+reads as one creature drawn several times.
+
+The fix is what actually happens: chemotaxis is run-and-tumble. A cell cannot
+steer; it swims straight and randomly re-orients, suppressing the tumble while
+conditions improve. Right way on average, never in a straight line, and two
+cells side by side take different paths. Measured: 52/60 down to 25/60, and a
+chaser seven tiles away still reaches the player 27 times in 30.
+
+**Three failed measurements before one worked, all the same mistake.** The
+first probe required all six mobs to move identically when they were at
+different bearings. The second shuffled the three candidate steps -- useless,
+because for a cell directly left of the player two of them are the SAME step
+and the third is a no-op. The third placed the mobs 10 tiles out when
+`senseRange("chase")` is 9, so they never moved at all and "all moved
+identically" was trivially true of standing still: 60/60 with the fix and
+60/60 without it, proving nothing twice.
+
+A probe that reports no difference is not evidence the fix failed. It is
+evidence the probe is not measuring the thing.
+
 ## The wall motif never drew
 
 `paintWallMotif` opened with `if (px < 40) return;`. A tile is 32px at the

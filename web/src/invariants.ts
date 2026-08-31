@@ -24,6 +24,7 @@ import type { Plasmid } from "./plasmid.js";
 import { BIN_CAP, SLOTS } from "./plasmid.js";
 import { MAX_LEVEL, modifierSlots } from "./parts.js";
 import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
+import { MAX_STACK, countOf } from "./stack.js";
 import { MAX_STRAIN } from "./strain.js";
 import type { Barrier } from "./barrier.js";
 import type { Drop } from "./items.js";
@@ -70,12 +71,28 @@ export const INVARIANTS: Readonly<Record<string, Check>> = {
     w.plasmid.bin.length <= BIN_CAP ? null
       : `bin holds ${String(w.plasmid.bin.length)} of ${String(BIN_CAP)}`,
 
-  "no gene is carried twice": (w) => {
-    const seen = new Set<string>();
-    for (const p of [...w.plasmid.slots, ...w.plasmid.bin]) {
-      if (p?.kind !== "gene") continue;
-      if (seen.has(p.id)) return `${p.id} is carried twice`;
-      seen.add(p.id);
+  "no stack exceeds its cap": (w) => {
+    // This used to forbid carrying a gene twice AT ALL, which was right when a
+    // duplicate was refused outright. Stacking made that rule wrong: one
+    // installed and spares in the bin is the whole point, and two rows of the
+    // same gene at DIFFERENT rarities are two different things.
+    //
+    // What must still hold is the cap. A stack over MAX_STACK is unreachable
+    // by play and means something pushed into the bin without going through
+    // the stacking rules.
+    for (const p of w.plasmid.bin) {
+      const n = countOf(p);
+      if (!Number.isInteger(n) || n < 1 || n > MAX_STACK) {
+        return `a stack of ${String(n)}`;
+      }
+    }
+    // And a gene may sit on the ring only once: two copies expressed from the
+    // same chromosome would be counted twice by every dosage figure.
+    const onRing = new Set<string>();
+    for (const p of w.plasmid.slots) {
+      if (p?.kind !== "gene" || p.id === "ori") continue;
+      if (onRing.has(p.id)) return `${p.id} is installed twice`;
+      onRing.add(p.id);
     }
     return null;
   },

@@ -2,6 +2,8 @@ import { WILD_TYPE } from "../src/allele.js";
 import { describe, expect, it } from "vitest";
 import * as bio from "../src/biology.js";
 import { Dungeon, MAX_FLOOR } from "../src/dungeon.js";
+import { BASE_SLOTS, MAX_SLOTS } from "../src/chromosome.js";
+import { firstViolation } from "../src/invariants.js";
 import { Plasmid } from "../src/plasmid.js";
 import { makeRng } from "../src/rng.js";
 import { microbeTurn } from "../src/combat.js";
@@ -237,10 +239,12 @@ const BREAKERS: Readonly<Record<string, () => WorldView>> = {
     for (let i = 0; i < 40; i++) p.bin.push({ kind: "terminator", id: "rrnbt1" });
     return world({ plasmid: p });
   },
-  "no gene is carried twice": () => {
+  "no stack exceeds its cap": () => {
+    // One installed plus spares in the bin is LEGAL now -- that is what
+    // stacking is for. What is not legal is a stack over the cap.
     const p = new Plasmid();
-    p.slots[5] = { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE };
-    p.bin.push({ kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
+    p.bin.push({ kind: "gene", id: "mtrC", level: 1, mods: [],
+                 allele: WILD_TYPE, count: 99 });
     return world({ plasmid: p });
   },
   "expression supply is a fraction": () => {
@@ -497,5 +501,37 @@ describe("hardening: things the density and stair changes disturbed", () => {
     for (let i = 0; i < 400; i++) check(w);
     const per = (performance.now() - t0) / 400;
     expect(per, `${(per * 1000).toFixed(0)} us per audit`).toBeLessThan(2);
+  });
+});
+
+describe("carrying spares is legal", () => {
+  it("one installed plus a stack in the bin trips no invariant", () => {
+    // The old invariant forbade carrying a gene twice AT ALL, which was right
+    // when a duplicate was refused outright. Stacking made that rule wrong,
+    // and it fired as a red error toast during ordinary play.
+    const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
+    for (let i = 0; i < 3; i++) {
+      p.stash({ kind: "gene", id: "atpB", level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.install(p.bin.findIndex((x) => x.kind === "gene" && x.id === "atpB"), 5);
+    expect(p.has("atpB"), "the fixture did not install").toBe(true);
+    expect(p.bin.some((x) => x.kind === "gene" && x.id === "atpB"),
+           "the fixture kept no spare").toBe(true);
+
+    const v = firstViolation(world({ plasmid: p }));
+    expect(v ? v.name : null,
+           "carrying a spare was reported as a violation").toBeNull();
+  });
+
+  it("two rows of the same gene at different rarities are legal", () => {
+    const p = new Plasmid();
+    p.stash({ kind: "gene", id: "atpB", level: 1, mods: [], allele: WILD_TYPE });
+    p.stash({ kind: "gene", id: "atpB", level: 1, mods: [],
+              allele: { ...WILD_TYPE, kcat: 1.6, km: 0.6, stability: 1.4,
+                        prefix: "hyperactive", suffix: "highCopy",
+                        rarity: "legendary" } });
+    const v = firstViolation(world({ plasmid: p }));
+    expect(v ? v.name : null).toBeNull();
   });
 });
