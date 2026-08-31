@@ -94,19 +94,30 @@ const saturate = (x: number): number => x <= 0 ? 0 : x / (x + 1.2);
  * looks. That is the same rule the rest of the model uses, and breaking it
  * here would make the avatar lie about the build.
  */
-let memo: { rev: number; depth: number; supply: number; value: Phenotype } | null = null;
+/**
+ * Memoised PER PLASMID, not in a module-level slot.
+ *
+ * The first version cached one entry keyed on `revision()`, which counts
+ * mutations on ONE plasmid and is not unique across instances: two plasmids
+ * built with the same number of operations both read revision 5, so a purple
+ * cell rendered green. A WeakMap keys on the object itself, which is the only
+ * identity that cannot collide, and lets a discarded plasmid be collected.
+ */
+const memo = new WeakMap<Plasmid,
+  { rev: number; depth: number; supply: number; value: Phenotype }>();
 
 export function phenotypeOf(p: Plasmid, depth: number): Phenotype {
   // Memoised on the same things it reads. It runs once a frame and walks
   // twenty genes; without this it was ten microseconds of expression maths per
   // frame to produce a value that changes when the build does, which is rarely.
   const supply = Math.round(p.supply * 20);
-  if (memo?.rev === p.revision() && memo.depth === depth
-      && memo.supply === supply) {
-    return memo.value;
+  const hit = memo.get(p);
+  if (hit?.rev === p.revision() && hit.depth === depth
+      && hit.supply === supply) {
+    return hit.value;
   }
   const value = compute(p, depth);
-  memo = { rev: p.revision(), depth, supply, value };
+  memo.set(p, { rev: p.revision(), depth, supply, value });
   return value;
 }
 

@@ -61,3 +61,35 @@ export function betterOf(
   const worth = (p: typeof a): number => p.level * 10 + p.mods.length;
   return worth(b) > worth(a) ? b : a;
 }
+
+/**
+ * Move parts off ring positions the chromosome no longer has.
+ *
+ * Shrinking the chromosome strands whatever sat on the positions that just
+ * went away: they are still in the array, still counted by `used()`, and no
+ * operation can ever reach them again. A part that exists and cannot be
+ * touched is worse than one that is gone.
+ *
+ * The origin is not optional, so it is relocated rather than binned.
+ */
+export function rescueStranded(
+  p: {
+    slots: (Part | null)[];
+    bin: Part[];
+    stash: (part: Part) => { ok: boolean };
+  },
+  from: number, to: number,
+): void {
+  for (let i = from; i < to && i < p.slots.length; i++) {
+    const part = p.slots[i];
+    if (!part) continue;
+    p.slots[i] = null;
+    if (part.kind === "gene" && part.id === "ori") {
+      const free = p.slots.findIndex((s, k) => s === null && k < from);
+      if (free >= 0) p.slots[free] = part;
+      else p.bin.push(part);
+    } else {
+      p.stash(part);
+    }
+  }
+}

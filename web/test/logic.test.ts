@@ -6414,3 +6414,126 @@ describe("the cell looks like what it expresses", () => {
     }
   });
 });
+
+describe("caches key on identity, not on a counter", () => {
+  it("two plasmids do not share one cached phenotype", () => {
+    // `revision()` counts mutations on ONE plasmid and is not unique across
+    // instances: two built with the same number of operations both read
+    // revision 5, so a module-level memo returned the first one's colour for
+    // the second. A purple cell rendered green.
+    const mk = (genes: bio.GeneId[]): Plasmid => {
+      const p = new Plasmid();
+      p.integrated = MAX_SLOTS - BASE_SLOTS;
+      p.strain = MAX_STRAIN;
+      let s = 4;
+      p.put(s++, { kind: "promoter", id: "j23119" });
+      for (const g of genes) {
+        p.put(s++, { kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      return p;
+    };
+    const green = mk(["psbA", "psaA"]);
+    const purple = mk(["pufM", "pufL"]);
+    expect(green.revision(), "the fixture no longer reproduces the collision")
+      .toBe(purple.revision());
+
+    const a = phenotypeOf(green, 1).body;
+    const b = phenotypeOf(purple, 1).body;
+    expect(b, "the second plasmid got the first one's cached colour").not.toBe(a);
+    expect(phenotypeOf(green, 1).body, "the cache is now wrong for the first")
+      .toBe(a);
+  });
+
+  it("interleaved reads stay correct", () => {
+    // A single-slot memo also thrashes: alternating between two plasmids
+    // recomputes every time and returns the right answer by accident. This
+    // asserts correctness under interleaving, which is how the renderer and
+    // any preview would actually use it.
+    const p1 = new Plasmid();
+    const p2 = new Plasmid();
+    p2.integrated = 8;
+    p2.put(4, { kind: "promoter", id: "j23119" });
+    p2.put(5, { kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    p2.put(6, { kind: "terminator", id: "rrnbt1" });
+    const bare = phenotypeOf(p1, 1).body;
+    const lit = phenotypeOf(p2, 1).body;
+    expect(lit).not.toBe(bare);
+    for (let i = 0; i < 20; i++) {
+      expect(phenotypeOf(p1, 1).body).toBe(bare);
+      expect(phenotypeOf(p2, 1).body).toBe(lit);
+    }
+  });
+});
+
+describe("the phenotype cache cannot serve the wrong cell", () => {
+  it("two plasmids at the same revision read differently", () => {
+    // `revision()` counts mutations on ONE plasmid and is not unique across
+    // instances: two built with the same number of operations both read 5, so
+    // a cache keyed on it rendered a purple cell green. The WeakMap keys on
+    // the object, which is the only identity that cannot collide.
+    const mk = (gene: bio.GeneId): Plasmid => {
+      const p = new Plasmid();
+      p.integrated = MAX_SLOTS - BASE_SLOTS;
+      p.strain = MAX_STRAIN;
+      p.put(4, { kind: "promoter", id: "j23119" });
+      p.put(5, { kind: "gene", id: gene, level: 1, mods: [], allele: WILD_TYPE });
+      p.put(6, { kind: "terminator", id: "rrnbt1t2" });
+      return p;
+    };
+    const green = mk("psbA");
+    const purple = mk("pufM");
+    expect(green.revision(), "the fixture no longer reproduces the collision")
+      .toBe(purple.revision());
+    const a = phenotypeOf(green, 1).body;
+    const b = phenotypeOf(purple, 4).body;
+    expect(b, "the cache served another plasmid's appearance").not.toBe(a);
+    // And re-reading the first still gives the first.
+    expect(phenotypeOf(green, 1).body).toBe(a);
+  });
+
+  it("a mutation invalidates the entry", () => {
+    const p = new Plasmid();
+    p.integrated = MAX_SLOTS - BASE_SLOTS;
+    p.strain = MAX_STRAIN;
+    p.put(4, { kind: "promoter", id: "j23119" });
+    p.put(5, { kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    p.put(6, { kind: "terminator", id: "rrnbt1t2" });
+    const green = phenotypeOf(p, 1).body;
+    p.remove(5);
+    expect(phenotypeOf(p, 1).body, "a stale appearance survived a mutation")
+      .not.toBe(green);
+  });
+});
+
+describe("shrinking the chromosome strands nothing", () => {
+  it("parts on positions that go away are rescued, not orphaned", () => {
+    // They stayed in the array, were still counted by `used()`, and no
+    // operation could ever reach them again. A part that exists and cannot be
+    // touched is worse than one that is gone.
+    for (let from = 16; from >= 0; from -= 4) {
+      const p = new Plasmid();
+      p.integrated = MAX_SLOTS - BASE_SLOTS;
+      for (let i = 0; i < p.usableSlots; i++) {
+        if (p.at(i) === null) {
+          p.put(i, { kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+        }
+      }
+      p.integrated = from;
+      for (let s = p.usableSlots; s < p.slots.length; s++) {
+        expect(p.at(s), `a part was stranded at ${String(s)} of `
+          + String(p.usableSlots)).toBeNull();
+      }
+      expect(p.has("ori"), "the origin was lost when the chromosome shrank")
+        .toBe(true);
+    }
+  });
+
+  it("an absurd size cannot size the ring past its array", () => {
+    for (const n of [NaN, -50, 1e9]) {
+      const p = new Plasmid();
+      p.integrated = n;
+      expect(p.usableSlots).toBeLessThanOrEqual(SLOTS);
+      expect(p.usableSlots).toBeGreaterThanOrEqual(BASE_SLOTS);
+    }
+  });
+});

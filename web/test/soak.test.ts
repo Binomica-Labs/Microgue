@@ -1791,3 +1791,79 @@ describe("state that should persist, does", () => {
     expect(row, "the stashed gene").toBeDefined();
   });
 });
+
+describe("a full descent holds together", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("survives being driven to the bottom", async () => {
+    // The release check. Every floor generated, entered, drawn and played --
+    // twenty-four strata, each with its own generator, palette, hazards and
+    // organisms. A bug in the deepest stratum is not something a unit test
+    // finds, because nothing else ever goes there.
+    const { Game } = await import("../src/main.js");
+    const { MAX_FLOOR } = await import("../src/dungeon.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+
+    let t = 0;
+    for (let floor = 1; floor <= MAX_FLOOR; floor++) {
+      for (let i = 0; i < 40; i++) {
+        // Topped up EVERY turn, not once per floor: forty turns among the
+        // deep fauna kills a strain, and this is about the code holding up
+        // rather than about surviving.
+        g.player.hp = g.player.maxhp;
+        g.player.atp = g.player.atpMax;
+        g.press("wait");
+        g.frame((t += 40));
+      }
+      g.openPlasmid(true);
+      g.frame((t += 40));
+      g.openPlasmid(false);
+      // Dying is not a failure of this test. A lytic phage kills outright
+      // regardless of hp, and reaching the deep strata and being lysed is the
+      // code WORKING. What must hold is that every floor generates, enters,
+      // plays and draws without an error -- so a dead strain is replaced and
+      // the descent continues.
+      if (g.dead) {
+        g.dead = false;
+        g.player.status.length = 0;
+      }
+      if (floor < MAX_FLOOR) {
+        const r = g.dungeon.descend();
+        expect("err" in r ? r.err : "", `could not leave floor ${String(floor)}`)
+          .toBe("");
+        if (!("err" in r)) g.enter(r.level, r.arrive);
+      }
+    }
+    expect(g.dungeon.floor, "did not reach the bottom").toBe(MAX_FLOOR);
+    expect(g.toasts.all().filter((x) => x.level === "error"),
+           "an error surfaced during the descent").toEqual([]);
+  });
+
+  it("every stratum draws without an error", async () => {
+    const { Game } = await import("../src/main.js");
+    const { MAX_FLOOR } = await import("../src/dungeon.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(1);
+    for (let floor = 1; floor <= MAX_FLOOR; floor++) {
+      g.enter(g.dungeon.level(floor), { x: g.player.x, y: g.player.y });
+      for (const screen of ["", "plasmid", "map", "notes", "research"]) {
+        if (screen !== "") g.press(screen);
+        expect(() => { g.frame(floor * 1000 + screen.length); })
+          .not.toThrow();
+        if (screen !== "") g.press(screen);
+      }
+    }
+    expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
+  });
+});

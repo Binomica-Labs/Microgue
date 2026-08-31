@@ -13,6 +13,7 @@
 // Everything else -- substrate gating, oxygen lability, codon optimisation --
 // carries over from the previous flat model.
 
+import { b_install, b_stash, b_takeOne, b_uninstall } from "./bin.js";
 import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
          type Complex, type GeneId, type Hazard } from "./biology.js";
 
@@ -58,9 +59,9 @@ import { CHLOROSOME, COST_PER_KB, GENERATORS, NEEDS, O2_LABILE, WASTE_PER_UNIT }
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
 import { buildOperon } from "./operon.js";
-import { MAX_STACK, betterOf, countOf, fullStackIndex, stackIndex }
-  from "./stack.js";
-import { capacityFor, copiesFor, copyBurden, dosage, slotsFor,
+import { rescueStranded } from "./stack.js";
+import { capacityFor, copiesFor, copyBurden,
+         dosage, slotsFor,
          type TraitId } from "./chromosome.js";
 import { TERMINATORS } from "./parts.js";
 import { bonusCapacityKb, bonusSlots } from "./strain.js";
@@ -157,46 +158,10 @@ export class Plasmid {
    * describes the copy, so a rare mtrC and a common one are different objects
    * that share a name.
    */
-  stash(part: Part): Result {
-    const at = stackIndex(this.bin, part);
-    if (at >= 0) {
-      const held = this.bin[at];
-      if (held?.kind === "gene" && part.kind === "gene") {
-        const keep = betterOf(held, part);
-        this.bin[at] = { ...keep, count: countOf(held) + countOf(part) };
-        this.touch();
-        return { ok: true };
-      }
-    }
-    if (fullStackIndex(this.bin, part) >= 0 && part.kind === "gene") {
-      return { ok: false, err: `already carrying ${String(MAX_STACK)} of `
-        + GENES[part.id].name };
-    }
-    // No "already carried" refusal any more. Having one installed and a spare
-    // in the bin is the POINT of stacking -- you want a second copy to put in
-    // another operon, or a better roll to swap in. The only thing that turns a
-    // pickup away now is a full stack or a full bin.
-    if (this.bin.length >= BIN_CAP) return { ok: false, err: "parts bin is full" };
-    this.bin.push(part);
-    this.touch();
-    return { ok: true };
-  }
+  stash(part: Part): Result { return b_stash(this, part); }
 
   /** Take ONE copy off a stack, leaving the rest. Returns what came off. */
-  takeOne(binIndex: number): Part | null {
-    const held = this.bin[binIndex];
-    if (!held) return null;
-    const n = countOf(held);
-    if (n <= 1) {
-      this.bin.splice(binIndex, 1);
-      this.touch();
-      return held;
-    }
-    if (held.kind !== "gene") return held;      // only genes stack
-    this.bin[binIndex] = { ...held, count: n - 1 };
-    this.touch();
-    return { ...held, count: 1 };
-  }
+  takeOne(binIndex: number): Part | null { return b_takeOne(this, binIndex); }
 
   inBin(id: GeneId): boolean {
     return this.bin.some((p) => p.kind === "gene" && p.id === id);
@@ -204,38 +169,10 @@ export class Plasmid {
 
   /** Bin -> ring. Whatever was in the slot goes back to the bin, so a swap
    *  never destroys a part. */
-  install(binIndex: number, slot: number): Result {
-    const part = this.bin[binIndex];
-    if (!part) return { ok: false, err: "no such part" };
-    if (!this.usable(slot)) {
-      return { ok: false,
-               err: `the chromosome has only ${String(this.usableSlots)} positions` };
-    }
-    const displaced = this.at(slot);
-    if (displaced?.kind === "gene" && displaced.id === "ori") {
-      return { ok: false, err: "cannot displace the origin" };
-    }
-    // ONE copy off the stack, not the whole row. Splicing the row out put
-    // three copies onto a single position and lost two of them.
-    const one = this.takeOne(binIndex);
-    if (!one) return { ok: false, err: "no such part" };
-    this.put(slot, one);
-    if (displaced) this.stash(displaced);
-    return { ok: true };
-  }
+  install(binIndex: number, slot: number): Result { return b_install(this, binIndex, slot); }
 
   /** Ring -> bin. */
-  uninstall(slot: number): Result {
-    const part = this.at(slot);
-    if (!part) return { ok: false, err: "empty slot" };
-    if (part.kind === "gene" && part.id === "ori") {
-      return { ok: false, err: "cannot excise the origin" };
-    }
-    if (this.bin.length >= BIN_CAP) return { ok: false, err: "parts bin is full" };
-    this.put(slot, null);
-    this.bin.push(part);
-    return { ok: true };
-  }
+  uninstall(slot: number): Result { return b_uninstall(this, slot); }
 
   /**
    * Wrap a ring index.
@@ -487,9 +424,22 @@ export class Plasmid {
   private _integrated = 0;
   get integrated(): number { return this._integrated; }
   set integrated(v: number) {
+    // NOT clamped here: `slotsFor` clamps and `usableSlots` bounds again, so
+    // a third clamp would only make the "chromosome is no larger than it has
+    // been grown to" invariant unreachable -- and an invariant that cannot be
+    // broken is one nobody is checking.
     const n = Number.isFinite(v) ? Math.round(v) : 0;
     if (n === this._integrated) return;
+    const before = this.usableSlots;
     this._integrated = n;
+    const after = this.usableSlots;
+
+    // SHRINKING strands whatever sat on the positions that just went away --
+    // they are still in the array, still counted by `used()`, and no operation
+    // can ever reach them again. Rescue them to the bin, or drop them if the
+    // bin is full; either is better than a part that exists and cannot be
+    // touched.
+    if (after < before) rescueStranded(this, after, before);
     this.invalidate();
   }
 
@@ -578,7 +528,8 @@ export class Plasmid {
     this.memoAtp.clear();
   }
 
-  private touch(): void {
+  /** @internal: public because bin.ts mutates the bin and must invalidate. */
+  touch(): void {
     this.invalidate();
     this.ensureOrigin();
   }

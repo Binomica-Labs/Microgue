@@ -121,18 +121,42 @@ if [ -n "$unpushed" ]; then
   printf '%s\n' "$unpushed" | sed 's/^/    /'
 fi
 git status --short
-# Embedded git repositories become a mode-160000 GITLINK: a submodule pointer
-# with no .gitmodules, aimed at a commit that exists only on this machine. The
-# push succeeds, and then CI fails in actions/checkout with "git failed with
-# exit code 128", which says nothing about the cause. Catch it here instead.
+# A mode-160000 GITLINK is the actual harm: a submodule pointer with no
+# .gitmodules, aimed at a commit that exists only on this machine. CI then
+# fails in actions/checkout with "git failed with exit code 128", which says
+# nothing about the cause.
+#
+# Two different situations, and the first version conflated them -- it refused
+# on the mere PRESENCE of a nested .git, which meant that once the damage was
+# done the guard blocked the very sync that would have delivered the fix. A
+# guard that cannot be got past is worse than the bug it prevents.
+
+# 1. Already TRACKED as a gitlink. This is broken right now, and only
+#    `git rm --cached` clears it -- deleting the directory does not.
+tracked_links="$(git ls-files -s | awk '$1 == "160000" { print $4 }')"
+if [ -n "$tracked_links" ]; then
+  echo "==> TRACKED GITLINK(S) -- this is what breaks CI checkout:"
+  printf '%s\n' "$tracked_links" | sed 's/^/      /'
+  echo "==> fix with:"
+  printf '%s\n' "$tracked_links" | sed "s|^|      git rm --cached |"
+  echo "==> then run sync.sh again. nothing was committed."
+  exit 1
+fi
+
+# 2. Present but not tracked. Harmless IF git is ignoring it; a warning if not,
+#    because `git add -A` would turn it into case 1 on this very run.
 embedded="$(find "$REPO" -mindepth 2 -name .git -not -path "*/node_modules/*" \
               -printf '%h\n' 2>/dev/null | sed "s|^$REPO/||")"
-if [ -n "$embedded" ]; then
-  echo "==> EMBEDDED GIT REPO(S) inside the tree:"
-  printf '%s\n' "$embedded" | sed 's/^/      /'
-  echo "==> these become dangling submodule pointers and break CI checkout."
-  echo "==> add them to .gitignore, or: git rm --cached <path>"
-  echo "==> nothing was committed."
+unignored=""
+for e in $embedded; do
+  git check-ignore -q "$e" 2>/dev/null || unignored="$unignored$e
+"
+done
+if [ -n "$unignored" ]; then
+  echo "==> EMBEDDED GIT REPO(S) that git is NOT ignoring:"
+  printf '%s' "$unignored" | sed 's/^/      /'
+  echo "==> git add -A would turn these into dangling submodule pointers."
+  echo "==> add them to .gitignore. nothing was committed."
   exit 1
 fi
 

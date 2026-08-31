@@ -1,3 +1,58 @@
+# v1.0.0
+
+74 modules, 15500 lines of source against 11100 lines of test, 882 tests, 78 kB
+gzipped. Two clean-checkout verifies.
+
+## A guard you cannot get past is worse than the bug
+
+The gitlink guard refused on the mere PRESENCE of a nested `.git`. So once the
+damage was done it blocked the very sync that would have delivered the fix --
+and the tracked gitlink stayed on the remote, still breaking CI, with no way to
+push a correction.
+
+Three states, three answers:
+
+* **Tracked as a gitlink** -- broken right now. Names the exact
+  `git rm --cached <path>`, because deleting the directory does NOT clear it.
+* **Present and NOT ignored** -- would become case 1 on this very run. Refuses,
+  and says to add it to .gitignore.
+* **Present and ignored** -- fine. Exits 0, because `git add -A` will not touch
+  it and blocking here is what created the deadlock.
+
+A test-harness note worth remembering: the scratch extraction cut the script at
+the literal `git add -A`, which now also appears inside one of the guard's own
+messages -- so two of the three cases were silently untested and appeared to
+pass. Anchor such cuts to the start of a line.
+
+## Shrinking the chromosome stranded parts
+
+Found by fuzzing 16000 random operations with the stacking and phenotype
+invariants asserted after every one. Setting `integrated` DOWN left whatever
+sat on the positions that went away: still in the array, still counted by
+`used()`, unreachable by any operation. A part that exists and cannot be
+touched is worse than one that is gone. `rescueStranded` moves them to the bin
+and relocates the origin, which is not optional.
+
+**A clamp I added and then removed.** My first fix also clamped the setter --
+which made the "chromosome is no larger than it has been grown to" invariant
+unreachable, and the test that proves every invariant is BREAKABLE caught it.
+`slotsFor` already clamps and `usableSlots` bounds again; a third clamp only
+disabled a check. An invariant that cannot be broken is one nobody is checking.
+
+**And a compaction I backed out.** Duplicate partial stacks can coexist when
+parts arrive by being displaced rather than stashed. It is cosmetic, the fix
+was half-wired through one of three paths, and the eve of a release is the
+wrong time for an invasive change to the one list the player reads constantly.
+Recorded here instead: `compact(bin)` belongs in stack.ts, called from every
+path that pushes directly.
+
+## bin.ts
+
+`plasmid.ts` crossed the ceiling again, so `stash`, `takeOne`, `install` and
+`uninstall` moved out. The boundary is real: plasmid.ts owns the RING -- what a
+position is, how it wraps, what may occupy it -- and bin.ts owns a list with
+stacking rules and no geometry at all.
+
 # Microgue — handover
 
 A turn-based roguelike descending the redox tower of a Winogradsky column. You
@@ -8,6 +63,47 @@ Live: `https://binomica-labs.github.io/Microgue/`
 Repo: `Binomica-Labs/Microgue` — the playable game is in `web/`.
 
 ---
+
+## v1.0
+
+73 modules, 878 tests, 66 genes across 24 strata, 78 kB gzipped.
+
+What 1.0 means here: every screen renders correctly on every form factor from a
+320x640 android to an ultrawide, every mutation is atomic, every failed save is
+reported, the whole descent generates and draws without an error, and the
+things that have bitten repeatedly -- stale memos, forgotten save fields,
+layout that only works in portrait -- are guarded by tests that were each
+verified by reintroducing their bug.
+
+What it does NOT mean: the game is balanced. That is playtesting, not
+engineering, and it is the next thing.
+
+### The bug this pass found
+
+`phenotypeOf` cached ONE entry in a module-level slot keyed on `revision()`.
+That counts mutations on a single plasmid and is not unique across instances:
+two plasmids built with the same number of operations both read revision 5, so
+the second got the first one's cached appearance and a purple cell rendered
+green.
+
+A `WeakMap` keyed on the plasmid itself fixes it -- object identity is the only
+key that cannot collide -- and lets a discarded plasmid be collected. `spec`
+covers both the collision and interleaved reads, because a single-slot cache
+also returns the right answer by accident when you alternate between two.
+
+**The rule: a cache keyed on a counter is only correct if the counter is unique
+across every instance that shares the cache.** A per-object counter in a
+module-level map is not.
+
+### The descent test
+
+Every floor generated, entered, played for forty turns and drawn on five
+screens. It found nothing, but it is the only test that exercises the deepest
+strata at all -- nothing else ever goes there.
+
+Worth knowing: it dies at F24 to a lytic phage, which kills outright regardless
+of hp. That is the code WORKING, so the test replaces the strain and continues
+rather than asserting survival.
 
 ## The cell looks like what it expresses
 

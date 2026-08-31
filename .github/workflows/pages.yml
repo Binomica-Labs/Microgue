@@ -21,12 +21,21 @@ defaults:
   run:
     working-directory: web
 
+# Action majors are kept current where a Node 24 major EXISTS and is verified:
+# checkout@v5 and setup-node@v5 both run on node24.
+#
+# The Pages actions are deliberately NOT bumped. `upload-pages-artifact` has no
+# published v4, and its v3 internally pins `actions/upload-artifact@v4.6.2`,
+# which is the Node 20 warning in the build log. That pin is inside GitHub's
+# action, not this workflow, so the warning stays until they ship it -- see
+# actions/upload-pages-artifact#138. Bumping to a tag that does not exist would
+# turn a cosmetic warning into a broken deploy.
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
