@@ -1,5 +1,33 @@
 # v1.2.0 — relict pockets, and walls with mass
 
+## The wall motif cost the entire frame budget
+
+Fixing the `px >= 40` gate in v1.2.0 made the stratum texture draw for the
+first time -- and it cost about FIVE THOUSAND canvas operations a frame: an
+`arc` and a `fill` per mark, per wall tile, per frame, over roughly 620 visible
+wall tiles. It had been free only because it never ran. That is the whole
+budget on a phone, and it is why the game went from smooth to unplayable in one
+version.
+
+It is rasterised once into a 4x4-tile block and used as a fill PATTERN now. One
+`fill` for the entire wall area. The block cannot be a single tile: the motif is
+hashed per tile precisely so texture never repeats, and a 1x1 pattern would undo
+that. Cached per stratum and per tile size, with the size quantised so a pinch
+does not rebuild it every frame.
+
+**`seenCount` was a 9216-byte scan per frame.** The minimap keys its terrain
+cache on how much has been uncovered, and computed it by walking the array --
+sixty times a second, to discover almost always that nothing had changed. It is
+maintained incrementally in `fov.ts` now, where `seen` is written: 0.10 ms a
+frame down to 0.08 microseconds.
+
+`spec` bounds both: under 200 arcs per frame, and at most one canvas allocated
+across thirty still frames. Verified by restoring the per-tile loop.
+
+The general lesson: making something DRAW that never drew is not a cosmetic
+change, it is a new per-frame cost, and it deserves the same measurement as any
+new feature. The gate was hiding the cost, not just the texture.
+
 ## A relict that cannot be sealed is not a relict
 
 Off-stratum genes are the one reward that must be bought by expressing

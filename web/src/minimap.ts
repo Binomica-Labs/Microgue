@@ -188,19 +188,9 @@ export function drawMinimap(
   ctx.restore();
 }
 
-/**
- * How much has been uncovered.
- *
- * The cache key. It rises monotonically within a floor, so it changes exactly
- * when there is something new to draw and never spuriously -- which a hash of
- * the array would not guarantee, and a dirty flag would need every writer to
- * remember to set.
- */
-export function seenCount(sight: Sight): number {
-  let n = 0;
-  for (const v of sight.seen) if (v) n++;
-  return n;
-}
+/* `seenCount` lives on Sight and is maintained incrementally by fov.ts.
+   Counting it here meant walking 9216 bytes once a frame to discover, almost
+   always, that nothing had changed. */
 
 /** An offscreen canvas, or null where there is no document (tests, workers). */
 export function makeCanvas(): HTMLCanvasElement | null {

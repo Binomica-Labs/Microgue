@@ -443,3 +443,60 @@ export function drawBody(
   ctx.drawImage(img, -size / 2, -size / 2, size, size);
   ctx.restore();
 }
+
+// ------------------------------------------------------------ wall pattern
+//
+// The motif used to be free because it never drew: a `px >= 40` gate against a
+// tile that is about 15px at the default zoom. Fixing that made it cost 5000
+// canvas operations a frame -- an `arc` and a `fill` per mark, per wall tile,
+// per frame -- which is the entire budget on a phone.
+//
+// So it is rasterised ONCE into a block of tiles and used as a fill pattern.
+// One `fill` for the whole wall area instead of five thousand.
+//
+// The block is several tiles across so the repeat is not obvious. It cannot be
+// one tile: the motif is hashed per tile precisely so texture never repeats,
+// and a 1x1 pattern would undo that. Four is enough that the eye does not
+// catch it and small enough to rasterise in well under a millisecond.
+
+const PATTERN_TILES = 4;
+let patternCache: { key: string; pattern: CanvasPattern | null } | null = null;
+
+/**
+ * A repeating wall texture for one stratum at one tile size.
+ *
+ * Returns null where there is no room for texture, or no document to
+ * rasterise into -- the caller then just fills flat, which is what it did
+ * before any of this existed.
+ */
+export function wallPattern(
+  ctx: CanvasRenderingContext2D, depth: number, px: number, floor: string,
+): CanvasPattern | null {
+  if (px < 10) return null;
+  // Quantised: `px` drifts continuously while zooming, and rebuilding the
+  // pattern every frame of a pinch would cost more than it saves.
+  const q = Math.max(Math.round(px), 1);
+  const key = `${String(depth)}@${String(q)}@${floor}`;
+  if (patternCache?.key === key) return patternCache.pattern;
+
+  let pattern: CanvasPattern | null = null;
+  try {
+    const side = q * PATTERN_TILES;
+    const c = document.createElement("canvas");
+    c.width = side;
+    c.height = side;
+    const g = c.getContext("2d");
+    if (g) {
+      for (let ty = 0; ty < PATTERN_TILES; ty++) {
+        for (let tx = 0; tx < PATTERN_TILES; tx++) {
+          paintWallMotif(g, depth, tx, ty, tx * q, ty * q, q, floor);
+        }
+      }
+      pattern = ctx.createPattern(c, "repeat");
+    }
+  } catch {
+    pattern = null;                  // no document, or a context we cannot get
+  }
+  patternCache = { key, pattern };
+  return pattern;
+}

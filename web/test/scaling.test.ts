@@ -695,3 +695,40 @@ describe("the walls are a mass, not a cut-out", () => {
            "high contrast should not be paying for gradients").toBe(0);
   });
 });
+
+describe("a frame costs what it should", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("the wall texture is ONE fill, not thousands", async () => {
+    // Fixing the `px >= 40` gate made the motif draw for the first time -- and
+    // it cost about five thousand canvas operations a frame, an arc and a fill
+    // per mark per wall tile. That is the whole budget on a phone, and it is
+    // why the game went from smooth to unplayable in one version.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.startRun(0);
+    g.frame(50);                       // first frame builds the pattern
+    const base = t.arcs.length;
+    for (let i = 0; i < 10; i++) g.frame(100 + i * 16);
+    const arcs = t.arcs.length - base;
+    expect(arcs / 10, `${String(Math.round(arcs / 10))} arcs per frame`)
+      .toBeLessThan(200);
+  });
+
+  it("the pattern is rasterised once, not per frame", async () => {
+    let made = 0;
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    const doc = (globalThis as unknown as
+      { document: { createElement: () => unknown } }).document;
+    const real = doc.createElement.bind(doc);
+    doc.createElement = () => { made++; return real(); };
+    g.startRun(0);
+    g.frame(50);
+    const after = made;
+    for (let i = 0; i < 30; i++) g.frame(100 + i * 16);
+    expect(made - after,
+           `${String(made - after)} canvases across 30 still frames`)
+      .toBeLessThanOrEqual(1);
+  });
+});

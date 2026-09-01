@@ -19,10 +19,10 @@ import { drawClose, stage } from "./chrome.js";
 import { isSeen, isVisible } from "./fov.js";
 import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
-import { drawBody, paintWallMotif, paletteForPigment, playerSprite, sprite }
+import { drawBody, paletteForPigment, playerSprite, sprite, wallPattern }
   from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
-import { drawMinimap, makeCanvas, miniBox, seenCount } from "./minimap.js";
+import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
 import { WALL_SPREAD, traceWalls } from "./walls.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
@@ -130,18 +130,22 @@ export function r_draw(_g: Game): void {
       ctx.restore();
     }
 
-    if (!hc && px >= 10) {
-      ctx.save();
-      ctx.scale(px, px);
-      ctx.clip(wallPath);
-      ctx.scale(1 / px, 1 / px);
-      for (let y = y0; y <= y1; y++) {
-        for (let x = x0; x <= x1; x++) {
-          if (!_g.level.grid.isWall(x, y)) continue;
-          paintWallMotif(ctx, s.depth, x, y, Math.round(x * px), Math.round(y * px), px, s.floor);
-        }
+    // ONE fill for the whole wall area. Drawing the motif per tile cost about
+    // five thousand canvas operations a frame -- an arc and a fill per mark,
+    // per wall tile -- which is the entire budget on a phone. It is rasterised
+    // once per stratum and tile size now; see wallPattern.
+    if (!hc) {
+      const pat = wallPattern(ctx, s.depth, px, s.floor);
+      if (pat) {
+        ctx.save();
+        ctx.scale(px, px);
+        ctx.clip(wallPath);
+        ctx.scale(1 / px, 1 / px);
+        ctx.fillStyle = pat;
+        ctx.fillRect((x0 - 1) * px, (y0 - 1) * px,
+                     (x1 - x0 + 3) * px, (y1 - y0 + 3) * px);
+        ctx.restore();
       }
-      ctx.restore();
     }
 
     if (_g.path) {
@@ -461,7 +465,7 @@ export function r_draw(_g: Game): void {
       if (box && _g.settings.minimap && !_g.showMap) {
         const down = _g.level.down;
         drawMinimap(ctx, _g.level.grid, _g.level.sight, box, _g.level.floor,
-                    seenCount(_g.level.sight),
+                    _g.level.sight.seenCount,
                     { player: { x: _g.player.x, y: _g.player.y },
                       stairs: down ?? null,
                       hostiles: _g.level.mobs.filter(

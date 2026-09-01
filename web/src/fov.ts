@@ -18,10 +18,21 @@ export interface Sight {
   readonly h: number;
   readonly visible: Uint8Array;
   readonly seen: Uint8Array;
+  /**
+   * How many tiles have ever been seen, maintained INCREMENTALLY.
+   *
+   * The minimap keys its terrain cache on this, once a frame. Counting it by
+   * walking the array meant scanning 9216 bytes sixty times a second to
+   * discover, almost always, that nothing had changed. It only ever goes up,
+   * and only where `seen` is written, so it costs a branch that was already
+   * there.
+   */
+  seenCount: number;
 }
 
 export function makeSight(w: number, h: number): Sight {
-  return { w, h, visible: new Uint8Array(w * h), seen: new Uint8Array(w * h) };
+  return { w, h, visible: new Uint8Array(w * h), seen: new Uint8Array(w * h),
+           seenCount: 0 };
 }
 
 export const isVisible = (s: Sight, x: number, y: number): boolean =>
@@ -60,7 +71,7 @@ function castLight(
       if (dx * dx + dy * dy <= radius * radius) {
         const i = my * s.w + mx;
         s.visible[i] = 1;
-        s.seen[i] = 1;
+        if (s.seen[i] !== 1) { s.seen[i] = 1; s.seenCount++; }
       }
 
       const wall = grid.isWall(mx, my);
@@ -86,7 +97,7 @@ export function computeFov(
   if (cx < 0 || cy < 0 || cx >= s.w || cy >= s.h) return;
   const i = cy * s.w + cx;
   s.visible[i] = 1;
-  s.seen[i] = 1;
+  if (s.seen[i] !== 1) { s.seen[i] = 1; s.seenCount++; }
   for (const [xx, xy, yx, yy] of OCTANTS) {
     castLight(s, grid, cx, cy, radius, 1, 1, 0, xx, xy, yx, yy);
   }
