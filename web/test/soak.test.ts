@@ -1867,3 +1867,83 @@ describe("a full descent holds together", () => {
     expect(g.toasts.all().filter((x) => x.level === "error")).toEqual([]);
   });
 });
+
+describe("auto-explore stops for threats, not for scenery", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  /** Put one organism a few tiles away, in plain sight. */
+  const withNeighbour = async (over: Record<string, unknown>) => {
+    const g = await game();
+    g.startRun(0);
+    const proto = g.level.mobs[0];
+    if (!proto) return null;
+    g.level.mobs.length = 0;
+    g.level.mobs.push({ ...proto, ...over, alive: true, hp: 9,
+                        x: g.player.x + 2, y: g.player.y,
+                        ax: g.player.x + 2, ay: g.player.y });
+    g.look();
+    return g;
+  };
+
+  it("a drifting alga does not halt it", async () => {
+    // The oxic column is five harmless drifters to one predator. Halting for
+    // each one made auto-explore useless on the first stratum, and the message
+    // named something that was already off the edge of the screen.
+    const g = await withNeighbour({ behaviour: "drift", atk: 0 });
+    if (!g) return;
+    expect(g.visibleHostile(), "a harmless drifter counted as a threat")
+      .toBeNull();
+  });
+
+  it("a pursuer does halt it, wherever it is", async () => {
+    const g = await withNeighbour({ behaviour: "chase", atk: 3 });
+    if (!g) return;
+    expect(g.visibleHostile(), "a chaser did not count as a threat")
+      .not.toBeNull();
+  });
+
+  it("something harmless but ADJACENT still halts it", async () => {
+    // A sessile thing with an attack is no threat across the room and every
+    // threat next to you.
+    const g = await game();
+    g.startRun(0);
+    const proto = g.level.mobs[0];
+    if (!proto) return;
+    g.level.mobs.length = 0;
+    g.level.mobs.push({ ...proto, behaviour: "sessile", atk: 4, alive: true,
+                        hp: 9, x: g.player.x + 1, y: g.player.y,
+                        ax: g.player.x + 1, ay: g.player.y });
+    g.look();
+    expect(g.visibleHostile(), "an adjacent striker was ignored").not.toBeNull();
+  });
+
+  it("a sessile thing across the room does not", async () => {
+    const g = await game();
+    g.startRun(0);
+    const proto = g.level.mobs[0];
+    if (!proto) return;
+    let spot: { x: number; y: number } | null = null;
+    for (let d = 4; d <= 7 && !spot; d++) {
+      if (g.level.grid.isFloor(g.player.x + d, g.player.y)) {
+        spot = { x: g.player.x + d, y: g.player.y };
+      }
+    }
+    if (!spot) return;
+    g.level.mobs.length = 0;
+    g.level.mobs.push({ ...proto, behaviour: "sessile", atk: 4, alive: true,
+                        hp: 9, x: spot.x, y: spot.y, ax: spot.x, ay: spot.y });
+    g.look();
+    expect(g.visibleHostile(), "a distant sessile organism halted exploring")
+      .toBeNull();
+  });
+});

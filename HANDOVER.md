@@ -1,4 +1,123 @@
+# v1.3.0 — wall art as sprite sheets in source
+
+`wall_pixels.ts`. Authored 16x16 tiles in the same character-grid format
+`pixels.ts` already uses for organisms: a grid of ROLE indices rather than
+colours, so the stratum's palette still tints them.
+
+That answers "can we use actual sprite sheets" with a yes that costs nothing:
+no binary assets, no loader, nothing for the service worker to cache, no
+cache-invalidation problem, and the diff of a texture change is readable. The
+bundle did not move.
+
+Six MATERIALS rather than eight strata, because what changes down the column is
+the palette and which material dominates -- silt does not become a different
+shape when it is iron-stained:
+
+    granular     packed grains with pore space -- most of a sediment column
+    laminated    varves; seasonal laminae, the reason a core reads like rings
+    filamentous  a Beggiatoa mat, tangled gliding threads with a grain to it
+    crystalline  Mn/Fe oxide plates and blades, angular rather than rounded
+    framboidal   pyrite microcrystals packed into raspberry-like spheres
+    massive      structureless deep clay; almost nothing to see, and that is
+                 the character of the bottom
+
+Two variants each, laid into the pattern block STAGGERED by row. Walking them
+in order alternated identically on every row, which with two variants is a set
+of vertical stripes -- a regularity as obvious as the repeat it was meant to
+hide.
+
+Still one `fill` per frame: the block is rasterised once per material and tile
+size, exactly as before. `spec` bounds it at under 200 arcs a frame and one
+canvas across thirty still frames.
+
+**The tiles are text, so a typo is a rendering bug.** `spec` checks every row
+is WALL_PX wide and every character is a known role -- a short row silently
+truncates a material and an unknown character silently draws nothing. Verified
+both: three failures and two.
+
 # v1.2.0 — relict pockets, and walls with mass
+
+## A cache key must include everything it READS
+
+`wallPattern` read `accent` and did not key on it. No two strata collide as the
+palettes stand today -- which is safe by accident, and would break the day
+someone retunes a colour rather than the day the bug was written. Keyed on all
+five inputs now.
+
+The test counts RASTERISATIONS rather than inspecting the key: a cache hit
+returns without building, so a stale entry shows up directly. Two things that
+had to be got right for those counts to mean anything:
+
+* This suite has no DOM, so `wallPattern` hit its catch and never rasterised.
+  The first version of the test passed by measuring nothing.
+* The cache is module-level and outlives a call, so a fixture used by an
+  earlier assertion was already warm and the count came back one short. Each
+  run now uses a nonce so it starts cold.
+
+Verified by dropping `accent` from the key: three failures.
+
+## The texture floor is 12px, not 10
+
+Below that each art pixel is well under a screen pixel, the marks merge, and
+the texture covers sixty percent of the tile -- more texture than wall, which
+is the "small marks become stripes" failure the ORIGINAL threshold was guarding
+against before I removed it. Measured across 10 to 64px: coverage sits at about
+40% everywhere above 12, and jumps at 10.
+
+Written `!(px >= 12)`, and `spec` checks NaN does not get past it -- the same
+inverted-guard trap as `miniBox`.
+
+## `x < 56` is not a guard when x can be NaN
+
+`miniBox` refused a box under 56px with `if (side < 56) return null`. NaN fails
+every comparison, so a degenerate button layout produced a NaN-sized box that
+passed the check and went on to be drawn. Written `if (!(side >= 56))` now,
+which rejects NaN as well as small. Verified by restoring the old form: two
+failures.
+
+Worth generalising -- any numeric guard written as `x < limit` on a value that
+could be NaN is inverted from what it looks like.
+
+## A comment that was wrong about the data
+
+The threat rule shipped with a comment saying a drifting Chlorella "has no
+attack and no interest in you". Half right. EVERY organism in the game has an
+attack -- Chlorella's is 1, and it will use it if you swim into it. There are
+zero organisms with `atk <= 0`, so that clause of the check filters nothing
+present.
+
+The rule is still correct; the reasoning printed beside it was not. A comment
+that misstates the data is worse than no comment, because the next person
+reasons from it. It now says what is true: the question is whether a thing
+COMES TO YOU, and the `atk` check is a guard for content that does not exist
+yet.
+
+## "Hostile" that meant "alive"
+
+`t_visibleHostile` returned ANY living mob in sight, despite its name, and the
+auto-explore interrupt had the same flaw independently. So exploring halted for
+a drifting Chlorella -- no attack, no interest in you -- and announced
+"comes into view" about something already off the edge of the screen.
+
+The oxic column is FIVE harmless drifters to one predator, so the first
+stratum was close to unplayable with auto-explore: it stopped every few tiles
+for scenery.
+
+A threat is now something that PURSUES (chase, wire, swarm) or something
+already within striking reach, and must have an attack at all. Both call sites
+share the rule; having two independent copies of "what is worth stopping for"
+is how they drifted apart in the first place.
+
+The lesson is smaller and sharper than usual: a function called
+`visibleHostile` that never checks hostility will be believed by everyone who
+reads the call site, including whoever wrote the second copy.
+
+## sight.ts
+
+`t_look` and `t_visibleHostile` moved out when turn.ts hit the ceiling. The
+boundary is real: turn.ts is what happens because time passed, and sight.ts is
+what the cell NOTICES -- a different question, and the one that decides whether
+auto-explore keeps going.
 
 ## The wall motif cost the entire frame budget
 

@@ -20,8 +20,8 @@ import * as say from "./flavour.js";
 import { BARRIERS, barrierAt, blockedBy, degrade } from "./barrier.js";
 import { Dungeon, MAX_FLOOR } from "./dungeon.js";
 import type { Mob } from "./dungeon.js";
-import { computeFov, isSeen, isVisible, sightRadius } from "./fov.js";
-import { isNight, lightAt } from "./cycle.js";
+import { isSeen, isVisible } from "./fov.js";
+import { isNight } from "./cycle.js";
 import { firstViolation, type WorldView } from "./invariants.js";
 import { MODIFIERS, RARITY } from "./parts.js";
 import { addDrop, dropAt, itemName, removeDrop, rollPart, substratesAt,
@@ -37,6 +37,8 @@ import { recordLocus, recordSighting } from "./run.js";
 import { findPath } from "./path.js";
 import { nextExplore, unexplored } from "./explore.js";
 import { profileFor, repairTurn } from "./repair.js";
+import { t_visibleHostile } from "./sight.js";
+export { t_look, t_visibleHostile } from "./sight.js";
 import { MAX_STACK, countOf, fullStackIndex, stackIndex, stacks }
   from "./stack.js";
 import { quality } from "./allele.js";
@@ -578,47 +580,6 @@ export function t_ascend(_g: Game): void {
     _g.enter(r.level, r.arrive);
   }
 
-export function t_look(_g: Game): void {
-    const s = _g.level.sight;
-    // Bioluminescence is its own light source, and luciferase needs O2 -- so
-    // the glow only helps in the oxic zone, which is where you least need it.
-    const glow = _g.genome.expression("luxAB", _g.dungeon.depth) > 0 ? 2 : 0;
-    const lit = lightAt(_g.level.stratum.light, _g.clock);
-    computeFov(s, _g.level.grid, _g.player.x, _g.player.y,
-               sightRadius(lit) + glow);
-
-    // Keyed on the INSTANCE. Keying on species-plus-position re-fired every
-    // time a microbe took a step, which is once per turn, for ever.
-    const nowVisible = new Set<number>();
-    const arrivals: Mob[] = [];
-    for (const mob of _g.level.mobs) {
-      if (!mob.alive || !isVisible(s, mob.x, mob.y)) continue;
-      nowVisible.add(mob.uid);
-      if (!_g.spotted.has(mob.uid)) arrivals.push(mob);
-    }
-    // Leaving sight is what re-arms the alert, so a thing pacing in and out of
-    // a doorway does not shout on every step.
-    for (const uid of [..._g.spotted]) if (!nowVisible.has(uid)) _g.spotted.delete(uid);
-    for (const mob of arrivals) _g.spotted.add(mob.uid);
-
-    if (arrivals.length > 0 && (_g.walk || _g.exploring)) {
-      // Total stop. Clearing only the walk left `exploring` set, so the next
-      // tick immediately picked a new frontier and walked on past the thing
-      // that had just appeared.
-      _g.walk = null;
-      _g.exploring = false;
-      _g.strikeAfterTravel = null;
-      const btn = _g.buttons.find((b) => b.id === "explore");
-      if (btn) btn.active = false;
-      _g.path = null;
-      const names = [...new Set(arrivals.map((a) => a.name))];
-      const what = names.length === 1
-        ? `a ${names[0] ?? ""}`
-        : `${String(arrivals.length)} things`;
-      _g.note(`You stop. ${what.charAt(0).toUpperCase()}${what.slice(1)} comes into view.`);
-      _g.toasts.push(`${what} in view.`, "warn", _g.now);
-    }
-  }
 
 export function t_onTile(_g: Game, x: number, y: number): void {
   if (_g.dead) return;             // a lost strain does not act
@@ -805,12 +766,6 @@ export function t_exploreStep(_g: Game): void {
 /** Start or stop exploring. */
 /** Anything alive and currently lit. Exploring with one of these in view is
  *  how you walk into a fight without meaning to. */
-export function t_visibleHostile(_g: Game): Mob | null {
-  for (const m of _g.level.mobs) {
-    if (m.alive && isVisible(_g.level.sight, m.x, m.y)) return m;
-  }
-  return null;
-}
 
 export function t_explore(_g: Game): void {
   if (_g.dead) return;

@@ -9,7 +9,7 @@ import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
          i_pointerMove, i_pointerUp, i_press } from "./input.js";
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,
-         t_look, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
+         t_look, t_visibleHostile, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
          t_take, t_takeTurn, t_upkeep, t_win, t_world, t_catabolise,
          t_expand, t_acquire, t_explore, t_eatOffered, t_declineOffered }
   from "./turn.js";
@@ -388,6 +388,9 @@ class Game {
    *  something new has come into view. DCSS does this and it is the single
    *  thing that stops auto-travel walking you into a fight. */
   look(): void { t_look(this); }
+
+  /** A visible thing that can actually hurt you; see sight.ts. */
+  visibleHostile(): Mob | null { return t_visibleHostile(this); }
 
 
   /** Called after the player lands on a tile. */

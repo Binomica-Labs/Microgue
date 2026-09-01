@@ -8,6 +8,9 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { BARRIERS } from "../src/barrier.js";
+import { miniBox, miniView } from "../src/minimap.js";
+import { wallPattern } from "../src/paint.js";
+import { WALL_MATERIALS, WALL_PX, materialFor } from "../src/wall_pixels.js";
 import { MAX_STACK, countOf, stacks } from "../src/stack.js";
 import { phenotypeOf } from "../src/phenotype.js";
 import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
@@ -6762,5 +6765,187 @@ describe("every gene named anywhere is a real gene", () => {
         expect(ids.has(g), `${m.id} carries "${g}", which is not a gene`).toBe(true);
       }
     }
+  });
+});
+
+describe("the minimap declines rather than misbehaving", () => {
+  it("a degenerate button layout gets no map, not a NaN-sized one", () => {
+    // `side < 56` looks like a guard and is not: NaN fails every comparison,
+    // so a NaN width passed straight through and was drawn.
+    for (const [bl, bt] of [[NaN, NaN], [-100, -100], [0, 0]] as const) {
+      const b = miniBox(393, 852, { top: 47, right: 0, left: 0 }, bl, bt);
+      if (b === null) continue;
+      expect(Number.isFinite(b.w), `miniBox(${String(bl)}) returned a NaN width`)
+        .toBe(true);
+      expect(Math.min(b.w, b.h)).toBeGreaterThanOrEqual(56);
+    }
+  });
+
+  it("it frames something sensible whether nothing or everything is explored", () => {
+    const d = new Dungeon(96, 96, 3);
+    const lvl = d.level(1);
+    const box = { x: 10, y: 10, w: 120, h: 120 };
+    for (const fill of [0, 1]) {
+      lvl.sight.seen.fill(fill);
+      const v = miniView(lvl.grid, lvl.sight, box);
+      expect(Number.isFinite(v.scale) && v.scale > 0,
+             `scale broke with seen=${String(fill)}`).toBe(true);
+      expect(Number.isFinite(v.ox) && Number.isFinite(v.oy)).toBe(true);
+    }
+  });
+
+  it("the wall pattern survives any depth and tile size", () => {
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_o, p: string) => {
+        if (["fillStyle", "globalAlpha", "strokeStyle"].includes(p)) return "";
+        return () => undefined;
+      },
+      set: () => true,
+    });
+    for (const px of [NaN, -5, 0, 1, 1e6, Infinity]) {
+      for (const depth of [NaN, 0, 1, 8, 99]) {
+        expect(() => wallPattern(ctx, depth, px, "#123"),
+               `wallPattern(${String(depth)}, ${String(px)})`).not.toThrow();
+      }
+    }
+  });
+});
+
+describe("wall art is authored, not scattered", () => {
+  it("every tile is exactly WALL_PX square and uses only known roles", () => {
+    // The tiles are text in source, so the only thing stopping a typo from
+    // becoming a rendering bug is this. A short row silently truncates a
+    // material; an unknown character silently draws nothing.
+    for (const [name, tiles] of Object.entries(WALL_MATERIALS)) {
+      expect(tiles.length, `${name} has no variants`).toBeGreaterThan(0);
+      for (const [i, tile] of tiles.entries()) {
+        expect(tile.length, `${name}[${String(i)}] has ${String(tile.length)} rows`)
+          .toBe(WALL_PX);
+        for (const [y, row] of tile.entries()) {
+          expect(row.length,
+                 `${name}[${String(i)}] row ${String(y)} is ${String(row.length)} wide`)
+            .toBe(WALL_PX);
+          for (const ch of row) {
+            expect(".123".includes(ch),
+                   `${name}[${String(i)}] row ${String(y)} has "${ch}"`).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it("every stratum maps to a material that exists", () => {
+    for (let d = 1; d <= 8; d++) {
+      const m = materialFor(d);
+      expect(Object.prototype.hasOwnProperty.call(WALL_MATERIALS, m),
+             `D${String(d)} maps to "${m}", which is not a material`).toBe(true);
+    }
+    for (const n of [NaN, -5, 0, 999]) {
+      expect(Object.prototype.hasOwnProperty.call(WALL_MATERIALS, materialFor(n)))
+        .toBe(true);
+    }
+  });
+
+  it("a tile is textured enough to see and sparse enough to read", () => {
+    // Under about a tenth and it reads as flat -- which is what the scattered
+    // dots did. Over about a half and the wall becomes noise and the outline
+    // stops being legible. `massive` is deliberately below the floor: an
+    // almost featureless deep clay IS the character of the bottom strata.
+    for (const [name, tiles] of Object.entries(WALL_MATERIALS)) {
+      for (const [i, tile] of tiles.entries()) {
+        let ink = 0;
+        for (const row of tile) for (const ch of row) if (ch !== ".") ink++;
+        const frac = ink / (WALL_PX * WALL_PX);
+        if (name === "massive") {
+          expect(frac, "even massive should not be blank").toBeGreaterThan(0);
+          continue;
+        }
+        expect(frac, `${name}[${String(i)}] is ${(frac * 100).toFixed(0)}% ink`)
+          .toBeGreaterThan(0.1);
+        expect(frac, `${name}[${String(i)}] is ${(frac * 100).toFixed(0)}% ink`)
+          .toBeLessThan(0.55);
+      }
+    }
+  });
+});
+
+describe("the wall pattern cache keys on everything it reads", () => {
+  let nonce = 0;
+
+  /** Count how many times a pattern is actually RASTERISED. A cache hit
+   *  returns without building one, so this detects a stale entry directly. */
+  const builds = (calls: [number, number, string, string, string][]): number => {
+    let made = 0;
+    // This suite has no DOM, so `wallPattern` would hit its catch and never
+    // rasterise -- the test would pass by measuring nothing. Give it just
+    // enough of a document to reach the code under test.
+    const inner = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_o, p: string) => {
+        if (["fillStyle", "globalAlpha", "strokeStyle"].includes(p)) return "";
+        return () => undefined;
+      },
+      set: () => true,
+    });
+    vi.stubGlobal("document", {
+      createElement: () => ({ width: 0, height: 0, getContext: () => inner }),
+    });
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_o, p: string) => {
+        if (["fillStyle", "globalAlpha", "strokeStyle"].includes(p)) return "";
+        if (p === "createPattern") {
+          made++;
+          return () => ({}) as CanvasPattern;
+        }
+        return () => undefined;
+      },
+      set: () => true,
+    });
+    // The cache is module-level and outlives a call, so a `base` used by an
+    // earlier assertion would already be warm and the count would come back
+    // one short. A nonce in the floor colour makes every run start cold, which
+    // is the only way these counts mean what they say.
+    nonce++;
+    for (const [depth, px, floor, wall, accent] of calls) {
+      wallPattern(ctx, depth, px, `${floor}${String(nonce)}`, wall, accent);
+    }
+    return made;
+  };
+
+  it("a changed accent rebuilds; an identical call does not", () => {
+    // `accent` was read by the rasteriser and left out of the key. No two
+    // strata collide as the palettes stand -- safe by accident, and it breaks
+    // the day a colour is retuned rather than the day the bug is written.
+    expect(builds([
+      [1, 32, "#050d0a", "#6ec78d", "#ffffff"],
+      [1, 32, "#050d0a", "#6ec78d", "#ff0000"],
+    ]), "a different accent reused the cached texture").toBe(2);
+
+    expect(builds([
+      [1, 32, "#050d0a", "#6ec78d", "#ffffff"],
+      [1, 32, "#050d0a", "#6ec78d", "#ffffff"],
+    ]), "an identical call rasterised twice").toBe(1);
+  });
+
+  it("each of depth, size, floor and wall also rebuilds", () => {
+    const base: [number, number, string, string, string] =
+      [1, 32, "#050d0a", "#6ec78d", "#ffffff"];
+    const changed: [string, [number, number, string, string, string]][] = [
+      ["depth", [6, 32, "#050d0a", "#6ec78d", "#ffffff"]],
+      ["size", [1, 48, "#050d0a", "#6ec78d", "#ffffff"]],
+      ["floor", [1, 32, "#111111", "#6ec78d", "#ffffff"]],
+      ["wall", [1, 32, "#050d0a", "#123456", "#ffffff"]],
+    ];
+    for (const [name, other] of changed) {
+      expect(builds([base, other]), `a changed ${name} reused the cache`).toBe(2);
+    }
+  });
+
+  it("below 12px it declines rather than drawing mush", () => {
+    // Each art pixel is well under a screen pixel there, the marks merge, and
+    // the texture covers 60% of the tile -- more texture than wall.
+    expect(builds([[1, 9, "#050d0a", "#6ec78d", "#fff"]]),
+           "it rasterised a texture too small to read").toBe(0);
+    expect(builds([[1, NaN, "#050d0a", "#6ec78d", "#fff"]]),
+           "NaN got past the size floor").toBe(0);
   });
 });

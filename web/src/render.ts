@@ -135,7 +135,7 @@ export function r_draw(_g: Game): void {
     // per wall tile -- which is the entire budget on a phone. It is rasterised
     // once per stratum and tile size now; see wallPattern.
     if (!hc) {
-      const pat = wallPattern(ctx, s.depth, px, s.floor);
+      const pat = wallPattern(ctx, s.depth, px, s.floor, s.wall, s.accent);
       if (pat) {
         ctx.save();
         ctx.scale(px, px);

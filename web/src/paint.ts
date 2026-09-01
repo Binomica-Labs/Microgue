@@ -5,6 +5,7 @@
 import { MORPHOLOGY, type Role, type Shape } from "./shapes.js";
 import { PIXELS, PX_SIZE } from "./pixels.js";
 import type { Phenotype } from "./phenotype.js";
+import { WALL_MATERIALS, WALL_PX, materialFor } from "./wall_pixels.js";
 import type { Facing, Squash } from "./motion.js";
 
 export interface Palette { body: string; dark: string; accent: string; hi: string; }
@@ -465,31 +466,74 @@ let patternCache: { key: string; pattern: CanvasPattern | null } | null = null;
 /**
  * A repeating wall texture for one stratum at one tile size.
  *
+ * Built from the authored tiles in `wall_pixels.ts` -- the same
+ * character-grid format the organisms use, so wall art is editable text
+ * rather than a binary asset with a loader and a cache-invalidation problem.
+ *
+ * The block is PATTERN_TILES square and each cell takes a DIFFERENT variant,
+ * so the repeat carries several distinct tiles rather than one. A single-tile
+ * pattern would undo the whole point of authoring variants.
+ *
  * Returns null where there is no room for texture, or no document to
- * rasterise into -- the caller then just fills flat, which is what it did
- * before any of this existed.
+ * rasterise into -- the caller then fills flat, which is what it did before
+ * any of this existed.
  */
 export function wallPattern(
   ctx: CanvasRenderingContext2D, depth: number, px: number, floor: string,
+  wall = "#6ec78d", accent = "#ffffff",
 ): CanvasPattern | null {
-  if (px < 10) return null;
-  // Quantised: `px` drifts continuously while zooming, and rebuilding the
-  // pattern every frame of a pinch would cost more than it saves.
+  // 12, not 10. Below that each art pixel is well under a screen pixel, the
+  // marks merge, and the texture covers 60% of the tile -- more texture than
+  // wall, which is the "small marks become stripes" failure the original
+  // threshold was guarding against. NaN-safe form; see minimap.ts.
+  if (!(px >= 12)) return null;
   const q = Math.max(Math.round(px), 1);
-  const key = `${String(depth)}@${String(q)}@${floor}`;
+  const mat = materialFor(depth);
+  // Every input, not just the ones that happen to differ today. `accent` was
+  // read and not keyed: no two strata collide as the palettes stand, which is
+  // exactly the kind of "safe by accident" that breaks when a colour is
+  // retuned.
+  const key = `${mat}@${String(q)}@${floor}@${wall}@${accent}`;
   if (patternCache?.key === key) return patternCache.pattern;
 
   let pattern: CanvasPattern | null = null;
   try {
+    const tiles = WALL_MATERIALS[mat];
     const side = q * PATTERN_TILES;
     const c = document.createElement("canvas");
     c.width = side;
     c.height = side;
     const g = c.getContext("2d");
     if (g) {
+      // One pixel of the 16x16 art, scaled to the tile. Rounded outward so
+      // adjacent pixels overlap by a fraction rather than leaving hairlines --
+      // at 15px a tile each art pixel is under a screen pixel wide.
+      const unit = q / WALL_PX;
+      const dot = Math.max(Math.ceil(unit), 1);
+      const roles: Record<string, string> = {
+        "1": mix(floor, 0, 0.35),          // pore: darker than the floor
+        "2": mix(wall, 0, 0.30),           // grain: the wall, shaded
+        "3": mix(accent, 255, 0.25),       // lit face
+      };
       for (let ty = 0; ty < PATTERN_TILES; ty++) {
         for (let tx = 0; tx < PATTERN_TILES; tx++) {
-          paintWallMotif(g, depth, tx, ty, tx * q, ty * q, q, floor);
+          // Staggered by row. `ty * PATTERN_TILES + tx` alternates identically
+          // on every row, which with two variants is a set of vertical stripes
+          // -- a regularity as obvious as the repeat it was meant to hide.
+          // The +1 offsets each row so it reads as a checker instead.
+          const art = tiles[(ty * (PATTERN_TILES + 1) + tx) % tiles.length];
+          if (!art) continue;
+          for (let y = 0; y < WALL_PX; y++) {
+            const row = art[y];
+            if (!row) continue;
+            for (let x = 0; x < WALL_PX; x++) {
+              const role = roles[row[x] ?? "."];
+              if (!role) continue;
+              g.fillStyle = role;
+              g.fillRect(Math.floor(tx * q + x * unit),
+                         Math.floor(ty * q + y * unit), dot, dot);
+            }
+          }
         }
       }
       pattern = ctx.createPattern(c, "repeat");
@@ -500,3 +544,4 @@ export function wallPattern(
   patternCache = { key, pattern };
   return pattern;
 }
+

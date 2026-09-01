@@ -43,8 +43,10 @@ export function miniBox(
     H * 0.20,
   );
   // Below this it is not readable, and a map you have to squint at costs
-  // pixels and gives nothing back.
-  if (side < 56) return null;
+  // pixels and gives nothing back. `!(side >= 56)` rather than `side < 56`
+  // because NaN fails every comparison: a degenerate button layout produced a
+  // NaN-sized box that passed the check and was then drawn.
+  if (!(side >= 56)) return null;
   return { x: buttonsLeft - gap - side, y: ins.top + gap, w: side, h: side };
 }
 
