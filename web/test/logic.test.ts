@@ -7,6 +7,7 @@ import { Dungeon, MAX_FLOOR, floorWithin, isBossFloor, strataOf }
 import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
+import { BARRIERS } from "../src/barrier.js";
 import { MAX_STACK, countOf, stacks } from "../src/stack.js";
 import { phenotypeOf } from "../src/phenotype.js";
 import { DEFAULT_SETTINGS, SCHEMA, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX,
@@ -6671,5 +6672,95 @@ describe("a relict pocket is another layer, buried", () => {
     expect(onlyAbove.length,
            "nothing is exclusive to the shallow column, so a relict adds nothing")
       .toBeGreaterThan(20);
+  });
+});
+
+describe("off-stratum genes are always earned", () => {
+  it("no relict is ever left unsealed", () => {
+    // A relict that could not be sealed -- because a stair landed inside it,
+    // or because sealing it cut the route to the exit -- would hand over the
+    // one reward that must be bought by expressing something. It is demoted to
+    // a plain chamber instead.
+    let relicts = 0, unsealed = 0, stranded = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const d = new Dungeon(96, 96, seed);
+      for (const f of [1, 5, 10, 16, 22]) {
+        const lvl = d.level(f);
+        for (const r of lvl.rooms) {
+          if (r.kind !== "relict") continue;
+          relicts++;
+          const ring = lvl.barriers.filter((b) =>
+            Math.hypot(b.x - r.cx, b.y - r.cy) <= r.r + 1.6);
+          if (ring.length === 0) unsealed++;
+          for (const p of [lvl.up, lvl.down]) {
+            if (p && Math.hypot(p.x - r.cx, p.y - r.cy) <= r.r) stranded++;
+          }
+        }
+      }
+    }
+    expect(relicts, "no relicts generated at all").toBeGreaterThan(20);
+    expect(unsealed, `${String(unsealed)} relicts gave their genes away free`).toBe(0);
+    expect(stranded, "a stair landed inside a sealed pocket").toBe(0);
+  });
+
+  it("every floor still has a route to its exit", () => {
+    // Barriers gate CACHES, never progress. A floor you cannot leave is
+    // unrecoverable, and sealing a relict must never cause one.
+    for (let seed = 0; seed < 40; seed++) {
+      const d = new Dungeon(96, 96, seed);
+      for (const f of [1, 5, 10, 16, 22]) {
+        const lvl = d.level(f);
+        if (!lvl.down) continue;
+        expect(findPath(lvl.grid, lvl.up, lvl.down),
+               `seed ${String(seed)} F${String(f)}: no route to the exit`)
+          .not.toBeNull();
+      }
+    }
+  });
+});
+
+describe("every gene named anywhere is a real gene", () => {
+  // TypeScript catches this where the type is `GeneId`. It does not where a
+  // list is widened, a string literal is built, or a table is keyed loosely --
+  // and a barrier advertising a key that cannot be found is a wall with no
+  // door, which no test would otherwise notice.
+  //
+  // Written by IMPORTING the modules, not by scanning the source. Three
+  // separate ad-hoc regexes over biology.ts got this wrong in one session --
+  // one required a single space after the colon and silently missed the three
+  // aligned entries, reporting 66 genes where there are 69.
+  const ids = new Set(Object.keys(bio.GENES));
+
+  it("barriers open on genes that exist", () => {
+    for (const id of Object.keys(BARRIERS) as (keyof typeof BARRIERS)[]) {
+      for (const g of BARRIERS[id].opens) {
+        expect(ids.has(g), `barrier "${id}" opens on "${g}", which is not a gene`)
+          .toBe(true);
+      }
+    }
+  });
+
+  it("every barrier can be opened by something reachable at its depth", () => {
+    // A seal whose only key lives deeper than the seal is a wall, not a gate.
+    for (const id of Object.keys(BARRIERS) as (keyof typeof BARRIERS)[]) {
+      const opens = BARRIERS[id].opens;
+      let earliest = Infinity;
+      for (let d = 1; d <= 8; d++) {
+        if (bio.microbesAt(d).some((m) => m.genes.some((g) => opens.includes(g)))) {
+          earliest = d;
+          break;
+        }
+      }
+      expect(earliest, `nothing anywhere carries a key for "${id}"`)
+        .toBeLessThan(Infinity);
+    }
+  });
+
+  it("every organism's genes exist", () => {
+    for (const m of bio.MICROBES) {
+      for (const g of m.genes) {
+        expect(ids.has(g), `${m.id} carries "${g}", which is not a gene`).toBe(true);
+      }
+    }
   });
 });

@@ -8,6 +8,19 @@ import { SIZES, type Size } from "./behaviour.js";
 import { covers, tilesOf } from "./footprint.js";
 import { makeSight, type Sight } from "./fov.js";
 import { carveRooms, planFor, ROOM_STYLE, type Room } from "./rooms.js";
+
+/**
+ * A relict that could not be sealed is not a relict.
+ *
+ * Its whole point is off-stratum genes bought by expressing the right thing.
+ * Left unsealed -- because a stair landed inside it, or because sealing it cut
+ * the route to the exit -- it hands the one reward that must be earned to
+ * anyone who walks past. Demoting it to a plain chamber costs a landmark and
+ * keeps the rule.
+ */
+function demote(room: Room): void {
+  if (room.kind === "relict") room.kind = "chamber";
+}
 import { barriersAt, type Barrier } from "./barrier.js";
 import { findPath } from "./path.js";
 import * as mg from "./mapgen.js";
@@ -244,7 +257,10 @@ export class Dungeon {
       // Two floors in 1440 landed like this before this check.
       const holds = (pt: Point | null): boolean =>
         pt !== null && Math.hypot(pt.x - room.cx, pt.y - room.cy) <= room.r + 1;
-      if (holds(lvl.up) || holds(lvl.down ?? null)) continue;
+      if (holds(lvl.up) || holds(lvl.down ?? null)) {
+        demote(room);
+        continue;
+      }
       const def = kinds[rng.int(kinds.length)];
       if (!def) continue;
       // Plug the ring one tile outside the room, which is where its corridor
@@ -271,12 +287,16 @@ export class Dungeon {
       // that route -- unseal it rather than shipping a floor you cannot leave.
       if (!this.exitReachable(lvl)) {
         lvl.barriers = lvl.barriers.filter((b) => !added.includes(b));
+        demote(room);
       }
     }
     // Belt and braces. Nothing above should be able to leave the exit sealed,
     // but a floor you cannot leave is unrecoverable, so verify once more and
     // drop every barrier rather than ship one.
-    if (!this.exitReachable(lvl)) lvl.barriers = [];
+    if (!this.exitReachable(lvl)) {
+      lvl.barriers = [];
+      for (const room of lvl.rooms) demote(room);
+    }
   }
 
   /**

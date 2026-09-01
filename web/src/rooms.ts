@@ -34,7 +34,10 @@ export type RoomKind = "port" | "mat" | "bloom" | "enrichment" | "relict"
   | "chamber";
 
 export interface Room {
-  readonly kind: RoomKind;
+  /** Mutable so an unsealable relict can be DEMOTED. Off-stratum genes are
+   *  the one reward that must be earned through a barrier; a relict whose
+   *  seal had to be dropped would hand them over free. */
+  kind: RoomKind;
   readonly cx: number;
   readonly cy: number;
   readonly r: number;

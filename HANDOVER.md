@@ -1,5 +1,35 @@
 # v1.2.0 — relict pockets, and walls with mass
 
+## A relict that cannot be sealed is not a relict
+
+Off-stratum genes are the one reward that must be bought by expressing
+something. Two paths left a relict unsealed -- a stair landing inside it, and
+sealing it cutting the route to the exit -- and both handed those genes to
+anyone who walked past. Either case DEMOTES the pocket to a plain chamber now.
+Measured across 480 floors: 4 unsealed before, 0 after, and still a route to
+every exit.
+
+The existing guard was working, incidentally. It correctly refused to seal a
+pocket containing a stair; what was missing was doing anything about the
+consequence.
+
+## Stop scanning source. Import the module.
+
+Three separate ad-hoc regexes over `biology.ts` got the gene list wrong in one
+session. One required exactly one space after the colon and silently missed the
+three ALIGNED entries -- `sqr`, `sat`, `ori` -- reporting 66 genes where there
+are 69. On the strength of that I removed `bchY` from the phenotype pigments
+believing it did not exist.
+
+It does not exist, as it happens, so the change was right. That is worse, not
+better: a bad method that returns the right answer teaches you to keep using
+it.
+
+`spec` now imports GENES and BARRIERS and checks every gene named by a barrier
+or an organism is real, and that every barrier has a key reachable at or above
+the depth it appears -- a seal whose only key lives deeper is a wall, not a
+gate. Verified by planting a fake gene id: two failures.
+
 ## The relict pocket
 
 Loot was `microbesAt(depth)` -- strictly stratum-locked. So a build tracked its
