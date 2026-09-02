@@ -13,7 +13,19 @@
 
 export type TraceKind =
   | "input" | "move" | "attack" | "hurt" | "status" | "floor"
-  | "loot" | "turn" | "death" | "note";
+  | "loot" | "turn" | "death" | "note"
+  /**
+   * The energy budget, when it is NEGATIVE.
+   *
+   * The recorder tracked everything that hits you and nothing that drains you,
+   * so "I am losing ATP and the readout says +0.1" was unanswerable from the
+   * log. The displayed balance is metabolic only; repair is spent on top of
+   * it and is frequently the larger term.
+   *
+   * Logged only when the pool is actually falling -- a line every turn would
+   * fill a 400-entry ring in seven minutes and push out everything else.
+   */
+  | "atp";
 
 export interface TraceEvent {
   /** Turn number, so events line up with the game clock. */

@@ -1,6 +1,8 @@
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 
+import { CLASSES, DEFAULT_CLASS, type ClassId } from "./classes.js";
+import type { ClassRow } from "./class_ui.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
@@ -134,6 +136,13 @@ class Game {
   won = false;
   /** Set once storage has refused a write, so it is said once. */
   storageWarned = false;
+  /** What was inoculated. Chosen once, before the culture goes in, and
+   *  never again -- see classes.ts. */
+  strainClass: ClassId = DEFAULT_CLASS;
+  /** Slot awaiting a class choice, or null. An EMPTY slot goes here
+   *  first; an occupied one resumes and never does. */
+  pickingClassFor: number | null = null;
+  classRows: ClassRow[] = [];
   /** A cassette that would not fit on a full stack, awaiting a choice. */
   offer: { part: Part; at: { x: number; y: number } } | null = null;
   offerBoxes: { eat: Box; leave: Box } | null = null;
@@ -162,6 +171,9 @@ class Game {
   lastAttacker: string | null = null;
   /** Fractional hit points repaired but not yet applied. */
   repairDebt = 0;
+  /** ATP spent on repair last turn. Not part of , which is
+   *  metabolism only -- see turn.ts. */
+  repairSpend = 0;
   /** Flight recorder. Always on; see trace.ts. */
   readonly trace = new Trace();
   /** Re-paths spent chasing one quarry, so a chase cannot run for ever. */
@@ -732,7 +744,7 @@ class Game {
 
 
 
-  startRun(slot: number): void {
+  startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void {
     this.slot = slot;
     // The lab outlives every strain, so it is read here rather than from the
     // slot file: dying, or deleting a save, must not cost the meta-progression.
@@ -754,8 +766,25 @@ class Game {
 
       // Everything the lab has ordered is on the new strain from turn one.
       // This is what the previous strain died for.
-      this.genome.integrated = this.lab.startSites;
+      // The CLASS first: it decides the chromosome the lab's constructs then
+      // land on. Applying it after the stock would let a class with fewer
+      // sites push already-ordered genes off the ring.
+      this.strainClass = cls;
+      const def = CLASSES[cls];
+      this.genome.integrated = Math.max(this.lab.startSites + def.sites, 0);
       this.genome.strain = this.lab.startStrain;
+      if (def.trait) this.genome.acquire(def.trait);
+
+      // Its opening operon, laid down as a WORKING unit -- promoter, genes,
+      // terminator -- not dropped in the bin for the player to assemble. The
+      // class is what you inoculated, so it should already be running.
+      for (const g of def.genes) {
+        this.genome.stash({ kind: "gene", id: g, level: 1, mods: [],
+                            allele: WILD_TYPE });
+      }
+      const built = this.genome.assemble([...def.genes]);
+      if (!built.ok) this.trace.push(0, "note", `class operon: ${built.err}`);
+
       for (const g of this.lab.stock) {
         this.genome.stash({ kind: "gene", id: g, level: 1, mods: [],
                             allele: WILD_TYPE });
@@ -765,7 +794,7 @@ class Game {
       this.player.atp = this.player.atpMax;
       this.player.status.length = 0;
       this.enter(this.dungeon.current(), this.dungeon.current().up);
-      this.note(`Culture ${this.runName} inoculated.`
+      this.note(`${def.name} ${this.runName} inoculated. ${def.blurb}`
         + (this.lab.stock.length > 0
           ? ` ${String(this.lab.stock.length)} synthesised construct`
             + `${this.lab.stock.length === 1 ? "" : "s"} in the bin.`

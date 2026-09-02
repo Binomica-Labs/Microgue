@@ -49,6 +49,7 @@ export function p_save(_g: Game): void {
       }),
       heldMods: [..._g.mods],
       turn: _g.clock.turn,
+      strainClass: _g.strainClass,
       integrated: _g.genome.integrated,
       traits: [..._g.genome.traits],
       stocked: _g.dungeon.visitedLevels()
@@ -83,6 +84,7 @@ export function p_applySave(_g: Game, s: SaveData): void {
     // knowing how far the chromosome was grown drops everything past the
     // base eight positions.
 
+    _g.strainClass = s.strainClass;
     _g.genome.integrated = s.integrated;
     _g.genome.setTraits(s.traits);
     // Same floor as `upkeep`: the lab's purchased start is a minimum, not a

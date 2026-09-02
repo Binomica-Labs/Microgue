@@ -1,3 +1,72 @@
+# v1.6.0 — you choose what goes into the column
+
+Chosen ONCE, on an empty slot, before anything is created. An occupied slot
+resumes and never asks: the class is fixed for the life of the strain, and
+offering a choice that cannot be honoured is worse than offering none.
+
+    Phototroph       psbA katG   +2 sites        native D1-3
+    Chemolithotroph  soxB sqr    +2              native D3-6
+    Heterotroph      celA katG   +2, par locus   native D1-8
+    Methanogen       mcrA hdrB   +1              native D8
+
+The trades are made of STARTING GENES, not numeric modifiers, because depth
+gating already turns a gene into a trade -- a photosystem is free energy at the
+surface and dead weight below the photic zone, and nothing had to be written to
+make that true.
+
+Two corrections that came from measuring rather than designing:
+
+* **The methanogen is native to D8 only.** I wrote D6-8; `mcrA` does not
+  express at all until the methanogenic zone. That makes a better class than
+  the one I designed -- native to exactly one stratum, the last, with
+  everything above it survival.
+* **THREE starting genes filled the whole chromosome.** Three plus a promoter
+  and terminator is five positions, and with the vector's three that left two
+  of the four classes with nowhere to build. Two genes, and +1 or +2 sites.
+
+**The phototroph shipped bleeding.** psbA without katG trips the peroxide
+hazard, so the default class took a point of damage every turn from turn one --
+not a trade, a countdown. It carries katG now, which is also more correct: a
+cyanobacterium that could not handle its own peroxide would not exist. Catalase
+is a precondition for oxygenic photosynthesis, not an upgrade.
+
+## "Losing ATP at +0.1"
+
+The balance on the plasmid screen is METABOLIC: gain minus expression cost.
+REPAIR is spent on top of it and was never shown -- and for a damaged cell it
+is usually the larger of the two. With a chaperone suite running, repair costs
+about 1.1 ATP a turn, so a cell reading `+0.1` was really at about -1.0 and
+nothing on screen or in the log said so.
+
+The readout now shows `+0.1  -1.1 repair`, and it is COLOURED on the net rather
+than the metabolic half -- what the player needs to know is whether the pool is
+filling or draining, not which term they are looking at.
+
+**The flight recorder tracked everything that hits you and nothing that drains
+you.** There is an `atp` line now, written only when the pool is actually
+falling, carrying the whole sum:
+
+    T  412  atp     69 left; +1.4 gain -1.3 expression -1.1 repair = -1.0/turn
+
+Only when falling: a line every turn would fill the 400-entry ring in seven
+minutes and push out everything else.
+
+`spec` reconciles the claim against reality -- the pool must move by the sum
+the game states, within rounding -- which is the assertion that would have
+caught this on the day repair was added.
+
+**A fixture I could not build.** Three attempts at constructing a draining cell
+all came out POSITIVE; the economy is generous once anything is expressed. The
+logging test drives `upkeepRepair` directly instead. A fixture that cannot
+reach the state under test is not a test of it, and hunting for one was costing
+more than the coverage was worth.
+
+## Empty slots read as empty
+
+They previewed a name from the pool -- "new culture  K-12" -- which reads as a
+save that already exists and belongs to someone else. A blank slot says
+`empty`, and the designation is assigned at creation.
+
 # v1.5.0 — texture that stays put, and fighting that counts
 
 ## Only one of three kill paths counted

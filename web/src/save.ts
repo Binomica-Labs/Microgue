@@ -8,6 +8,7 @@
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
 import { BASE_SLOTS, MAX_SLOTS, TRAITS, atpCeiling, type TraitId }
   from "./chromosome.js";
+import { DEFAULT_CLASS, isClassId, type ClassId } from "./classes.js";
 import { MAX_FLOOR } from "./dungeon.js";
 import { MAX_STRAIN } from "./strain.js";
 import { RARITY, type Rarity } from "./parts.js";
@@ -82,6 +83,8 @@ export interface SaveData {
   /** Turn count, so the diel cycle resumes rather than restarting at dawn. */
   readonly turn: number;
   /** Cassette sites integrated beyond the base, and architecture acquired. */
+  /** What was inoculated. Fixed for the life of the strain. */
+  readonly strainClass: ClassId;
   readonly integrated: number;
   readonly traits: readonly TraitId[];
   /** Clock turn each visited floor was last stocked, so the pump does not
@@ -294,6 +297,10 @@ export function parseSave(raw: unknown): SaveData | null {
       ? (raw["heldMods"] as unknown[]).filter(isModifierId).slice(0, 40)
       : [],
     turn: Math.min(Math.max(Math.round(num(raw["turn"], 0)), 0), 1e7),
+    // A save written before classes existed is a phototroph, which is what
+    // the old fixed starting vector behaved like.
+    strainClass: isClassId(raw["strainClass"])
+      ? raw["strainClass"] : DEFAULT_CLASS,
     integrated: Math.min(Math.max(Math.round(num(raw["integrated"], 0)), 0),
                          MAX_SLOTS - BASE_SLOTS),
     traits: Array.isArray(raw["traits"])

@@ -36,7 +36,7 @@ import { makeRng } from "./rng.js";
 import { recordLocus, recordSighting } from "./run.js";
 import { findPath } from "./path.js";
 import { nextExplore, unexplored } from "./explore.js";
-import { profileFor, repairTurn } from "./repair.js";
+import { upkeepRepair } from "./repair_turn.js";
 import { t_visibleHostile } from "./sight.js";
 export { t_look, t_visibleHostile } from "./sight.js";
 import { MAX_STACK, countOf, fullStackIndex, stackIndex, stacks }
@@ -235,6 +235,7 @@ export function t_upkeep(_g: Game): void {
     // Energy first: everything below depends on what the pool can supply.
     const gain = _g.genome.atpGain(d);
     const cost = _g.genome.atpCost(d);
+    _g.repairSpend = 0;                  // set below if anything is repaired
     _g.player.atp = Math.min(_g.player.atp + gain, _g.player.atpMax);
     if (cost <= _g.player.atp) {
       _g.player.atp -= cost;
@@ -269,25 +270,7 @@ export function t_upkeep(_g: Game): void {
     }
     // Repair: spend ATP to close damage. This is the ordinary way to recover
     // -- only two of nine complexes grant free regeneration, so without it a
-    // scratch on the first floor followed you to the last.
-    if (_g.player.hp < _g.player.maxhp) {
-      const prof = profileFor((g) => _g.genome.expression(g, d) > 0);
-      const r = repairTurn(prof, _g.player.hp, _g.player.maxhp,
-                           _g.player.atp, _g.player.atpMax);
-      if (r.hp > 0) {
-        _g.repairDebt += r.hp;
-        _g.player.atp = Math.max(_g.player.atp - r.atp, 0);
-        // Accumulate the fraction and apply whole points, so a slow cell
-        // visibly recovers instead of rounding to nothing every turn.
-        const whole = Math.floor(_g.repairDebt);
-        if (whole > 0) {
-          _g.repairDebt -= whole;
-          _g.player.hp = Math.min(_g.player.hp + whole, _g.player.maxhp);
-          _g.fx.add({ kind: "text", t0: _g.now, dur: 700, x: _g.player.x,
-                      y: _g.player.y, text: `+${String(whole)}`, colour: "#7fe0a4" });
-        }
-      }
-    }
+    upkeepRepair(_g, d, gain, cost);
 
     // Regeneration complexes are free healing ON TOP, which is what makes
     // them worth building around rather than merely nice.

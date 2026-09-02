@@ -12,6 +12,7 @@ import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box } from "./chrome.js";
+import { loadSlot } from "./saves.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
 import type { Point } from "./mapgen.js";
@@ -106,10 +107,30 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       _g.gesture = "none";
       return;
     }
+    // The class picker is modal over the splash: an empty slot asks what to
+    // inoculate before anything is created.
+    if (_g.pickingClassFor !== null) {
+      const hit = _g.classRows.find((r) => inBoxOf(r.box, x, y));
+      if (hit) {
+        const slot = _g.pickingClassFor;
+        _g.pickingClassFor = null;
+        _g.startRun(slot, hit.id);
+      } else if (_g.inClose(x, y)) {
+        _g.pickingClassFor = null;      // back to the slots
+      }
+      _g.gesture = "none";
+      return;
+    }
     if (_g.showSplash || !_g.started) {
       const i = _g.slotBoxes.findIndex(
         (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
-      if (i >= 0) _g.startRun(i);
+      if (i >= 0) {
+        // Occupied slots RESUME. The class was decided when that culture was
+        // inoculated and asking again would be offering a choice that cannot
+        // be honoured.
+        if (loadSlot(i)) _g.startRun(i);
+        else _g.pickingClassFor = i;
+      }
       _g.gesture = "none";
       return;
     }

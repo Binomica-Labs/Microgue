@@ -27,8 +27,15 @@ export interface StrainClass {
   readonly name: string;
   /** One line, on the selection card. */
   readonly blurb: string;
-  /** Laid down as a working operon at inoculation, with a promoter and a
-   *  terminator around it. Not merely dropped in the bin. */
+  /**
+   * Laid down as a working operon at inoculation -- promoter, genes,
+   * terminator -- not merely dropped in the bin.
+   *
+   * TWO genes, not three. Three plus its regulation is five positions, and
+   * with the starting vector's three that filled an eight-slot chromosome
+   * completely: two of the four classes began with nowhere to build at all.
+   * A class should give you an opening, not spend your whole genome on one.
+   */
   readonly genes: readonly GeneId[];
   /** Architecture it is built with, if any. */
   readonly trait?: TraitId;
@@ -48,19 +55,24 @@ export const CLASSES: Readonly<Record<ClassId, StrainClass>> = {
     id: "phototroph",
     name: "Phototroph",
     blurb: "Fixes its own carbon in the light. Helpless in the dark.",
-    genes: ["psbA", "psaA", "cbbL"],
-    sites: 1,
+    // psbA AND katG. Photosystem II leaks reactive oxygen, and a cyanobacterium
+    // that could not deal with its own peroxide would not exist -- catalase is
+    // not an upgrade for these organisms, it is a precondition. Shipping
+    // psbA alone made the starting class take a point of damage every turn
+    // from turn one, which is not a trade, it is a countdown.
+    genes: ["psbA", "katG"],
+    sites: 2,
     // Light attenuates rather than stopping, so the photosystem keeps making
     // SOMETHING down to D6 -- less and less of it. The range is where it is
     // worth having, not where it is non-zero.
     native: [1, 3],
     pros: [
       "the oxic column costs almost nothing to survive",
-      "carbon fixation from the first turn",
+      "catalase from the start: the surface cannot corrode it",
     ],
     cons: [
       "output collapses below the photic zone",
-      "photosystem II leaks peroxide -- find katG or bleed",
+      "nothing it carries is worth anything in the dark",
     ],
     note: "A Synechococcus. Oxygenic photosynthesis is the most productive "
       + "thing on this planet and it stops working a few metres down.",
@@ -70,8 +82,8 @@ export const CLASSES: Readonly<Record<ClassId, StrainClass>> = {
     id: "chemolithotroph",
     name: "Chemolithotroph",
     blurb: "Eats rock. At home wherever two chemistries meet.",
-    genes: ["soxB", "sqr", "sat"],
-    sites: 0,
+    genes: ["soxB", "sqr"],
+    sites: 2,
     native: [3, 6],
     pros: [
       "the redox fronts are its home ground",
@@ -89,9 +101,9 @@ export const CLASSES: Readonly<Record<ClassId, StrainClass>> = {
     id: "heterotroph",
     name: "Heterotroph",
     blurb: "Digests everything. Makes nothing.",
-    genes: ["celA", "chiA", "katG"],
+    genes: ["celA", "katG"],
     trait: "partitioned",
-    sites: 1,
+    sites: 2,
     native: [1, 8],
     pros: [
       "chews through crusts and sealed pockets earliest",
@@ -110,8 +122,10 @@ export const CLASSES: Readonly<Record<ClassId, StrainClass>> = {
     id: "methanogen",
     name: "Methanogen",
     blurb: "Native to the bottom. Oxygen is poison.",
-    genes: ["mcrA", "hdrB", "fwdB"],
-    sites: -1,
+    // One fewer than the others, not fewer than the base: a small ancient
+    // genome is a handicap, not an inability to play.
+    genes: ["mcrA", "hdrB"],
+    sites: 1,
     // D8 only. Measured, not assumed: mcrA does not express at all until the
     // methanogenic zone, so the claimed range was a guess that the data
     // contradicted. That is the point of this class -- it is native to exactly

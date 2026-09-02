@@ -6,6 +6,8 @@
 
 export { r_drawFx } from "./fx_render.js";
 import { eliteHalo } from "./fx_render.js";
+import { r_drawPicker, r_drawSplash } from "./picker_render.js";
+import { r_ringReadout } from "./ring_readout.js";
 export { r_drawHud } from "./hud_render.js";
 import { r_drawOffer } from "./hud_render.js";
 import { BIN_CAP } from "./plasmid.js";
@@ -29,7 +31,7 @@ import { squashFor, travel, wake } from "./motion.js";
 import { WALL_SPREAD, traceWalls } from "./walls.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
-import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash, ellipsise }
+import { drawContainer, drawLab, drawNotes, drawResearch, ellipsise }
   from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
 import { Effects, easeOutQuad }
@@ -53,9 +55,8 @@ export function r_draw(_g: Game): void {
     // function, the error it queued was never drawn either. Black screen, no
     // diagnostic, which is precisely the failure this was meant to prevent.
     if (_g.showSplash || !_g.started) {
-      _g.closeBox = drawSplash(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
-        Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, _g.lab);
-      _g.drawToasts(W, H);
+      if (_g.pickingClassFor !== null) { r_drawPicker(_g, W, H); return; }
+      r_drawSplash(_g, W, H);
       return;
     }
 
@@ -660,59 +661,19 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
       dragXY: _g.dragXY, selected: _g.selected, u,
     });
 
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    r_ringReadout(_g, u);
 
-    // Sized to the RING, not to the screen.
-    //
-    // These were `15 * u`, scaled by the smaller screen dimension, while the
-    // ring hole is sized from `H * 0.46`. On a wide, short screen the hole
-    // shrinks and the text does not, so the readout was drawn straight across
-    // the plasmid -- which is what a landscape phone actually looked like.
-    // 0.86 of the diameter, not the diameter: a chord across a circle is only
-    // that long at the exact middle, and three lines are stacked.
-    const hole = _g.ring.rInner * 2 * 0.86;
-    const fit = (text: string, want: number): number => {
-      let size = want;
-      for (let i = 0; i < 14; i++) {
-        ctx.font = `${size}px ui-monospace,monospace`;
-        if (ctx.measureText(text).width <= hole || size <= 6) break;
-        size = Math.max(size * 0.9, 6);
-      }
-      return size;
-    };
+  // Parts bin: everything you hold but have not installed.
+  const cell = Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
+  const gap = 8 * u;
+  _g.bin = {
+    x: ins.left + gap, y: _g.ring.cy + _g.ring.rOuter + 16 * u,
+    cell, gap, cols: 6,
+  };
+  ctx.fillStyle = "#8fa89a";
+  ctx.font = `${11 * u}px ui-monospace,monospace`;
 
-    ctx.fillStyle = "#ffffff";
-    // toFixed on BOTH: capacity is a float sum, printed raw as "13.1499999 kb".
-    const kbText = `${_g.genome.used().toFixed(1)}/`
-      + `${_g.genome.capacityKb().toFixed(1)} kb`;
-    const kbSize = fit(kbText, 15 * u);
-    ctx.fillText(kbText, _g.ring.cx, _g.ring.cy - 9 * u);
-    const d = _g.dungeon.depth;
-    const bal = _g.genome.atpBalance(d);
-    ctx.fillStyle = bal >= 0 ? "#7fc4e8" : "#e08a5a";
-    const atpText = `ATP ${Math.round(_g.player.atp)}/${_g.player.atpMax}   `
-      + `${bal >= 0 ? "+" : ""}${bal.toFixed(1)}/action`;
-    fit(atpText, Math.min(11 * u, kbSize * 0.75));
-    ctx.fillText(
-      atpText,
-      _g.ring.cx, _g.ring.cy + 10 * u);
-    ctx.fillStyle = "#8fa89a";
-    const powerText = `power ${_g.genome.power(d).toFixed(1)}`
-      + (_g.genome.burden() > 0 ? `   burden ${String((_g.genome.burden() * 100) | 0)}%` : "")
-      + (_g.genome.supply < 0.99 ? `   brownout ${String((_g.genome.supply * 100) | 0)}%` : "");
-    fit(powerText, Math.min(11 * u, kbSize * 0.75));
-    ctx.fillText(powerText, _g.ring.cx, _g.ring.cy + 27 * u);
 
-    // Parts bin: everything you hold but have not installed.
-    const cell = Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
-    const gap = 8 * u;
-    _g.bin = {
-      x: ins.left + gap, y: _g.ring.cy + _g.ring.rOuter + 16 * u,
-      cell, gap, cols: 6,
-    };
-    ctx.fillStyle = "#8fa89a";
-    ctx.font = `${11 * u}px ui-monospace,monospace`;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
     ctx.fillText(`PARTS BIN  ${_g.genome.bin.length}/${BIN_CAP}`,

@@ -1695,6 +1695,8 @@ describe("state that should persist, does", () => {
     researchRows: "hit boxes, per frame", dropBoxes: "hit boxes, per frame",
     closeBox: "hit box, per frame", cardBoxes: "hit boxes, per frame",
     offerBoxes: "hit boxes, per frame", miniBox: "layout, per frame",
+    classRows: "hit boxes, per frame",
+    pickingClassFor: "a choice in progress, before anything is created",
     // Momentary interaction state: meaningless after a reload.
     gesture: "a pointer gesture in progress", gestureBtn: "ditto",
     dragFrom: "a drag in progress", dragBin: "ditto", dragXY: "ditto",
@@ -1714,6 +1716,7 @@ describe("state that should persist, does", () => {
     now: "wall clock", last: "wall clock", autoAt: "wall clock",
     deathAt: "wall clock", lysisAt: "wall clock", clock: "turn counter, saved separately",
     storageWarned: "a warning already given", repairDebt: "sub-hp accumulator",
+    repairSpend: "last turn only; recomputed every upkeep",
     lastAttacker: "for the obituary only", deathRecord: "written to the lab",
     inRoom: "derived from position", drops: "part of the level",
     lab: "its own storage key", slot: "which slot this IS",
@@ -1751,7 +1754,8 @@ describe("state that should persist, does", () => {
     // Anything not listed must be something the save actually carries.
     const { SCHEMA } = await import("../src/save.js");
     void SCHEMA;
-    const carried = ["player", "run", "settings", "mods", "won", "turn"];
+    const carried = ["player", "run", "settings", "mods", "won", "turn",
+                     "strainClass"];
     const missing = unexplained.filter((f) => !carried.includes(f));
     expect(missing,
            "new field(s) on Game with no persistence decision recorded -- add "
@@ -2104,4 +2108,186 @@ describe("a kill costs a turn and nothing more", () => {
     }
     expect(drops, "maxhp fell during ordinary play, clamping hp silently").toBe(0);
   });
+});
+
+describe("a class is chosen once, before inoculation", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("an empty slot asks; an occupied one resumes without asking", async () => {
+    const g = await game();
+    g.frame(16);
+    const slot = g.slotBoxes[0];
+    expect(slot, "no slots drawn").toBeDefined();
+    if (!slot) return;
+
+    g.pointerDown(slot.x + 10, slot.y + 10);
+    g.pointerUp(slot.x + 10, slot.y + 10);
+    expect(g.pickingClassFor, "an empty slot started a run without asking")
+      .toBe(0);
+    expect(g.started, "it started the run anyway").toBe(false);
+
+    // Choose one.
+    g.frame(40);
+    const row = g.classRows[2];
+    expect(row, "the picker drew no classes").toBeDefined();
+    if (!row) return;
+    g.pointerDown(row.box.x + 10, row.box.y + 10);
+    g.pointerUp(row.box.x + 10, row.box.y + 10);
+    expect(g.started, "choosing a class did not start the run").toBe(true);
+    expect(g.strainClass, "the choice was not applied").toBe(row.id);
+    expect(g.pickingClassFor).toBeNull();
+
+    // Now the slot is occupied: tapping it must RESUME, not re-ask. The class
+    // is fixed for the life of the strain and offering a choice that cannot be
+    // honoured is worse than offering none.
+    const h = await game();
+    h.frame(16);
+    const s2 = h.slotBoxes[0];
+    if (!s2) return;
+    h.pointerDown(s2.x + 10, s2.y + 10);
+    h.pointerUp(s2.x + 10, s2.y + 10);
+    expect(h.pickingClassFor, "an occupied slot asked again").toBeNull();
+    expect(h.started).toBe(true);
+  });
+
+  it("the class it started with is the class it has after a reload", async () => {
+    const g = await game();
+    g.startRun(0, "methanogen");
+    expect(g.strainClass).toBe("methanogen");
+    expect(g.genome.has("mcrA"), "its opening operon was not laid down").toBe(true);
+    g.save();
+
+    const b = await game();
+    b.startRun(0);
+    expect(b.strainClass, "the class did not survive a reload").toBe("methanogen");
+  });
+
+  it("every class starts with room left to build", async () => {
+    const { CLASS_IDS } = await import("../src/classes.js");
+    // A slot PER class. Reusing slot 0 meant the second iteration found the
+    // first one's save and resumed it -- so the class was never applied and
+    // the failure looked like a broken operon rather than a broken fixture.
+    for (const [i, id] of CLASS_IDS.entries()) {
+      const g = await game();
+      g.startRun(i, id);
+      expect(g.genome.free(), `${id} has nowhere to build`)
+        .toBeGreaterThanOrEqual(2);
+      // And its opening is RUNNING, not sitting in the bin.
+      const { CLASSES } = await import("../src/classes.js");
+      for (const gene of CLASSES[id].genes) {
+        expect(g.genome.has(gene), `${id} left ${gene} uninstalled`).toBe(true);
+      }
+    }
+  });
+});
+
+describe("the ATP readout accounts for everything that spends it", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a damaged cell showing a positive balance can still be draining", async () => {
+    // Reported as "still losing ATP despite +0.1". The displayed balance is
+    // METABOLIC -- gain minus expression -- and repair is spent on top of it.
+    // With a chaperone suite running, repair costs about 1.1 ATP a turn, so a
+    // cell reading +0.1 was really at about -1.0 and nothing said so.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    for (let i = 0; i < 3; i++) g.press("wait");
+
+    g.player.hp = Math.max(g.player.maxhp - 8, 1);
+    const atp0 = g.player.atp;
+    g.press("wait");
+
+    expect(g.repairSpend, "repair reported no cost while healing")
+      .toBeGreaterThan(0);
+    // The pool must move by exactly the sum the game claims, within rounding.
+    const claimed = g.genome.atpBalance(g.dungeon.depth) - g.repairSpend;
+    const actual = g.player.atp - atp0;
+    expect(Math.abs(actual - claimed),
+           `the pool moved ${actual.toFixed(2)} but the sum says `
+           + claimed.toFixed(2))
+      .toBeLessThan(0.35);
+  });
+
+  it("a full-health cell pays nothing for repair", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.press("wait");
+    g.player.hp = g.player.maxhp;
+    g.press("wait");
+    expect(g.repairSpend, "an undamaged cell was charged for repair").toBe(0);
+  });
+
+  it("a draining turn is written to the log", async () => {
+    // The recorder tracked everything that HITS you and nothing that DRAINS
+    // you, so "where is my ATP going" was unanswerable from the flight log.
+    //
+    // Driven through `upkeepRepair` directly rather than by building a cell
+    // that loses money. Three attempts at constructing one all came out
+    // POSITIVE -- the economy is generous once anything is expressed -- and a
+    // fixture that cannot reach the state under test is not a test of it.
+    const { upkeepRepair } = await import("../src/repair_turn.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.press("wait");
+    g.player.hp = Math.max(g.player.maxhp - 10, 1);
+
+    // A turn where metabolism made almost nothing.
+    upkeepRepair(g, g.dungeon.depth, 0.1, 0.0);
+    const lines = g.trace.all().filter((e) => e.kind === "atp");
+    expect(lines.length, "nothing was logged while the pool drained")
+      .toBeGreaterThan(0);
+    const l = lines[lines.length - 1]?.what ?? "";
+    for (const part of ["gain", "expression", "repair"]) {
+      expect(l.includes(part), `the log line omits ${part}: "${l}"`).toBe(true);
+    }
+  });
+
+  it("a turn that is NOT draining writes nothing", async () => {
+    // A line every turn would fill the 400-entry ring in seven minutes and
+    // push out everything else in it.
+    const { upkeepRepair } = await import("../src/repair_turn.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.press("wait");
+    g.player.hp = Math.max(g.player.maxhp - 10, 1);
+    const before = g.trace.all().filter((e) => e.kind === "atp").length;
+    upkeepRepair(g, g.dungeon.depth, 40, 0);      // comfortably positive
+    expect(g.trace.all().filter((e) => e.kind === "atp").length,
+           "a healthy turn was logged").toBe(before);
+  });
+
 });
