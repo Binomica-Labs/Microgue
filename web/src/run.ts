@@ -19,10 +19,13 @@ export interface RunState {
   /** Loci ever seen, and organisms ever met -- the field notebook. */
   bestiary: string[];
   library: GeneId[];
+  /** Organisms killed this lineage. Feeds the smallest, saturating term of
+   *  strain adaptation; see strain.ts. */
+  killed: number;
 }
 
 export function newRun(): RunState {
-  return { deepest: 1, deaths: 0, bestiary: [], library: [] };
+  return { deepest: 1, deaths: 0, bestiary: [], library: [], killed: 0 };
 }
 
 export function recordSighting(run: RunState, microbeId: string): boolean {

@@ -22,6 +22,7 @@ import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
 import { drawBody, paletteForPigment, playerSprite, sprite, wallPattern }
   from "./paint.js";
+import { wallPatternSize } from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
 import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
@@ -138,13 +139,24 @@ export function r_draw(_g: Game): void {
     if (!hc) {
       const pat = wallPattern(ctx, s.depth, px, s.floor, s.wall, s.accent);
       if (pat) {
+        // The pattern is rasterised at a ROUNDED tile size, because rebuilding
+        // it on every frame of a pinch would cost more than it saves. The
+        // walls are drawn at the true fractional size. Filling one with the
+        // other lets the texture slide against the tile grid -- 8px of drift
+        // over twenty tiles at minimum zoom, which is the texture visibly
+        // coming unstuck from the wall it belongs to.
+        //
+        // Scaling by px/q maps the pattern's q-pixel cells onto real tiles, so
+        // it stays locked to the grid at any zoom, and lands on a tile
+        // boundary every PATTERN_TILES.
+        const k = px / wallPatternSize(px);
         ctx.save();
         ctx.scale(px, px);
         ctx.clip(wallPath);
-        ctx.scale(1 / px, 1 / px);
+        ctx.scale(k / px, k / px);
         ctx.fillStyle = pat;
-        ctx.fillRect((x0 - 1) * px, (y0 - 1) * px,
-                     (x1 - x0 + 3) * px, (y1 - y0 + 3) * px);
+        ctx.fillRect((x0 - 1) * px / k, (y0 - 1) * px / k,
+                     (x1 - x0 + 3) * px / k, (y1 - y0 + 3) * px / k);
         ctx.restore();
       }
     }

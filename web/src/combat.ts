@@ -32,7 +32,15 @@ export interface TurnWorld {
 }
 
 export interface TurnEvent {
-  readonly kind: "strike" | "move" | "status" | "charge" | "fire";
+  /**
+   * `died` is reported so the CALLER can count it.
+   *
+   * A microbe finished off by a status the player applied -- poison, oxidative
+   * stress -- died in here and nothing outside ever knew. The kill counter
+   * only saw the melee path, so a build that wins by poisoning things earned
+   * no adaptation from any of its kills.
+   */
+  readonly kind: "strike" | "move" | "status" | "charge" | "fire" | "died";
   readonly mob: Mob;
   readonly dmg?: number;
   readonly status?: StatusId;
@@ -69,7 +77,11 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     const selfDmg = tick(m.status);
     if (selfDmg > 0) {
       m.hp = Math.max(m.hp - selfDmg, 0);
-      if (m.hp <= 0) { m.alive = false; continue; }
+      if (m.hp <= 0) {
+        m.alive = false;
+        events.push({ kind: "died", mob: m });
+        continue;
+      }
     }
 
     // Large bodies act less often, and impaired ones less still.

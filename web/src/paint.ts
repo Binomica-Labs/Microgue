@@ -478,6 +478,17 @@ let patternCache: { key: string; pattern: CanvasPattern | null } | null = null;
  * rasterise into -- the caller then fills flat, which is what it did before
  * any of this existed.
  */
+/**
+ * The tile size the pattern is actually rasterised at.
+ *
+ * Exported because the caller has to scale by `px / this` to keep the texture
+ * locked to the tile grid -- the two numbers must agree, and having the caller
+ * re-derive the rounding is how they stop agreeing.
+ */
+export function wallPatternSize(px: number): number {
+  return Math.max(Math.round(Number.isFinite(px) ? px : 1), 1);
+}
+
 export function wallPattern(
   ctx: CanvasRenderingContext2D, depth: number, px: number, floor: string,
   wall = "#6ec78d", accent = "#ffffff",
@@ -487,7 +498,7 @@ export function wallPattern(
   // wall, which is the "small marks become stripes" failure the original
   // threshold was guarding against. NaN-safe form; see minimap.ts.
   if (!(px >= 12)) return null;
-  const q = Math.max(Math.round(px), 1);
+  const q = wallPatternSize(px);
   const mat = materialFor(depth);
   // Every input, not just the ones that happen to differ today. `accent` was
   // read and not keyed: no two strata collide as the palettes stand, which is

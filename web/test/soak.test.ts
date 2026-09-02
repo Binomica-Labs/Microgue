@@ -1947,3 +1947,96 @@ describe("auto-explore stops for threats, not for scenery", () => {
       .toBeNull();
   });
 });
+
+describe("killing advances the strain", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a kill increments the counter and survives a reload", async () => {
+    const { Game } = await import("../src/main.js");
+    const mk = () => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+
+    const g = mk();
+    g.startRun(0);
+    expect(g.run.killed).toBe(0);
+    const m = g.level.mobs.find((x) => x.alive);
+    expect(m).toBeDefined();
+    if (!m) return;
+    m.x = g.player.x + 1;
+    m.y = g.player.y;
+    m.hp = 1;
+    g.attack(m);
+    expect(m.alive, "the fixture did not kill it").toBe(false);
+    expect(g.run.killed, "the kill was not counted").toBe(1);
+
+    g.save();
+    const b = mk();
+    b.startRun(0);
+    expect(b.run.killed, "the kill count did not survive a reload").toBe(1);
+  });
+
+  it("an old save without the counter loads as zero, not NaN", async () => {
+    const { parseSave, SCHEMA } = await import("../src/save.js");
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5, hp: 20, atp: 50,
+      ring: [], bin: [], settings: {}, heldMods: [], turn: 0, stocked: [],
+      integrated: 0, traits: [],
+      run: { deepest: 4, deaths: 1, bestiary: [], library: [] },
+    });
+    expect(s?.run.killed, "a lineage predating the counter broke the bar").toBe(0);
+  });
+});
+
+describe("every way you kill something counts", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("a kill by a status the player applied counts", async () => {
+    // It died inside combat.ts, which is pure and has no run to write to, so
+    // nothing outside ever knew. A build that wins by poisoning things earned
+    // no adaptation from any of its kills.
+    const { apply } = await import("../src/status.js");
+    const g = await game();
+    g.startRun(0);
+    const m = g.level.mobs.find((x) => x.alive);
+    if (!m) return;
+    m.hp = 1;
+    apply(m.status, "oxidative", 3, 5);
+    const before = g.run.killed;
+    for (let i = 0; i < 6 && m.alive; i++) g.mobTurn();
+    expect(m.alive, "the fixture did not kill it").toBe(false);
+    expect(g.run.killed, "a status kill was not counted").toBeGreaterThan(before);
+  });
+
+  // A test for the aura path was written and REMOVED: it drove the counter by
+  // hand rather than the aura, so it asserted 1 === 1. Building a genome that
+  // actually emits H2S is the only honest version and it belongs with the
+  // other genome fixtures, not here.
+
+  it("the counter never counts the same corpse twice", async () => {
+    const g = await game();
+    g.startRun(0);
+    const m = g.level.mobs.find((x) => x.alive);
+    if (!m) return;
+    m.x = g.player.x + 1;
+    m.y = g.player.y;
+    m.hp = 1;
+    g.attack(m);
+    const once = g.run.killed;
+    for (let i = 0; i < 10; i++) g.mobTurn();
+    expect(g.run.killed, "a dead mob kept being counted").toBe(once);
+  });
+});

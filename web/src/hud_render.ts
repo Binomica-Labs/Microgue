@@ -88,6 +88,7 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     // for attention.
     const prog = levelProgress({
       catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
+      killed: _g.run.killed,
     });
     const sy = barTop + lh * 1.15 + gaugeH + 3 * u;
     const sw = hpW * 2 + 8 * u;

@@ -72,7 +72,7 @@ import { LEDGER_CAP, buy, creditFor, genePrice, newLab, offers,
          recordRun, sitesPrice, stockCap, strainPrice } from "../src/lab.js";
 import { parseLab } from "../src/lab_save.js";
 import { LYSIS_MS, phaseAt, shards } from "../src/lysis.js";
-import { levelProgress } from "../src/strain.js";
+import { adaptation, levelProgress } from "../src/strain.js";
 import { frontier, nextExplore, unexplored } from "../src/explore.js";
 import { playerSpeed, speedOf, tick as speedTick } from "../src/speed.js";
 import { REPAIR_GENES, estimate, profileFor, repairTurn }
@@ -5060,14 +5060,37 @@ describe("the gene catalogue is deep enough to hunt in", () => {
 
 
 describe("strain level comes from what the lineage has learned", () => {
-  it("both breadth and depth count", () => {
+  it("breadth, depth AND fighting each count", () => {
+    // Fighting used to advance nothing at all -- only the FIRST kill of a
+    // species counted, as cataloguing. That is the main thing a player does,
+    // and it did not move the bar.
     const deepOnly = strainLevel({ catalogued: 0, deepest: MAX_FLOOR });
     const wideOnly = strainLevel({ catalogued: bio.MICROBES.length, deepest: 1 });
-    const both = strainLevel({ catalogued: bio.MICROBES.length, deepest: MAX_FLOOR });
+    const fightOnly = strainLevel({ catalogued: 0, deepest: 1, killed: 500 });
+    const all = strainLevel({ catalogued: bio.MICROBES.length,
+                              deepest: MAX_FLOOR, killed: 500 });
     expect(deepOnly).toBeGreaterThan(1);
     expect(wideOnly).toBeGreaterThan(1);
-    expect(both, "doing both must beat either").toBeGreaterThan(Math.max(deepOnly, wideOnly));
-    expect(both).toBe(MAX_STRAIN);
+    expect(fightOnly, "killing advances nothing").toBeGreaterThan(1);
+    expect(all, "doing everything must beat any one")
+      .toBeGreaterThan(Math.max(deepOnly, wideOnly, fightOnly));
+    expect(all).toBe(MAX_STRAIN);
+  });
+
+  it("grinding one floor cannot substitute for descending", () => {
+    // The combat term saturates. A linear one would make farming a safe floor
+    // the optimal play, which is the opposite of what the game is about.
+    const grinder = strainLevel({ catalogued: 3, deepest: 2, killed: 100000 });
+    const explorer = strainLevel({ catalogued: bio.MICROBES.length,
+                                   deepest: MAX_FLOOR, killed: 0 });
+    expect(grinder, "grinding reached the cap").toBeLessThan(MAX_STRAIN);
+    expect(explorer, "exploring lost to grinding").toBeGreaterThan(grinder);
+    // And the first kills must be worth noticeably more than the last.
+    const early = adaptation({ catalogued: 0, deepest: 1, killed: 40 })
+      - adaptation({ catalogued: 0, deepest: 1, killed: 0 });
+    const late = adaptation({ catalogued: 0, deepest: 1, killed: 1040 })
+      - adaptation({ catalogued: 0, deepest: 1, killed: 1000 });
+    expect(early).toBeGreaterThan(late * 5);
   });
 
   it("level never leaves its band, whatever the input", () => {
@@ -5373,8 +5396,14 @@ describe("the plasmid grows as the strain learns", () => {
     // `raw - floor(raw)` is 0 at exactly the cap, which would show a fully
     // adapted strain as having made no progress at all.
     expect(levelProgress({ catalogued: 0, deepest: 1 })).toBe(0);
-    expect(levelProgress({ catalogued: bio.MICROBES.length, deepest: MAX_FLOOR }))
-      .toBe(1);
+    // Full adaptation now needs all THREE terms. Breadth and depth together
+    // reach 0.85 of the score, which is level 7 -- a strain that never fought
+    // anything is not fully adapted, which is the point of the combat term.
+    expect(levelProgress({ catalogued: bio.MICROBES.length, deepest: MAX_FLOOR,
+                           killed: 500 })).toBe(1);
+    expect(strainLevel({ catalogued: bio.MICROBES.length, deepest: MAX_FLOOR }),
+           "a strain that never fought should not be fully adapted")
+      .toBeLessThan(MAX_STRAIN);
     for (const p of [{ catalogued: 3, deepest: 3 }, { catalogued: 9, deepest: 12 }]) {
       const v = levelProgress(p);
       expect(v).toBeGreaterThanOrEqual(0);

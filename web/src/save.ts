@@ -90,7 +90,8 @@ export interface SaveData {
   readonly won: boolean;
   /** Lineage state: the notebook, the score, the death count. Omitting this
    *  silently discarded every sighting the moment the tab closed. */
-  readonly run: { deepest: number; deaths: number; bestiary: string[]; library: GeneId[] };
+  readonly run: { deepest: number; deaths: number; killed: number;
+                  bestiary: string[]; library: GeneId[] };
   readonly settings: Settings;
 }
 
@@ -180,7 +181,8 @@ function parsePart(v: unknown): Part | null {
 }
 
 function parseRun(v: unknown): SaveData["run"] {
-  const empty = { deepest: 1, deaths: 0, bestiary: [] as string[], library: [] as GeneId[] };
+  const empty = { deepest: 1, deaths: 0, killed: 0,
+                  bestiary: [] as string[], library: [] as GeneId[] };
   if (!isRecord(v)) return empty;
   const ids = new Set(MICROBES.map((m) => m.id));
   const bestiary = Array.isArray(v["bestiary"])
@@ -197,6 +199,9 @@ function parseRun(v: unknown): SaveData["run"] {
     // taking its strain level with it.
     deepest: Math.min(Math.max(num(v["deepest"], 1), 1), MAX_FLOOR),
     deaths: Math.max(num(v["deaths"], 0), 0),
+    // Absent in an older save simply means a lineage that predates the
+    // counter, not one that never fought.
+    killed: Math.max(num(v["killed"], 0), 0),
     bestiary, library,
   };
 }

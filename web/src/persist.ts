@@ -54,7 +54,7 @@ export function p_save(_g: Game): void {
       stocked: _g.dungeon.visitedLevels()
         .map((l): [number, number] => [l.floor, l.stockedAt]),
       won: _g.won,
-      run: { deepest: _g.run.deepest, deaths: _g.run.deaths,
+      run: { deepest: _g.run.deepest, deaths: _g.run.deaths, killed: _g.run.killed,
              bestiary: [..._g.run.bestiary], library: [..._g.run.library] },
       settings: _g.settings,
     };
@@ -88,7 +88,8 @@ export function p_applySave(_g: Game, s: SaveData): void {
     // Same floor as `upkeep`: the lab's purchased start is a minimum, not a
     // starting value, or reloading a save undid what credit had bought.
     _g.genome.strain = Math.max(
-      strainLevel({ catalogued: s.run.bestiary.length, deepest: s.run.deepest }),
+      strainLevel({ catalogued: s.run.bestiary.length, deepest: s.run.deepest,
+                    killed: s.run.killed }),
       _g.lab.startStrain);
     s.ring.forEach((p, i) => { _g.genome.put(i, p); });
     _g.genome.bin.length = 0;
@@ -103,7 +104,7 @@ export function p_applySave(_g: Game, s: SaveData): void {
     for (const [floor, at] of s.stocked) _g.dungeon.level(floor).stockedAt = at;
     _g.won = s.won;
     _g.run = {
-      deepest: s.run.deepest, deaths: s.run.deaths,
+      deepest: s.run.deepest, deaths: s.run.deaths, killed: s.run.killed,
       bestiary: [...s.run.bestiary], library: [...s.run.library],
     };
   }

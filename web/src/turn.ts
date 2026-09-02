@@ -141,6 +141,11 @@ export function t_mobTurn(_g: Game): void {
         }
         _g.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
                                   _g.turnSeed + e.mob.x));
+      } else if (e.kind === "died") {
+        // A status the player applied finished it. Counted here rather than in
+        // combat.ts, which is pure and has no run to write to.
+        _g.run.killed += 1;
+        _g.trace.push(_g.clock.turn, "attack", `${e.mob.name} succumbed`);
       } else if (e.kind === "status" && e.status) {
         _g.note(`${e.mob.name}: ${STATUS[e.status].name}.`);
         _g.fx.add({ kind: "ring", t0: _g.now, dur: 420, x: _g.player.x,
@@ -192,7 +197,8 @@ export function t_upkeep(_g: Game): void {
     // lab had paid escalating credit for -- from L8 to L1, and three ring
     // positions with it, one turn into the run and with no message.
     const level = Math.max(
-      strainLevel({ catalogued: _g.run.bestiary.length, deepest: _g.run.deepest }),
+      strainLevel({ catalogued: _g.run.bestiary.length, deepest: _g.run.deepest,
+                    killed: _g.run.killed }),
       _g.lab.startStrain);
     // Strain first, THEN the ceiling: reading `genome.strain` before assigning
     // it computed the pool from last turn's strain, so the ATP ceiling lagged
@@ -303,7 +309,13 @@ export function t_upkeep(_g: Game): void {
         if (!m.alive) continue;
         if (Math.abs(m.x - _g.player.x) <= 1 && Math.abs(m.y - _g.player.y) <= 1) {
           m.hp = Math.max(m.hp - aura, 0);
-          if (m.hp <= 0) { m.alive = false; _g.note(`${m.name} dissolved by H2S.`); }
+          if (m.hp <= 0) {
+            m.alive = false;
+            // The aura is the PLAYER's -- it is centred on them and it exists
+            // because of a gene they express. A kill by it is theirs.
+            _g.run.killed += 1;
+            _g.note(`${m.name} dissolved by H2S.`);
+          }
         }
       }
     }
@@ -503,6 +515,10 @@ export function t_attack(_g: Game, m: Mob): void {
     if (m.hp > 0) _g.note(say.hitLine(m.name, dmg, false, _g.turnSeed + dmg));
     if (m.hp <= 0) {
       m.alive = false;
+      // Fighting used to advance nothing: only the FIRST kill of a species
+      // counted, as cataloguing. See strain.ts -- the term saturates, so
+      // this rewards fighting without rewarding grinding.
+      _g.run.killed += 1;
       if (m.elite && Dungeon.isCleared(_g.level)) {
         _g.note("The floor goes quiet. The way down is clear.");
         _g.toasts.push("Floor cleared.", "info", _g.now);

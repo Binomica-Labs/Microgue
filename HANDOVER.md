@@ -1,3 +1,64 @@
+# v1.5.0 — texture that stays put, and fighting that counts
+
+## Only one of three kill paths counted
+
+Adding the combat term to strain, I wired it into the melee path and stopped
+there. A microbe finished off by a STATUS the player applied -- poison,
+oxidative stress -- died inside `combat.ts`, which is pure and has no run to
+write to, so nothing outside ever knew. A build that wins by poisoning things
+earned no adaptation from any of its kills. The player's own H2S aura was the
+same.
+
+`combat.ts` reports a `died` event now and `turn.ts` counts it; the aura counts
+its own. `spec` covers the status path and that a corpse is never counted
+twice. Audited all four `alive = false` sites: three are mobs and all three are
+counted, the fourth is a projectile expiring.
+
+The shape of the mistake is worth naming: a new rule was added at the place the
+old code happened to be, rather than at every place the rule applies. The
+question to ask is "where does this become true", not "where am I editing".
+
+## A test I wrote and deleted
+
+The aura test drove the counter by hand rather than the aura, so it asserted
+1 === 1. Deleted rather than shipped, with a note where it was. A test that
+cannot fail is worse than a gap, because the gap is at least visible.
+
+## The texture came unstuck when you zoomed
+
+The pattern is rasterised at a ROUNDED tile size, because rebuilding it on
+every frame of a pinch would cost more than it saves. The walls are drawn at
+the true fractional size. Filling one with the other let the texture slide
+against the tile grid: at minimum zoom a tile is 9.60px and the pattern cell
+was 10px, which is 8px of drift over twenty tiles -- the texture visibly
+detaching from the wall it belongs to.
+
+Scaling the fill by `px / q` maps the pattern's cells onto real tiles. Zero
+drift at every zoom, and it still lands on a tile boundary every
+PATTERN_TILES. `wallPatternSize` is exported so the caller cannot re-derive
+the rounding differently, which is exactly how the two got out of step.
+
+## Fighting advanced nothing
+
+Only the FIRST kill of a species counted, as cataloguing. Every one after it
+was worth nothing toward adaptation -- so the main thing a player does did not
+move the bar, and the bar looked broken even though it worked.
+
+`run.killed` now feeds a THIRD term. Weights went 55/45 to 45/40/15, and it
+SATURATES: half the term at 40 kills, never all of it. A linear term would make
+farming one safe floor the optimal play, which is the opposite of what the game
+is about. `spec` asserts a grinder with a hundred thousand kills on floor 2
+still loses to an explorer who never fought.
+
+A consequence worth knowing: full adaptation now needs all three. Breadth and
+depth together reach 0.85 of the score, which is level 7. A strain that never
+fought anything is not fully adapted.
+
+**`levelProgress` and `strainLevel` each computed their own score** with the
+weights kept in step by hand. That is how a combat term added to one would have
+silently not appeared in the other. There is one `adaptation()` now and both
+call it.
+
 # v1.4.0 — elites, drops that never dry, a bar that says what it is
 
 ## Gene drops went dry, permanently

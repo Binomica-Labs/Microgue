@@ -19,6 +19,20 @@ export interface Progress {
   readonly catalogued: number;
   /** Deepest floor reached. */
   readonly deepest: number;
+  /**
+   * Organisms killed this run.
+   *
+   * Fighting used to advance nothing at all: only the FIRST kill of a species
+   * counted, as cataloguing, and every one after it was worth nothing toward
+   * adaptation. That is the main thing a player does, and it did not move the
+   * bar -- so the bar looked broken even though it worked.
+   *
+   * Deliberately the smallest of the three terms, and it SATURATES. A strain
+   * adapts by seeing new things and going deeper; killing the same drifter two
+   * hundred times is not adaptation, and a linear term would make grinding one
+   * safe floor the optimal play.
+   */
+  readonly killed?: number;
 }
 
 /**
@@ -28,15 +42,36 @@ export interface Progress {
  * shallow, and so does cataloguing the surface exhaustively. The column has to
  * be understood as well as survived.
  */
-export function strainLevel(p: Progress): number {
+/** Kills at which the combat term reaches half its value. */
+export const KILL_HALF = 40;
+
+/**
+ * How adapted the strain is, 0..1.
+ *
+ * ONE definition, used by both the level and the bar. They each computed their
+ * own and the weights had to be kept in step by hand -- which is how a combat
+ * term added to one would have silently not appeared in the other.
+ */
+export function adaptation(p: Progress): number {
   // Math.min/max propagate NaN, so the finiteness guard has to come first.
   const c = Number.isFinite(p.catalogued) ? p.catalogued : 0;
   const d = Number.isFinite(p.deepest) ? p.deepest : 1;
+  const raw = p.killed ?? 0;
+  const k = Number.isFinite(raw) ? raw : 0;
   const catalogued = Math.min(Math.max(c, 0), MICROBES.length);
   const deepest = Math.min(Math.max(d, 1), MAX_FLOOR);
+  const killed = Math.max(k, 0);
+
   const breadth = catalogued / MICROBES.length;
   const depth = (deepest - 1) / (MAX_FLOOR - 1);
-  const score = breadth * 0.55 + depth * 0.45;
+  // Saturating: half the term at KILL_HALF kills, and it never reaches all of
+  // it. Grinding one safe floor cannot substitute for descending.
+  const combat = killed / (killed + KILL_HALF);
+  return breadth * 0.45 + depth * 0.40 + combat * 0.15;
+}
+
+export function strainLevel(p: Progress): number {
+  const score = adaptation(p);
   return Math.min(Math.max(Math.floor(score * MAX_STRAIN) + 1, 1), MAX_STRAIN);
 }
 
@@ -85,12 +120,7 @@ export function describeLevel(level: number): string {
  * can be drawn -- what was missing was visibility, not a mechanic.
  */
 export function levelProgress(p: Progress): number {
-  const c = Number.isFinite(p.catalogued) ? p.catalogued : 0;
-  const d = Number.isFinite(p.deepest) ? p.deepest : 1;
-  const catalogued = Math.min(Math.max(c, 0), MICROBES.length);
-  const deepest = Math.min(Math.max(d, 1), MAX_FLOOR);
-  const score = (catalogued / MICROBES.length) * 0.55
-    + ((deepest - 1) / (MAX_FLOOR - 1)) * 0.45;
+  const score = adaptation(p);
   // At the cap the bar reads full, not empty: `raw - floor(raw)` is 0 at
   // exactly 8.0, which would show a fully adapted strain as having made no
   // progress at all.
