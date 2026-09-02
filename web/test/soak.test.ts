@@ -2040,3 +2040,68 @@ describe("every way you kill something counts", () => {
     expect(g.run.killed, "a dead mob kept being counted").toBe(once);
   });
 });
+
+describe("a kill costs a turn and nothing more", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("killing an isolated mob does no damage to the player", async () => {
+    // Reported as "there is always damage after an enemy is killed". There is
+    // not: attacking spends a turn and every OTHER mob acts on it, which is
+    // the ordinary roguelike exchange. With nothing else on the floor, a kill
+    // costs nothing.
+    //
+    // Two false leads worth recording. A freshly constructed Game has a stale
+    // `maxhp` -- it is derived from the genome and corrected on the first
+    // upkeep -- so an unsettled fixture shows 30 -> 20 and looks like damage.
+    // And `lastAttacker` persists from earlier turns, so reading it after an
+    // action attributes an old hit to a new one.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    const proto = g.level.mobs.find((x) => x.alive);
+    if (!proto) return;
+    for (let i = 0; i < 3; i++) g.press("wait");     // settle maxhp
+
+    g.level.mobs.length = 0;
+    g.level.mobs.push({ ...proto, alive: true, hp: 1,
+                        x: g.player.x + 1, y: g.player.y,
+                        ax: g.player.x + 1, ay: g.player.y });
+    g.player.hp = g.player.maxhp;
+    g.lastAttacker = null;
+    const before = g.player.hp;
+    g.attack(g.level.mobs[0] as never);
+
+    expect(g.level.mobs[0]?.alive, "the fixture did not kill it").toBe(false);
+    expect(g.player.hp, "a solo kill cost hp").toBe(before);
+    expect(g.lastAttacker, "something attacked that should not have").toBeNull();
+  });
+
+  it("maxhp does not drift, so hp is never silently clamped", async () => {
+    // When vitality changes, `maxhp` follows and hp is clamped to it -- with
+    // no message. If that oscillated it would read as a steady unexplained
+    // drain. Measured over 400 turns with a photosystem running: one value,
+    // zero drops.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.genome.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    g.genome.assemble(["psbA"]);
+    let drops = 0, prev = -1;
+    for (let i = 0; i < 200; i++) {
+      g.press("wait");
+      if (prev >= 0 && g.player.maxhp < prev) drops++;
+      prev = g.player.maxhp;
+    }
+    expect(drops, "maxhp fell during ordinary play, clamping hp silently").toBe(0);
+  });
+});

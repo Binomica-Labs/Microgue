@@ -8,6 +8,7 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { BARRIERS } from "../src/barrier.js";
+import { CLASSES, CLASS_IDS } from "../src/classes.js";
 import { ELITES, ELITE_IDS, eliteCount, promoteSome } from "../src/elite.js";
 import { miniBox, miniView } from "../src/minimap.js";
 import { wallPattern } from "../src/paint.js";
@@ -7151,5 +7152,70 @@ describe("genes keep dropping", () => {
     // At least one must be a genuine downside somewhere.
     expect(ELITE_IDS.some((id) => ELITES[id].atk < 1),
            "no elite trades attack for anything").toBe(true);
+  });
+});
+
+describe("strain classes", () => {
+  it("every class can lay down its own opening operon", () => {
+    // A class whose starting genes do not fit its own chromosome would fail at
+    // the one moment it matters, and only for that class.
+    for (const id of CLASS_IDS) {
+      const c = CLASSES[id];
+      const p = new Plasmid();
+      p.integrated = Math.max(c.sites, 0);
+      for (const g of c.genes) {
+        p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      const r = p.assemble([...c.genes]);
+      expect(r.ok, `${c.name} cannot build its own opening: `
+        + (r.ok ? "" : r.err)).toBe(true);
+      // Native means "worth having here", and for the phototroph that is a
+      // range over which output DECLINES rather than one where it is flat. The
+      // testable claim is the top of the range, where it should be at its
+      // best.
+      for (const g of c.genes) {
+        expect(p.expression(g, c.native[1]),
+               `${c.name} does not express ${g} at the deepest depth it `
+               + "claims to be native to").toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("every starting gene is a real gene", () => {
+    for (const id of CLASS_IDS) {
+      for (const g of CLASSES[id].genes) {
+        expect(Object.prototype.hasOwnProperty.call(bio.GENES, g),
+               `${id} starts with "${g}", which is not a gene`).toBe(true);
+      }
+    }
+  });
+
+  it("each class is a trade, not a tier", () => {
+    // Every one must name a real cost. A class with only upsides is the
+    // correct pick and the others are decoration.
+    for (const id of CLASS_IDS) {
+      const c = CLASSES[id];
+      expect(c.pros.length, `${id} has no advantages`).toBeGreaterThan(0);
+      expect(c.cons.length, `${id} has no cost`).toBeGreaterThan(0);
+      expect(c.note.length, `${id} has no organism behind it`)
+        .toBeGreaterThan(40);
+      expect(c.native[0]).toBeLessThanOrEqual(c.native[1]);
+    }
+    // And they must not all be native to the same place, or the choice is
+    // cosmetic.
+    const spans = CLASS_IDS.map((id) => CLASSES[id].native.join("-"));
+    expect(new Set(spans).size, "every class is native to the same depths")
+      .toBeGreaterThan(2);
+  });
+
+  it("the chromosome sizes differ, and none is unplayable", () => {
+    for (const id of CLASS_IDS) {
+      const p = new Plasmid();
+      p.integrated = Math.max(CLASSES[id].sites, 0);
+      expect(p.usableSlots, `${id} has no room to build`).toBeGreaterThan(6);
+      expect(p.free(), `${id} cannot fit an operon`).toBeGreaterThanOrEqual(3);
+    }
+    expect(new Set(CLASS_IDS.map((id) => CLASSES[id].sites)).size,
+           "every class starts with the same chromosome").toBeGreaterThan(1);
   });
 });

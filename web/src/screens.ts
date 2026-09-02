@@ -24,7 +24,7 @@ export type Wrap = (text: string, max: number) => string[];
 /** Title screen: the column as a backdrop, one card per culture. */
 export function drawSplash(
   ctx: CanvasRenderingContext2D, W: number, H: number,
-  ins: Insets, u: number, slotBoxes: Box[], names: readonly string[],
+  ins: Insets, u: number, slotBoxes: Box[],
   lab: Lab | null = null,
 ): Box {
   ctx.fillStyle = "#050d0a";
@@ -86,10 +86,17 @@ export function drawSplash(
       ctx.fillText(`D${String(info.depth)} ${st.name}  ·  ${String(info.genes)} loci`,
                    box.x + 14 * u, box.y + 45 * u);
     } else {
-      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      // An EMPTY slot says it is empty. It used to preview a name from the
+      // pool -- "new culture  K-12" -- which reads as a save that already
+      // exists and belongs to someone else. A blank slot has no strain, no
+      // designation, and nothing about it to explain.
+      ctx.fillStyle = "rgba(255,255,255,0.38)";
       ctx.font = `${13 * u}px ui-monospace,monospace`;
-      ctx.fillText(`new culture  ${names[i % names.length] ?? ""}`,
-                   box.x + 14 * u, box.y + 36 * u);
+      ctx.fillText("empty", box.x + 14 * u, box.y + 30 * u);
+      ctx.fillStyle = "rgba(255,255,255,0.28)";
+      ctx.font = `${10 * u}px ui-monospace,monospace`;
+      ctx.fillText("tap to inoculate a new culture",
+                   box.x + 14 * u, box.y + 47 * u);
     }
   }
 

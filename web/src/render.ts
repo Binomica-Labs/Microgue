@@ -32,7 +32,6 @@ import { drawButtons } from "./buttons.js";
 import { drawContainer, drawLab, drawNotes, drawResearch, drawSplash, ellipsise }
   from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
-import { NAME_POOL } from "./saves.js";
 import { Effects, easeOutQuad }
   from "./fx.js";
 import { Toasts } from "./toast.js";
@@ -55,7 +54,7 @@ export function r_draw(_g: Game): void {
     // diagnostic, which is precisely the failure this was meant to prevent.
     if (_g.showSplash || !_g.started) {
       _g.closeBox = drawSplash(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
-        Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, NAME_POOL, _g.lab);
+        Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, _g.lab);
       _g.drawToasts(W, H);
       return;
     }
