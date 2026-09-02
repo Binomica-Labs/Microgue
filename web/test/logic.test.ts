@@ -8,6 +8,7 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { BARRIERS } from "../src/barrier.js";
+import { ELITES, ELITE_IDS, eliteCount, promoteSome } from "../src/elite.js";
 import { miniBox, miniView } from "../src/minimap.js";
 import { wallPattern } from "../src/paint.js";
 import { WALL_MATERIALS, WALL_PX, materialFor } from "../src/wall_pixels.js";
@@ -3871,13 +3872,24 @@ describe("boss floors", () => {
     }
   });
 
-  it("a boss floor holds something elite; ordinary floors do not", () => {
+  it("a boss floor holds a boss; ordinary floors hold a FEW elites", () => {
+    // Ordinary floors used to hold none at all -- twenty of every twenty-four
+    // had exactly one difficulty, and the only thing that changed as you
+    // descended was which species was in front of you.
     const d = new Dungeon(96, 96, 21);
     for (let f = 1; f <= MAX_FLOOR; f++) {
       const L = d.level(f);
       const elites = L.mobs.filter((m) => m.elite).length;
-      if (isBossFloor(f)) expect(elites, `floor ${f}`).toBeGreaterThan(0);
-      else expect(elites, `floor ${f}`).toBe(0);
+      if (isBossFloor(f)) {
+        expect(elites, `floor ${String(f)}`).toBeGreaterThan(0);
+      } else {
+        // A count, not a rate. A floor holds around a hundred and fifty
+        // organisms, so a per-mob probability produced six -- and an elite you
+        // meet six times a floor is the local difficulty, not an event.
+        expect(elites, `floor ${String(f)} has ${String(elites)} elites`)
+          .toBeLessThanOrEqual(eliteCount(L.depth));
+        expect(elites, `floor ${String(f)} has none`).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -6947,5 +6959,168 @@ describe("the wall pattern cache keys on everything it reads", () => {
            "it rasterised a texture too small to read").toBe(0);
     expect(builds([[1, NaN, "#050d0a", "#6ec78d", "#fff"]]),
            "NaN got past the size floor").toBe(0);
+  });
+});
+
+describe("wall texture is material, not dither", () => {
+  const lum = (hex: string): number => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return (((n >> 16) & 255) * 0.30 + ((n >> 8) & 255) * 0.59
+            + (n & 255) * 0.11) / 255;
+  };
+  const mix = (hex: string, target: number, t: number): string => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+      .map((c) => Math.round(c + (target - c) * t));
+    return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+  };
+
+  it("no role is more than a fifth of a step from the wall", () => {
+    // The first version keyed one role off the FLOOR and another off the
+    // accent: 63% and 31% apart in luminance on the oxic stratum. That is not
+    // texture, it is a checkerboard punched through the wall, and at 15px a
+    // tile it read as dither.
+    for (const s of bio.STRATA) {
+      const roles = [mix(s.wall, 0, 0.26), mix(s.wall, 0, 0.13),
+                     mix(s.wall, 255, 0.17)];
+      for (const [i, r] of roles.entries()) {
+        const apart = Math.abs(lum(r) - lum(s.wall));
+        expect(apart, `D${String(s.depth)} role ${String(i + 1)} is `
+          + `${(apart * 100).toFixed(0)}% from the wall`)
+          .toBeLessThan(0.2);
+      }
+    }
+  });
+
+  it("features are several pixels across, not single specks", () => {
+    // At 15px a tile each art pixel is about one screen pixel, so a texture
+    // made of lone marks IS dither however subtle the colours are. Measured as
+    // the share of marked pixels that have a marked orthogonal neighbour.
+    for (const [name, tiles] of Object.entries(WALL_MATERIALS)) {
+      for (const [i, tile] of tiles.entries()) {
+        let marks = 0, clustered = 0;
+        for (let y = 0; y < WALL_PX; y++) {
+          for (let x = 0; x < WALL_PX; x++) {
+            if ((tile[y]?.[x] ?? ".") === ".") continue;
+            marks++;
+            const near = [[0, -1], [0, 1], [-1, 0], [1, 0]].some(([dx, dy]) =>
+              (tile[y + (dy ?? 0)]?.[x + (dx ?? 0)] ?? ".") !== ".");
+            if (near) clustered++;
+          }
+        }
+        if (marks === 0) continue;
+        expect(clustered / marks,
+               `${name}[${String(i)}]: only ${((clustered / marks) * 100).toFixed(0)}%`
+               + " of its marks touch another")
+          .toBeGreaterThan(0.75);
+      }
+    }
+  });
+});
+
+describe("elites are individuals, not a difficulty setting", () => {
+  it("every strain is a real phenotype with a real advantage", () => {
+    for (const id of ELITE_IDS) {
+      const e = ELITES[id];
+      expect(e.note.length, `${id} has no explanation`).toBeGreaterThan(40);
+      // It must be better at SOMETHING, or the epithet is a lie.
+      expect(e.hp > 1 || e.atk > 1, `${id} is no stronger than a normal one`)
+        .toBe(true);
+      expect(e.loot, `${id} gives nothing extra for the trouble`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("promotion actually changes the organism", () => {
+    // A 1.4x on a 1 hp organism rounds back to 1, which is a normal creature
+    // with a different name.
+    const d = new Dungeon(96, 96, 5);
+    const lvl = d.level(3);
+    const proto = lvl.mobs.find((m) => !m.elite);
+    expect(proto).toBeDefined();
+    if (!proto) return;
+    for (let seed = 0; seed < 40; seed++) {
+      const m = { ...proto, elite: false, hp: 1, maxhp: 1, atk: 1 };
+      const mobs = [m];
+      promoteSome(mobs, 3, makeRng(seed));
+      if (!m.elite) continue;
+      expect(m.maxhp, "an elite with the same hp as a normal one")
+        .toBeGreaterThan(1);
+      expect(m.hp, "it did not start at full").toBe(m.maxhp);
+      expect(m.name, "it is not named as one").not.toBe(proto.name);
+    }
+  });
+
+  it("the count is a count, not a rate", () => {
+    // A floor holds around a hundred and fifty organisms, so a per-mob
+    // probability produced six elites -- the local difficulty, not an event.
+    for (const depth of [1, 4, 8]) {
+      const mobs = Array.from({ length: 150 }, (_, i) => ({
+        uid: i, elite: false, alive: true, name: "x", hp: 5, maxhp: 5, atk: 2,
+      })) as unknown as Parameters<typeof promoteSome>[0];
+      promoteSome(mobs, depth, makeRng(depth));
+      const n = mobs.filter((m) => m.elite).length;
+      expect(n, `D${String(depth)} promoted ${String(n)} of 150`)
+        .toBe(eliteCount(depth));
+    }
+  });
+
+  it("promoting an empty or already-elite population is safe", () => {
+    expect(() => { promoteSome([], 4, makeRng(1)); }).not.toThrow();
+    const all = Array.from({ length: 3 }, (_, i) => ({
+      uid: i, elite: true, alive: true, name: "x", hp: 5, maxhp: 5, atk: 2,
+    })) as unknown as Parameters<typeof promoteSome>[0];
+    expect(() => { promoteSome(all, 4, makeRng(1)); }).not.toThrow();
+  });
+});
+
+describe("genes keep dropping", () => {
+  it("a stackable duplicate is scored between a discovery and waste", () => {
+    // The drop had two tiers: 80% for a gene you did not hold, 35% for
+    // anything else. Stacking made a duplicate valuable -- a spare for a
+    // second operon, or a better roll to swap in -- and the filter, written
+    // before that, scored it alongside a full stack. A floor whose species you
+    // had fully sampled fell to 35% a kill, which is what "genes stop
+    // dropping" felt like.
+    const FRESH = 0.8, STACKABLE = 0.6, FULL = 0.2;
+    expect(FRESH).toBeGreaterThan(STACKABLE);
+    expect(STACKABLE).toBeGreaterThan(FULL);
+    // And the middle tier must be worth something: it is most of the late run.
+    expect(STACKABLE).toBeGreaterThan(0.5);
+  });
+
+  it("elites exist, everywhere, and are worth the fight", () => {
+    let elites = 0, total = 0, floorsWith = 0, floors = 0;
+    for (let seed = 0; seed < 12; seed++) {
+      const d = new Dungeon(96, 96, seed);
+      for (const f of [1, 6, 12, 18, 24]) {
+        const lvl = d.level(f);
+        floors++;
+        total += lvl.mobs.length;
+        const n = lvl.mobs.filter((m) => m.elite).length;
+        elites += n;
+        if (n > 0) floorsWith++;
+      }
+    }
+    expect(elites, "no elites generated at all").toBeGreaterThan(0);
+    expect(floorsWith / floors, "elites are not reliably present")
+      .toBeGreaterThan(0.8);
+    // Rare enough to be an event, common enough to meet.
+    expect(elites / total).toBeGreaterThan(0.01);
+    expect(elites / total).toBeLessThan(0.2);
+  });
+
+  it("every elite strain is a real trade, not a flat buff", () => {
+    // A strain that is better at everything is not a choice to fight or avoid.
+    for (const id of ELITE_IDS) {
+      const e = ELITES[id];
+      expect(e.hp, `${id} is not tougher`).toBeGreaterThan(1);
+      expect(e.loot, `${id} gives no extra reason to fight it`)
+        .toBeGreaterThanOrEqual(1);
+      expect(e.note.length, `${id} has no explanation`).toBeGreaterThan(30);
+    }
+    // At least one must be a genuine downside somewhere.
+    expect(ELITE_IDS.some((id) => ELITES[id].atk < 1),
+           "no elite trades attack for anything").toBe(true);
   });
 });

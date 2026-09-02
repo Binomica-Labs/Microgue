@@ -5,6 +5,7 @@
 // plasmid, the effect queue and the view all at once, so they take the Game.
 
 export { r_drawFx } from "./fx_render.js";
+import { eliteHalo } from "./fx_render.js";
 export { r_drawHud } from "./hud_render.js";
 import { r_drawOffer } from "./hud_render.js";
 import { BIN_CAP } from "./plasmid.js";
@@ -208,6 +209,7 @@ export function r_draw(_g: Game): void {
           drawBody(ctx, img, bx + w.dx * px, by + w.dy * px, px * scale * spread,
                    m.facing, m.heading, sq, w.alpha * 0.7, "east", stretchOf(fp));
         }
+        if (m.elite) eliteHalo(ctx, bx, by, px, _g.now, m.uid);
         drawBody(ctx, img, bx, by, px * scale * spread, m.facing, m.heading, sq,
                  1, "east", stretchOf(fp));
       } else {

@@ -732,3 +732,25 @@ describe("a frame costs what it should", () => {
       .toBeLessThanOrEqual(1);
   });
 });
+
+describe("the HUD's own labels are on screen", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each(VIEWPORTS)("%s (%ix%i): the strain label is visible", async (name, W, H) => {
+    // The bar has been advancing and granting ring positions since the first
+    // floor. It is labelled -- but a label drawn past the bottom edge is the
+    // same as no label, and that is indistinguishable from decoration.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    t.texts.length = 0;
+    g.frame(100);
+    const label = t.texts.find((x) => x.text.startsWith("strain L")
+      || x.text.startsWith("fully adapted"));
+    expect(label, `${name}: no strain label drawn at all`).toBeDefined();
+    if (!label) return;
+    expect(label.y, `${name}: the strain label is drawn at y=`
+      + `${Math.round(label.y)} on a ${String(H)}px screen`)
+      .toBeLessThanOrEqual(H - 4);
+  });
+});

@@ -41,6 +41,7 @@ import { t_visibleHostile } from "./sight.js";
 export { t_look, t_visibleHostile } from "./sight.js";
 import { MAX_STACK, countOf, fullStackIndex, stackIndex, stacks }
   from "./stack.js";
+import { ELITES, type EliteStrain } from "./elite.js";
 import { quality } from "./allele.js";
 import { distanceTo } from "./pursuit.js";
 import { headingOf, turnToward } from "./motion.js";
@@ -514,14 +515,59 @@ export function t_attack(_g: Game, m: Mob): void {
       // Remains fall where the cell died. Nothing is picked up for free.
       const loot: Item[] = [];
       const rng = makeRng(_g.turnSeed + m.x * 31 + m.y);
-      const pool = m.genes.filter(
+      // Prefer what you do NOT have, but never go dry.
+      //
+      // This used to drop only unowned genes, so an organism stopped giving
+      // anything once you held its three-to-twelve loci -- and the commonest
+      // species on a floor went silent first. Stacking then made a duplicate
+      // valuable in its own right: a spare for a second operon, or a better
+      // roll to swap in. The filter was written before that and turned away
+      // exactly the drops stacking exists to accept.
+      // THREE tiers, not two. The comment above describes stacking correctly
+      // and the code did not follow it: a gene you hold one of can still take
+      // two more -- a spare for a second operon, or a better roll to swap in --
+      // and it was being scored as waste alongside a full stack.
+      //
+      // Measured before this: a floor whose species you had fully sampled fell
+      // from 80% to 35% a kill, which is what "genes stop dropping" felt like.
+      const room = (g: bio.GeneId): boolean => {
+        const held = _g.genome.bin.find(
+          (p) => p.kind === "gene" && p.id === g);
+        return held === undefined || countOf(held) < MAX_STACK;
+      };
+      const fresh = m.genes.filter(
         (g) => !_g.genome.has(g) && !_g.genome.inBin(g));
+      const stackable = m.genes.filter((g) => !fresh.includes(g) && room(g));
+      const pool = fresh.length > 0 ? fresh
+        : stackable.length > 0 ? stackable
+        : m.genes;
       const gene = pool[rng.int(Math.max(pool.length, 1))];
-      if (gene !== undefined && rng.next() < 0.8) {
+      // An elite has been dividing on the substrate longer, so it carries more
+      // of it. This is the reason to fight one rather than walk past.
+      const strain = m.elite ? m.eliteStrain : undefined;
+      const bonus = strain !== undefined && strain in ELITES
+        ? ELITES[strain as EliteStrain].loot : 0;
+      // A discovery, then a spare, then a copy you cannot hold. Only the last
+      // is genuinely near-worthless, and only that one is rare.
+      const chance = fresh.length > 0 ? 0.8
+        : stackable.length > 0 ? 0.6
+        : 0.2;
+      if (gene !== undefined && rng.next() < chance) {
         loot.push({ kind: "cassette", gene, allele: rollAllele(rng, _g.dungeon.depth) });
       }
+      // Extra cassettes for an elite, rolled at depth like any other. A
+      // second copy of something you hold now STACKS rather than being wasted,
+      // which is what makes this a reward and not a consolation.
+      for (let i = 0; i < bonus; i++) {
+        const extra = m.genes[rng.int(m.genes.length)];
+        if (extra !== undefined) {
+          loot.push({ kind: "cassette", gene: extra,
+                      allele: rollAllele(rng, _g.dungeon.depth) });
+        }
+      }
+
       const subs = substratesAt(_g.dungeon.depth);
-      const n = 1 + rng.int(2);
+      const n = 1 + rng.int(2) + (m.elite ? 1 : 0);
       for (let i = 0; i < n; i++) {
         const id = subs[rng.int(subs.length)];
         if (id) loot.push({ kind: "substrate", id });

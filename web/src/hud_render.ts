@@ -9,7 +9,7 @@ import { MAX_FLOOR } from "./dungeon.js";
 import { GENES } from "./biology.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
 import { timeName } from "./cycle.js";
-import { MAX_STRAIN, levelProgress } from "./strain.js";
+import { MAX_STRAIN, bonusSlots, levelProgress } from "./strain.js";
 import { t_visibleHostile } from "./turn.js";
 import { ellipsise } from "./screens.js";
 import { Dungeon } from "./dungeon.js";
@@ -95,6 +95,27 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     ctx.fillRect(barX, sy, sw, Math.max(2 * u, 2));
     ctx.fillStyle = _g.genome.strain >= MAX_STRAIN ? "#7fe0a4" : "#cfe04a";
     ctx.fillRect(barX, sy, sw * prog, Math.max(2 * u, 2));
+
+    // Say what the bar IS. It has been advancing and granting ring positions
+    // and headroom since the first floor, and nothing on screen said so -- an
+    // unlabelled bar is indistinguishable from decoration.
+    // Legible, not merely present. 7.5px of #7f9488 on black is on screen
+    // at every viewport and still invisible enough to be asked "is that
+    // bar doing anything?". A label nobody can read is decoration.
+    ctx.font = `${9 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = _g.genome.strain >= MAX_STRAIN ? "#7fe0a4" : "#b9cbb0";
+    const slots = bonusSlots(_g.genome.strain);
+    const next = _g.genome.strain >= MAX_STRAIN
+      ? "fully adapted"
+      : `strain L${String(_g.genome.strain)} \u2192 L${String(_g.genome.strain + 1)}`;
+    ctx.fillText(
+      // What it has GRANTED, not just where it is: the bar earns ring
+      // positions, and that was never named on screen.
+      `${next}${slots > 0 ? `  +${String(slots)} site`
+        + (slots === 1 ? "" : "s") : ""}`,
+      barX, sy + 4 * u);
 
     // Explore is unavailable while anything is in view. Greyed rather than
     // hidden: a button that vanishes is harder to learn than one that dims.

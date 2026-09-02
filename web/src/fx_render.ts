@@ -95,3 +95,31 @@ export function r_drawFx(_g: Game, px: number): void {
     ctx.globalAlpha = 1;
     ctx.restore();
   }
+
+/**
+ * The mark on an elite.
+ *
+ * They were drawn identically to everything else, which made 5.5% of the
+ * population -- with up to 3.4x the hp and triple the loot -- unreadable. You
+ * could not tell what you were picking a fight with, or what was worth picking
+ * one with.
+ *
+ * A halo rather than a recolour: the pigment is already saying what the
+ * organism IS, and overwriting it to say something else would cost the more
+ * useful signal. Phased by `uid` so a group does not pulse in unison.
+ */
+export function eliteHalo(
+  ctx: CanvasRenderingContext2D,
+  bx: number, by: number, px: number, now: number, uid: number,
+): void {
+  const puls = 0.88 + Math.sin(now / 540 + uid) * 0.12;
+  const r0 = px * 0.52 * puls;
+  const gr = ctx.createRadialGradient(bx, by, px * 0.16, bx, by, r0);
+  gr.addColorStop(0, "rgba(255,210,120,0.00)");
+  gr.addColorStop(0.62, "rgba(255,196,96,0.30)");
+  gr.addColorStop(1, "rgba(255,196,96,0)");
+  ctx.fillStyle = gr;
+  ctx.beginPath();
+  ctx.arc(bx, by, r0, 0, Math.PI * 2);
+  ctx.fill();
+}

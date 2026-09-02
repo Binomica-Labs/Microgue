@@ -8,6 +8,7 @@ import { SIZES, type Size } from "./behaviour.js";
 import { covers, tilesOf } from "./footprint.js";
 import { makeSight, type Sight } from "./fov.js";
 import { carveRooms, planFor, ROOM_STYLE, type Room } from "./rooms.js";
+import { promoteSome } from "./elite.js";
 
 /**
  * A relict that could not be sealed is not a relict.
@@ -123,6 +124,11 @@ export class Dungeon {
                          sight: makeSight(grid.w, grid.h) };
     this.sealRooms(lvl, rng);
     this.populate(lvl, rng);
+    // A few individuals doing better than their neighbours. After populating,
+    // so the number is a COUNT rather than a function of how crowded the floor
+    // came out. Not on a boss floor: the boss IS the elite there, and a second
+    // kind of exceptional creature beside it reads as noise.
+    if (!lvl.boss) promoteSome(lvl.mobs, lvl.depth, rng);
     this.stockRooms(lvl, rng);
     if (lvl.boss) this.placeBoss(lvl, rng);
     return lvl;

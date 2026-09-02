@@ -510,10 +510,20 @@ export function wallPattern(
       // at 15px a tile each art pixel is under a screen pixel wide.
       const unit = q / WALL_PX;
       const dot = Math.max(Math.ceil(unit), 1);
+      // All three are variations OF THE WALL, gently.
+      //
+      // The first version keyed role 1 off the FLOOR colour and role 3 off the
+      // accent, which on the oxic stratum put a near-black and a near-white
+      // against a mid-green: 63% and 31% apart in luminance. That is not
+      // texture, it is a checkerboard punched through the wall, and at 15px a
+      // tile it read as harsh dither rather than as sediment.
+      //
+      // Material shows as a few percent of shading. Anything more and the
+      // silhouette stops being the thing you see.
       const roles: Record<string, string> = {
-        "1": mix(floor, 0, 0.35),          // pore: darker than the floor
-        "2": mix(wall, 0, 0.30),           // grain: the wall, shaded
-        "3": mix(accent, 255, 0.25),       // lit face
+        "1": mix(wall, 0, 0.26),           // pore: a shadow between grains
+        "2": mix(wall, 0, 0.13),           // grain: barely darker
+        "3": mix(wall, 255, 0.17),         // lit: the upper face of one
       };
       for (let ty = 0; ty < PATTERN_TILES; ty++) {
         for (let tx = 0; tx < PATTERN_TILES; tx++) {

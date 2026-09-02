@@ -50,6 +50,9 @@ export interface Microbe extends Body {
   /** Part of what holds a boss floor. The way down stays sealed while any
    *  elite is alive, which is what makes a boss a gate rather than scenery. */
   elite: boolean;
+  /** Which elite phenotype, for the death line and the tint. See
+   *  elite.ts. Absent on a boss, which is its own thing. */
+  eliteStrain?: string;
   /** Unspent fraction of a move, carried across turns. See speed.ts. */
   banked?: number;
   /** Turns until it may fire again, and how long it has been winding up. */

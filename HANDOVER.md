@@ -1,3 +1,47 @@
+# v1.4.0 — elites, drops that never dry, a bar that says what it is
+
+## Gene drops went dry, permanently
+
+A kill dropped only genes you did NOT already hold. Each organism carries three
+to twelve loci, so the commonest species on a floor went silent first and
+stayed silent for the rest of the run.
+
+Stacking then made a duplicate valuable in its own right -- a spare for a
+second operon, a better roll to swap in -- and the filter, written before
+stacking existed, turned away exactly the drops stacking was built to accept.
+
+Discoveries still come first: an unowned gene drops at 0.8, a duplicate at
+0.35. Measured over forty kills of one species: 3 drops before, 14 after.
+
+## Elites, on ordinary floors
+
+They existed only on boss floors -- 8.4 per boss, ZERO across the other 320
+floors sampled. So twenty of every twenty-four floors had one difficulty, and
+the only thing that changed as you descended was which species was in front of
+you.
+
+Four strains, each a phenotype a microbe can actually have: `gorged` (reached
+the substrate first and kept dividing), `encrusted` (a mineral crust
+precipitated on its sheath -- armoured by its own waste), `swarming`
+(quorum-sensing tipped it into the attacking phenotype), `resistant` (carries
+the plasmid that survived whatever killed its cohort).
+
+**A COUNT, not a rate.** A per-mob probability of 4% produced 6.26 elites a
+floor, because a floor holds around a hundred and fifty organisms -- and an
+elite you meet six times a floor is the local difficulty, not an event. It is
+1 to 3 by depth now, promoted as a pass over the finished population. Measured
+at 2.13 a floor.
+
+Each drops extra cassettes, which is the reason to fight one rather than walk
+past -- and a duplicate now stacks instead of being wasted.
+
+## The strain bar was doing something, silently
+
+It advances L1 to L8 on catalogued organisms and depth, and grants ring
+positions and headroom. None of that was on screen: an unlabelled bar is
+indistinguishable from decoration. It says the level and the sites it has
+granted now.
+
 # v1.3.0 — wall art as sprite sheets in source
 
 `wall_pixels.ts`. Authored 16x16 tiles in the same character-grid format
@@ -36,6 +80,41 @@ truncates a material and an unknown character silently draws nothing. Verified
 both: three failures and two.
 
 # v1.2.0 — relict pockets, and walls with mass
+
+## The wall texture was dither, twice over
+
+Two independent mistakes, both mine, both shipped:
+
+**The role colours were keyed off the wrong things.** Role 1 came from the
+FLOOR colour and role 3 from the accent, which on the oxic stratum put a
+near-black and a near-white against a mid-green -- 63% and 31% apart in
+luminance. That is not texture; it is a checkerboard punched through the wall.
+All three roles are gentle shades OF THE WALL now: 17%, 8% and 6% apart.
+
+**The features were one pixel across.** At the default zoom a tile is about
+15px and the art is 16x16, so an art pixel is roughly a screen pixel -- a
+texture of lone marks IS dither however subtle its colours are. Redrawn with
+2-5 pixel grains, laminae and framboids.
+
+`spec` guards both: no role more than a fifth of a step from the wall, and over
+75% of each tile's marks must touch another mark. The second needed a proper
+sabotage to verify -- scattering one ROW still passed, because those marks had
+neighbours on the rows above and below. Only a fully scattered tile trips it,
+which is the right sensitivity but not what the first attempt measured.
+
+## Jaggedness, measured
+
+54% of wall boundary tiles are outside corners -- so more than half the wall
+edge is a step. That is the staircase, quantified, and it is a property of the
+GRID, not of the corner rounding: the tracer already cuts each convex corner
+with a radius up to half a tile.
+
+Cutting corners harder cannot fix it. Two adjacent quarter-circles on a
+staircase still read as two steps, because the cut is bounded by the tile it
+belongs to. A continuous 45-degree edge needs the contour to be computed across
+tiles -- marching squares over the grid, with the existing bow, fillet and
+per-stratum radius rebuilt on top. That is a real rewrite of walls.ts and it is
+NOT started.
 
 ## A cache key must include everything it READS
 
