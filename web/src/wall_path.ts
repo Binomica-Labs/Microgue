@@ -108,10 +108,27 @@ function addLoopIn(
  * `grow` and `spread` are zero in high contrast, where the point is a hard
  * legible edge rather than an organic one.
  */
+/**
+ * @param outer whether to enclose the region in a rectangle first.
+ *
+ * TRUE for walls: the loops enclose the CAVES, so the path has to be the whole
+ * map with the caves as holes. FALSE for anything that IS the filled region --
+ * a barrier is a crust, not a hole in one.
+ *
+ * This was a comment rather than a parameter for one version. The barrier
+ * renderer said "no outer rectangle, unlike the walls" directly above a call
+ * that added one unconditionally, so every crust filled its entire bounding
+ * box with itself punched out of it.
+ */
 export function traceContour(
   path: PathTarget, solid: Solid,
   x0: number, y0: number, x1: number, y1: number,
   seed: number, spread: number, grow: number,
+  // REQUIRED, deliberately. With a default, restoring the bug at the call site
+  // was a silent one-token edit that no test caught -- the tests exercised the
+  // function, not the caller. Making every call state its intent moves the
+  // check to the compiler, which is the only place it cannot be forgotten.
+  outer: boolean,
 ): number {
   // The loops enclose the CAVES, not the rock -- which is geometrically right,
   // because a cave IS a cavity, and is why filling them directly painted the
@@ -122,16 +139,21 @@ export function traceContour(
   // loop rather than trusting the contour's winding matters -- 29 of 30 came
   // out one way and one the other, and a single stray loop would have punched
   // a solid island into the middle of a cave.
-  path.moveTo(x0 - 1, y0 - 1);
-  path.lineTo(x1 + 2, y0 - 1);
-  path.lineTo(x1 + 2, y1 + 2);
-  path.lineTo(x0 - 1, y1 + 2);
-  path.closePath();
+  if (outer) {
+    path.moveTo(x0 - 1, y0 - 1);
+    path.lineTo(x1 + 2, y0 - 1);
+    path.lineTo(x1 + 2, y1 + 2);
+    path.lineTo(x0 - 1, y1 + 2);
+    path.closePath();
+  }
 
   const loops = contour(solid, x0, y0, x1, y1);
   for (const l of loops) {
-    // The rectangle above is wound positive, so every cave must be negative.
-    addLoop(path, l, seed, spread, grow, signedArea2(l) > 0);
+    // With an outer rectangle, wound positive, every cave must be negative so
+    // it punches a hole. Without one, each loop IS a filled shape and they
+    // must all wind the same way or they cancel each other out.
+    addLoop(path, l, seed, spread, grow,
+            outer ? signedArea2(l) > 0 : signedArea2(l) < 0);
   }
   return loops.length;
 }
@@ -172,7 +194,8 @@ export function wallSilhouette(
   }
   const path = make();
   if (!path) return null;
-  traceContour(path, solid, 0, 0, w - 1, h - 1, seed, spread, grow);
+  // The walls: the loops enclose the caves, so this needs the rectangle.
+  traceContour(path, solid, 0, 0, w - 1, h - 1, seed, spread, grow, true);
   cache = { path, floor, seed, hc };
   return path;
 }

@@ -54,10 +54,12 @@ export function r_barriers(_g: Game, px: number, hc: boolean): void {
     } catch {
       return;                       // no Path2D: nothing to draw into
     }
-    // No outer rectangle here, unlike the walls: a barrier IS the filled
-    // region, where a cave is the hole in one.
+    // `outer: false` -- a barrier IS the filled region, where a cave is the
+    // hole in one. This was a comment saying exactly that above a call that
+    // added the rectangle anyway, and every crust filled its whole bounding
+    // box with itself punched out.
     traceContour(path, solid, lo, top, hi, bot,
-                 (lo * 31 + top) | 0, hc ? 0 : 0.10, hc ? 0 : 0.22);
+                 (lo * 31 + top) | 0, hc ? 0 : 0.10, hc ? 0 : 0.22, false);
 
     ctx.save();
     ctx.scale(px, px);

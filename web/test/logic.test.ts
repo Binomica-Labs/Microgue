@@ -7412,7 +7412,7 @@ describe("the wall path fills the walls", () => {
         },
         closePath: () => undefined,
       };
-      traceContour(path, solid, 0, 0, g.w - 1, g.h - 1, 1, 0, 0);
+      traceContour(path, solid, 0, 0, g.w - 1, g.h - 1, 1, 0, 0, true);
       flush();
 
       expect(Math.abs(area - walls),
@@ -7474,7 +7474,7 @@ describe("the contour survives shapes a cave will not produce", () => {
                   quadraticCurveTo: () => undefined, closePath: () => undefined };
     for (const [x0, y0, x1, y1] of [[0, 0, 0, 0], [5, 5, 4, 4], [-3, -3, 3, 3],
                                     [0, 0, 1, 0], [10, 10, 10, 20]] as const) {
-      expect(() => traceContour(nul, () => true, x0, y0, x1, y1, 1, 0.1, 0.2),
+      expect(() => traceContour(nul, () => true, x0, y0, x1, y1, 1, 0.1, 0.2, true),
              `window ${String(x0)},${String(y0)}..${String(x1)},${String(y1)}`)
         .not.toThrow();
     }
@@ -7490,5 +7490,76 @@ describe("the contour survives shapes a cave will not produce", () => {
     expect(() => contour(noise, 0, 0, 200, 200)).not.toThrow();
     expect(Date.now() - t0, "a 200x200 noisy region took too long")
       .toBeLessThan(4000);
+  });
+});
+
+describe("a filled shape fills itself, not its bounding box", () => {
+  /** Net signed area the tracer emits, sampled through the curves. */
+  const filled = (
+    solid: Solid, x0: number, y0: number, x1: number, y1: number,
+    outer: boolean,
+  ): number => {
+    let total = 0;
+    let cur: [number, number][] = [];
+    const flush = (): void => {
+      let a = 0;
+      for (const [i, p] of cur.entries()) {
+        const q = cur[(i + 1) % cur.length];
+        if (!q) continue;
+        a += p[0] * q[1] - q[0] * p[1];
+      }
+      total += a / 2;
+      cur = [];
+    };
+    const path = {
+      moveTo: (x: number, y: number) => { flush(); cur.push([x, y]); },
+      lineTo: (x: number, y: number) => { cur.push([x, y]); },
+      quadraticCurveTo: (cx: number, cy: number, x: number, y: number) => {
+        const last = cur[cur.length - 1] ?? [0, 0];
+        for (let t = 0.25; t <= 1.0001; t += 0.25) {
+          const u = 1 - t;
+          cur.push([u * u * last[0] + 2 * u * t * cx + t * t * x,
+                    u * u * last[1] + 2 * u * t * cy + t * t * y]);
+        }
+      },
+      closePath: () => undefined,
+    };
+    traceContour(path, solid, x0, y0, x1, y1, 1, 0, 0, outer);
+    flush();
+    return Math.abs(total);
+  };
+
+  it("a barrier patch covers its tiles, not the box around them", () => {
+    // `outer: false` was a COMMENT above a call that added the rectangle
+    // anyway, so every crust filled its whole bounding box with itself punched
+    // out of it. An L-shaped patch of 5 tiles in a 9-tile box came out at 20.
+    const tiles = new Set(["10,10", "11,10", "12,10", "12,11", "12,12"]);
+    const solid: Solid = (x, y) => tiles.has(`${String(x)},${String(y)}`);
+    const a = filled(solid, 10, 10, 12, 12, false);
+    expect(a, `an L of 5 tiles filled ${a.toFixed(1)}`).toBeLessThan(7);
+    expect(a, "it filled nothing").toBeGreaterThan(2);
+  });
+
+  it("a patch of separate blobs fills both, not the gap between", () => {
+    // Without an outer rectangle every loop must wind the SAME way, or two
+    // blobs cancel each other out and one disappears.
+    const tiles = new Set(["2,2", "8,8"]);
+    const solid: Solid = (x, y) => tiles.has(`${String(x)},${String(y)}`);
+    const a = filled(solid, 2, 2, 8, 8, false);
+    expect(a, `two separate tiles filled ${a.toFixed(1)}`).toBeGreaterThan(0.8);
+    expect(a, "it filled the gap between them too").toBeLessThan(4);
+  });
+
+  it("walls still use the rectangle, and still cover rock", () => {
+    const d = new Dungeon(96, 96, 4);
+    const g = d.level(1).grid;
+    const solid: Solid = (x, y) =>
+      x < 0 || y < 0 || x >= g.w || y >= g.h || g.isWall(x, y);
+    let walls = 0;
+    for (let y = 0; y < g.h; y++) {
+      for (let x = 0; x < g.w; x++) if (g.isWall(x, y)) walls++;
+    }
+    const a = filled(solid, 0, 0, g.w - 1, g.h - 1, true);
+    expect(Math.abs(a - walls)).toBeLessThan(Math.abs(a - (g.w * g.h - walls)));
   });
 });

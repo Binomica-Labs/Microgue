@@ -24,6 +24,32 @@ A per-vertex outward bulge replaces the old per-vertex radius: a pure contour
 cuts through tile midpoints, which reads slightly thinner than the tiles it
 represents. Deterministic, so the silhouette never shimmers between frames.
 
+## The same mistake twice in two versions
+
+v1.8.2's barrier renderer carried this comment:
+
+    // No outer rectangle here, unlike the walls: a barrier IS the filled
+    // region, where a cave is the hole in one.
+
+directly above a call to `traceContour`, which added the rectangle
+UNCONDITIONALLY. Every crust filled its entire bounding box with itself punched
+out of it -- an L of five tiles covering an area of 20.
+
+That is the second time in two versions a comment described the opposite of the
+code, after `contour.ts` claimed connected saddles it did not have. Both times
+the comment was written first, as intent, and then not checked against what was
+actually called.
+
+**The fix is not the test.** I wrote one, then restored the bug at the call
+site to check it -- and got zero failures, because the test exercised
+`traceContour` directly with `outer` passed explicitly, not the caller that
+omits it. A test of a function is not a test of its callers.
+
+`outer` is a REQUIRED parameter now. Omitting it is a compile error, verified,
+which is the only place the check cannot be forgotten. Default arguments are
+how a call site silently keeps the old behaviour when the meaning of the
+default changes underneath it.
+
 ## Barriers are material too
 
 They were one `fillRect` per tile, which read as a grid of doors -- and looked
