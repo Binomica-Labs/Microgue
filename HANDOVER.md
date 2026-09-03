@@ -24,6 +24,28 @@ A per-vertex outward bulge replaces the old per-vertex radius: a pure contour
 cuts through tile midpoints, which reads slightly thinner than the tiles it
 represents. Deterministic, so the silhouette never shimmers between frames.
 
+## The walls came out inside-out
+
+v1.8.0 shipped with the floor painted green and the walls black.
+
+The contour loops enclose the CAVES, not the rock -- which is geometrically
+correct, because a cave IS a cavity -- and filling them directly fills the
+wrong side. The path is now the whole map wound one way with every cave wound
+the other, so nonzero fill gives rock with holes in it.
+
+Each loop is NORMALISED rather than trusted: 29 of 30 came out wound one way
+and one the other, and that stray would have been filled as a solid island in
+the middle of open water.
+
+**A smoothness metric is not a correctness metric.** I measured mean tangent
+swing, got 77 degrees down to 8, and shipped. The number was true and the walls
+were inverted, because nothing I measured had any opinion about WHICH SIDE gets
+painted. The area check that now guards it -- does the filled region match the
+wall count or the floor count -- takes four lines and would have caught it
+before it left.
+
+Verified by removing the outer rectangle: two failures.
+
 ## The cache key I got wrong first
 
 I keyed it on a count of solid tiles -- which meant scanning 9216 tiles every

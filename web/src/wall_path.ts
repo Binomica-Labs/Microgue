@@ -54,9 +54,29 @@ function hash(a: number, b: number, seed: number): number {
   return h / 4294967296;
 }
 
+/** Twice the signed area. Sign tells you which way a loop winds. */
+export function signedArea2(loop: Loop): number {
+  let a = 0;
+  for (const [i, p] of loop.entries()) {
+    const q = loop[(i + 1) % loop.length];
+    if (!q) continue;
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a;
+}
+
 /** Add one smoothed loop to the path. */
 export function addLoop(
   path: PathTarget, loop: Loop, seed: number, spread: number, grow: number,
+  reverse = false,
+): void {
+  const src = reverse ? [...loop].reverse() : loop;
+  addLoopIn(path, src, seed, spread, grow);
+}
+
+function addLoopIn(
+  path: PathTarget, loop: readonly { x: number; y: number }[],
+  seed: number, spread: number, grow: number,
 ): void {
   const n = loop.length;
   if (n < 3) return;
@@ -93,8 +113,26 @@ export function traceContour(
   x0: number, y0: number, x1: number, y1: number,
   seed: number, spread: number, grow: number,
 ): number {
+  // The loops enclose the CAVES, not the rock -- which is geometrically right,
+  // because a cave IS a cavity, and is why filling them directly painted the
+  // floor green and left the walls black.
+  //
+  // So the path is the whole map wound one way, with every cave wound the
+  // other: nonzero fill then gives rock with holes in it. Normalising each
+  // loop rather than trusting the contour's winding matters -- 29 of 30 came
+  // out one way and one the other, and a single stray loop would have punched
+  // a solid island into the middle of a cave.
+  path.moveTo(x0 - 1, y0 - 1);
+  path.lineTo(x1 + 2, y0 - 1);
+  path.lineTo(x1 + 2, y1 + 2);
+  path.lineTo(x0 - 1, y1 + 2);
+  path.closePath();
+
   const loops = contour(solid, x0, y0, x1, y1);
-  for (const l of loops) addLoop(path, l, seed, spread, grow);
+  for (const l of loops) {
+    // The rectangle above is wound positive, so every cave must be negative.
+    addLoop(path, l, seed, spread, grow, signedArea2(l) > 0);
+  }
   return loops.length;
 }
 

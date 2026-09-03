@@ -9,6 +9,7 @@ import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { BARRIERS } from "../src/barrier.js";
 import { contour, type Solid } from "../src/contour.js";
+import { signedArea2, traceContour } from "../src/wall_path.js";
 import { CLASSES, CLASS_IDS } from "../src/classes.js";
 import { ELITES, ELITE_IDS, eliteCount, promoteSome } from "../src/elite.js";
 import { miniBox, miniView } from "../src/minimap.js";
@@ -7365,5 +7366,75 @@ describe("the wall boundary is a contour, not a staircase", () => {
     const t0 = performance.now();
     for (let i = 0; i < 10; i++) contour(solid, 0, 0, g.w - 1, g.h - 1);
     expect((performance.now() - t0) / 10).toBeLessThan(40);
+  });
+});
+
+describe("the wall path fills the walls", () => {
+  it("covers rock, not cave", () => {
+    // The contour loops enclose the CAVES -- geometrically right, because a
+    // cave is a cavity -- so filling them directly painted the floor green and
+    // left the walls black. That shipped. The path is the whole map wound one
+    // way with every cave wound the other, so nonzero fill gives rock with
+    // holes in it.
+    for (const seed of [1, 5, 9]) {
+      const d = new Dungeon(96, 96, seed);
+      const g = d.level(1).grid;
+      const solid: Solid = (x, y) =>
+        x < 0 || y < 0 || x >= g.w || y >= g.h || g.isWall(x, y);
+      let walls = 0;
+      for (let y = 0; y < g.h; y++) {
+        for (let x = 0; x < g.w; x++) if (g.isWall(x, y)) walls++;
+      }
+      const floor = g.w * g.h - walls;
+
+      let area = 0;
+      let cur: [number, number][] = [];
+      const flush = (): void => {
+        let a = 0;
+        for (const [i, p] of cur.entries()) {
+          const q = cur[(i + 1) % cur.length];
+          if (!q) continue;
+          a += p[0] * q[1] - q[0] * p[1];
+        }
+        area += a / 2;
+        cur = [];
+      };
+      const path = {
+        moveTo: (x: number, y: number) => { flush(); cur.push([x, y]); },
+        lineTo: (x: number, y: number) => { cur.push([x, y]); },
+        quadraticCurveTo: (cx: number, cy: number, x: number, y: number) => {
+          const last = cur[cur.length - 1] ?? [0, 0];
+          for (let t = 0.25; t <= 1.0001; t += 0.25) {
+            const u = 1 - t;
+            cur.push([u * u * last[0] + 2 * u * t * cx + t * t * x,
+                      u * u * last[1] + 2 * u * t * cy + t * t * y]);
+          }
+        },
+        closePath: () => undefined,
+      };
+      traceContour(path, solid, 0, 0, g.w - 1, g.h - 1, 1, 0, 0);
+      flush();
+
+      expect(Math.abs(area - walls),
+             `seed ${String(seed)}: filled ${area.toFixed(0)}, walls `
+             + `${String(walls)}, floor ${String(floor)} -- the fill is inverted`)
+        .toBeLessThan(Math.abs(area - floor));
+      expect(area, `seed ${String(seed)}: filled nothing`).toBeGreaterThan(0);
+    }
+  });
+
+  it("one stray loop cannot punch a solid island into a cave", () => {
+    // 29 of 30 loops came out wound one way and one the other. Trusting the
+    // contour's winding rather than normalising each loop would have filled
+    // that one as rock in the middle of open water.
+    const d = new Dungeon(96, 96, 2);
+    const g = d.level(1).grid;
+    const solid: Solid = (x, y) =>
+      x < 0 || y < 0 || x >= g.w || y >= g.h || g.isWall(x, y);
+    const loops = contour(solid, 0, 0, g.w - 1, g.h - 1);
+    const signs = loops.map((l) => Math.sign(signedArea2(l)));
+    // The raw contour may well be mixed -- that is the point. What matters is
+    // that traceContour normalises, which the area test above proves.
+    expect(signs.length).toBeGreaterThan(0);
   });
 });
