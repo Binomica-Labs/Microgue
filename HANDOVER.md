@@ -64,6 +64,42 @@ not a trade, a countdown. It carries katG now, which is also more correct: a
 cyanobacterium that could not handle its own peroxide would not exist. Catalase
 is a precondition for oxygenic photosynthesis, not an upgrade.
 
+## contour.ts — marching squares (BUILT, NOT YET WIRED)
+
+The walls are drawn PER TILE: each wall square with its corners rounded. That
+is why a diagonal edge comes out as a staircase -- every cut is bounded by the
+tile it belongs to, so two neighbouring cuts can never join into one line.
+Cutting corners harder cannot fix it and did not.
+
+`contour.ts` traces the boundary over the LATTICE between tiles instead. Each
+lattice point samples its four tiles; the sixteen arrangements each emit fixed
+segments; a diagonal run emits collinear segments that chain into one straight
+edge. Measured on a real floor: **67% of segments are now diagonal**, 30 closed
+loops, every one closing.
+
+The two saddle cases resolve as CONNECTED WALL rather than connected floor. A
+cave that pinches off at a diagonal has a hole you can see through and not walk
+through, and the pathfinder already treats those as blocked.
+
+**It is not wired into the renderer.** The contour is tested and correct; the
+renderer still uses `traceWalls`. Wiring it means rebuilding the bow, fillet
+and per-stratum radius on top of loops instead of tiles, and half-doing that
+would replace a working silhouette with a broken one.
+
+### Three optimisations that optimised nothing
+
+The first measurement said 25ms. I replaced string keys with integers, then
+made each tile sample once instead of four times, then hoisted forty thousand
+allocations out of the hot loop. It went 25 -> 19.6 -> 19.2 -> 22.7.
+
+It was JIT WARMUP. Steady state was 3.6ms all along, and the algorithm was
+never the problem. Every one of those three changes is a genuine improvement to
+the code and none of them was worth making for the reason I made it.
+
+The lesson is the same one this project keeps teaching in new costumes: measure
+the thing you are actually changing, and measure it more than once before
+believing the number.
+
 ## Two origins
 
 A fresh plasmid is CONSTRUCTED with an origin at its default position.

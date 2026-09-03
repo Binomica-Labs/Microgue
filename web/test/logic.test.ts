@@ -8,6 +8,7 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { BARRIERS } from "../src/barrier.js";
+import { contour, type Solid } from "../src/contour.js";
 import { CLASSES, CLASS_IDS } from "../src/classes.js";
 import { ELITES, ELITE_IDS, eliteCount, promoteSome } from "../src/elite.js";
 import { miniBox, miniView } from "../src/minimap.js";
@@ -7280,5 +7281,89 @@ describe("there is exactly one origin, always", () => {
     // Force the repair the way any real write would.
     p.put(9, { kind: "terminator", id: "rrnbt1" });
     expect(origins(p), "a plasmid with a planted second origin kept it").toBe(1);
+  });
+});
+
+describe("the wall boundary is a contour, not a staircase", () => {
+  const box = (w: number, h: number, walls: string[]): Solid =>
+    (x, y) => x < 0 || y < 0 || x >= w || y >= h
+      || (walls[y]?.[x] ?? "#") === "#";
+
+  it("a diagonal edge becomes diagonal segments, not steps", () => {
+    // Per-tile drawing could never express this: every cut was bounded by the
+    // tile it belonged to, so two neighbouring cuts could not join into one
+    // line. That is why cutting corners harder did not help.
+    const walls = [
+      "#####",
+      "####.",
+      "###..",
+      "##...",
+      "#....",
+    ];
+    const loops = contour(box(5, 5, walls), 0, 0, 4, 4);
+    expect(loops.length, "no contour at all").toBeGreaterThan(0);
+    let diag = 0, axis = 0;
+    for (const l of loops) {
+      for (const [i, a] of l.entries()) {
+        const b = l[(i + 1) % l.length];
+        if (!b) continue;
+        if (Math.abs(b.x - a.x) > 0.01 && Math.abs(b.y - a.y) > 0.01) diag++;
+        else axis++;
+      }
+    }
+    expect(diag, "a 45-degree wall produced no diagonal segments")
+      .toBeGreaterThan(0);
+    expect(diag / (diag + axis), "mostly still steps").toBeGreaterThan(0.4);
+  });
+
+  it("every loop closes", () => {
+    // An open loop is a hole in the wall: the fill leaks through it and the
+    // whole floor turns the wall colour.
+    for (let seed = 0; seed < 15; seed++) {
+      const d = new Dungeon(96, 96, seed);
+      const g = d.level(1).grid;
+      const solid: Solid = (x, y) =>
+        x < 0 || y < 0 || x >= g.w || y >= g.h || g.isWall(x, y);
+      const loops = contour(solid, 0, 0, g.w - 1, g.h - 1);
+      expect(loops.length, `seed ${String(seed)}: no loops`).toBeGreaterThan(0);
+      for (const [i, l] of loops.entries()) {
+        const a = l[0], b = l[l.length - 1];
+        if (!a || !b) continue;
+        expect(Math.hypot(a.x - b.x, a.y - b.y),
+               `seed ${String(seed)} loop ${String(i)} does not close`)
+          .toBeLessThan(1.01);
+      }
+    }
+  });
+
+  it("an all-wall and an all-floor region produce nothing", () => {
+    expect(contour(() => true, 0, 0, 8, 8)).toEqual([]);
+    // All floor, but bounded: out of bounds is solid, so there IS a boundary
+    // at the edge. Inside a solid region there is none.
+    const inner: Solid = (x, y) => !(x >= 0 && y >= 0 && x < 9 && y < 9);
+    expect(contour(inner, 2, 2, 6, 6), "a region with no boundary emitted one")
+      .toEqual([]);
+  });
+
+  it("it never hangs on a malformed grid", () => {
+    // The chaining walk is bounded: a hang is a far worse failure than a
+    // missing wall, and a table typo could otherwise loop for ever.
+    for (const solid of [() => Math.random() < 0.5, (x: number) => x % 2 === 0]) {
+      expect(() => contour(solid, 0, 0, 40, 40)).not.toThrow();
+    }
+  });
+
+  it("costs about a floor's worth of work, once", () => {
+    // 3.6ms steady state over a whole 96x96 floor. The first measurement said
+    // 25ms and three rounds of "optimisation" barely moved it -- it was JIT
+    // warmup, and the algorithm was never the problem.
+    const d = new Dungeon(96, 96, 3);
+    const g = d.level(1).grid;
+    const solid: Solid = (x, y) =>
+      x < 0 || y < 0 || x >= g.w || y >= g.h || g.isWall(x, y);
+    contour(solid, 0, 0, g.w - 1, g.h - 1);          // warm
+    const t0 = performance.now();
+    for (let i = 0; i < 10; i++) contour(solid, 0, 0, g.w - 1, g.h - 1);
+    expect((performance.now() - t0) / 10).toBeLessThan(40);
   });
 });
