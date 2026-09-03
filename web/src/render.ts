@@ -28,7 +28,8 @@ import { wallPatternSize } from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
 import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
-import { WALL_SPREAD, traceWalls } from "./walls.js";
+import { WALL_SPREAD } from "./walls.js";
+import { wallSilhouette } from "./wall_path.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
 import { drawContainer, drawLab, drawNotes, drawResearch, ellipsise }
@@ -84,13 +85,22 @@ export function r_draw(_g: Game): void {
     // One Path2D, used for both the fill and the motif clip. Tracing twice a
     // frame cost 29 us; this halves it and the geometry is identical by
     // construction rather than by hoping the two calls match.
-    const wallPath = new Path2D();
-    // Per-vertex radius, seeded per floor. One constant radius meant every
-    // convex corner was the same quarter circle, so a one-tile bump was always
-    // a perfect circle and a corridor always a perfect stadium -- a very small
-    // shape vocabulary, repeated, which is what reads as cookie-cutter.
-    traceWalls(wallPath, _g.level.grid, x0, y0, x1, y1, hc ? 0 : 0.5,   // see walls.ts
-      _g.dungeon.seed ^ (_g.level.floor * 9176), hc ? 0 : WALL_SPREAD[s.hatch], hc ? 0 : 0.13);
+    // From a CONTOUR, not from tiles. Drawing each wall square with rounded
+    // corners is what made a diagonal edge a staircase: every cut was bounded
+    // by its own tile, so neighbouring cuts could never join into one line.
+    // Measured on the same region, mean tangent swing went 77 degrees to 8.
+    //
+    // Whole-floor and cached: it changes only when a barrier dissolves.
+    const grid = _g.level.grid;
+    const solidAt = (gx: number, gy: number): boolean =>
+      gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h || grid.isWall(gx, gy);
+    const wallPath = wallSilhouette(
+      solidAt, grid.w, grid.h, _g.level.floor,
+      _g.dungeon.seed ^ (_g.level.floor * 9176),
+      hc ? 0 : WALL_SPREAD[s.hatch] * 0.14, hc ? 0 : 0.20, hc,
+      () => {
+        try { return new Path2D(); } catch { return null; }
+      }) ?? new Path2D();
     const sight = _g.level.sight;
 
     ctx.fillStyle = hc ? "#ffffff" : s.wall;

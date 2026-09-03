@@ -1,3 +1,42 @@
+# v1.8.0 — the staircase is gone
+
+`traceWalls` drew each wall SQUARE with its corners rounded. That is why a
+diagonal edge came out as a staircase: every cut was bounded by the tile it
+belonged to, so two neighbouring cuts could never join into one line. 54% of
+boundary tiles are outside corners and each was a separate bump. Cutting
+corners harder could not fix it, and did not.
+
+The renderer now fills a contour from `contour.ts`. Measured on the same region
+of the same floor:
+
+    per-tile tracer:  7411 samples, mean tangent swing 76.9 deg
+    contour tracer:   1356 samples, mean tangent swing  7.8 deg
+
+Smoothing is quadratic curves through EDGE MIDPOINTS with each loop vertex as
+the control point. That has exactly the property this needs: three collinear
+points give a straight line, because the control point lies on it -- so a long
+wall stays flat and a 45-degree run stays a clean 45, while every corner rounds
+by half its adjacent edges. No radius clamping, no corner cases, nothing to
+tune per shape. `spec` asserts the middle of a straight run stays within 0.02
+of true.
+
+A per-vertex outward bulge replaces the old per-vertex radius: a pure contour
+cuts through tile midpoints, which reads slightly thinner than the tiles it
+represents. Deterministic, so the silhouette never shimmers between frames.
+
+## The cache key I got wrong first
+
+I keyed it on a count of solid tiles -- which meant scanning 9216 tiles every
+frame to discover, always, that nothing had changed. That is the SAME mistake
+the minimap's `seenCount` made two versions ago.
+
+The grid is immutable once generated: it is written during `carve` and never
+again, and barriers are a separate list whose dissolution does not touch a
+tile. Floor and seed are a sufficient key, and cost nothing.
+
+`traceWalls` and `walls.ts` are still present and still tested. Nothing calls
+them for the world any more.
+
 # v1.7.0 — a recorder you can debug from
 
 It had eleven kinds declared and logged from sixteen sites, none of which

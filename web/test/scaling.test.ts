@@ -754,3 +754,74 @@ describe("the HUD's own labels are on screen", () => {
       .toBeLessThanOrEqual(H - 4);
   });
 });
+
+describe("the wall silhouette is a contour", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("is built once per floor, not once per frame", async () => {
+    // The contour costs about 3.6ms over a floor -- fine once, impossible
+    // sixty times a second. The grid is immutable after generation, so the
+    // floor number alone is a sufficient key.
+    const { forgetSilhouette, wallSilhouette } = await import("../src/wall_path.js");
+    forgetSilhouette();
+    let built = 0;
+    const solid = (x: number, y: number): boolean =>
+      x < 2 || y < 2 || x > 30 || y > 30 || (x % 7 === 0 && y % 5 === 0);
+    const make = (): Path2D => {
+      built++;
+      return { moveTo: () => undefined, lineTo: () => undefined,
+               quadraticCurveTo: () => undefined,
+               closePath: () => undefined } as unknown as Path2D;
+    };
+    for (let i = 0; i < 40; i++) {
+      wallSilhouette(solid, 32, 32, 3, 99, 0.1, 0.2, false, make);
+    }
+    expect(built, `${String(built)} rebuilds across 40 frames on one floor`)
+      .toBe(1);
+    // A different floor must rebuild.
+    wallSilhouette(solid, 32, 32, 4, 99, 0.1, 0.2, false, make);
+    expect(built, "changing floor did not rebuild").toBe(2);
+    // So must high contrast, which draws a different shape entirely.
+    wallSilhouette(solid, 32, 32, 4, 99, 0, 0, true, make);
+    expect(built, "high contrast reused the organic path").toBe(3);
+  });
+
+  it("a straight run stays straight and a diagonal stays diagonal", async () => {
+    // Quadratic curves through EDGE MIDPOINTS with the vertex as control
+    // point: three collinear points give a straight line, because the control
+    // point lies on it. That is the property that lets a long wall stay flat
+    // and a 45-degree run stay a clean 45 with no special cases.
+    const { addLoop } = await import("../src/wall_path.js");
+    const pts: [number, number][] = [];
+    const path = {
+      moveTo: (x: number, y: number) => { pts.push([x, y]); },
+      lineTo: (x: number, y: number) => { pts.push([x, y]); },
+      quadraticCurveTo: (cx: number, cy: number, x: number, y: number) => {
+        // Sample the curve, not just its ends.
+        const [x0, y0] = pts[pts.length - 1] ?? [0, 0];
+        for (let t = 0.25; t <= 1.0001; t += 0.25) {
+          const u = 1 - t;
+          pts.push([u * u * x0 + 2 * u * t * cx + t * t * x,
+                    u * u * y0 + 2 * u * t * cy + t * t * y]);
+        }
+      },
+      closePath: () => undefined,
+    };
+    // A long straight edge, as a loop.
+    const loop = [];
+    for (let x = 0; x <= 20; x++) loop.push({ x, y: 0 });
+    for (let x = 20; x >= 0; x--) loop.push({ x, y: 4 });
+    addLoop(path, loop, 1, 0, 0);
+    // The MIDDLE of the top edge, away from the corners -- which are supposed
+    // to round, and do. Anything between x=4 and x=16 has collinear
+    // neighbours and must stay exactly on y = 0.
+    const middle = pts.filter(([x, y]) => x > 4 && x < 16 && y < 2);
+    expect(middle.length, "the fixture sampled no straight run")
+      .toBeGreaterThan(10);
+    for (const [x, y] of middle) {
+      expect(Math.abs(y),
+             `a straight wall bowed to y=${y.toFixed(2)} at x=${x.toFixed(1)}`)
+        .toBeLessThan(0.02);
+    }
+  });
+});
