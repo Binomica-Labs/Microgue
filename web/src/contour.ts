@@ -12,10 +12,21 @@
 // emits collinear segments that chain into a single straight edge, which is
 // exactly the thing per-tile drawing cannot express.
 //
-// The two saddle cases -- where two diagonal walls meet two diagonal floors --
-// are resolved as CONNECTED wall rather than connected floor. A cave whose
-// walls pinch off at a diagonal has a hole you can see through and not walk
-// through, and the pathfinder already treats those as blocked.
+// The two saddle cases -- two diagonal walls meeting two diagonal floors --
+// are resolved as SEPARATED: each wall corner gets its own cut, so a diagonal
+// chain of single tiles draws as a row of diamonds rather than one ridge.
+//
+// That is not what I first wrote here. The comment claimed the opposite for a
+// version, and connecting them turned out to break the chaining outright: the
+// boundary of a one-tile-wide diagonal thread passes through each saddle point
+// TWICE, once on the way out and once on the way back, and the walk marks a
+// point used the first time it sees it. Connected saddles produced zero loops
+// on a thread and would have erased it from the screen.
+//
+// It does not arise in practice -- a generated floor has no diagonal-only
+// pinches, measured -- but separated is what the code does and this is what it
+// says now. Reconnecting them means a chaining walk that can revisit a vertex,
+// which is a real change and not a table edit.
 
 export interface Pt { readonly x: number; readonly y: number }
 export type Loop = readonly Pt[];

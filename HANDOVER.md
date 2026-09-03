@@ -24,6 +24,38 @@ A per-vertex outward bulge replaces the old per-vertex radius: a pure contour
 cuts through tile midpoints, which reads slightly thinner than the tiles it
 represents. Deterministic, so the silhouette never shimmers between frames.
 
+## Barriers are material too
+
+They were one `fillRect` per tile, which read as a grid of doors -- and looked
+especially wrong beside walls that had just stopped being square. `barrier_render.ts`
+contours each MATERIAL separately, so two different crusts in one gap stay two
+shapes rather than merging into one blob of the first colour. No outer
+rectangle, unlike the walls: a barrier IS the filled region, where a cave is
+the hole in one.
+
+Digestion progress stays square, per tile -- it is progress on THAT tile, not
+on the patch.
+
+## A comment that described the opposite of the code
+
+`contour.ts` said saddles were resolved as CONNECTED wall. They were resolved
+as separated, and a diagonal chain of single tiles came out as seventeen
+diamonds instead of one ridge. Found by measuring, not by looking.
+
+Connecting them made it worse: the boundary of a one-tile-wide diagonal thread
+passes through each saddle point TWICE, once out and once back, and the
+chaining walk marks a point used the first time it sees it. Connected saddles
+produced ZERO loops on a thread -- the wall would have vanished.
+
+Reverted, and the comment now says what the code does and why. Reconnecting
+them needs a walk that can revisit a vertex, which is a real change and not a
+table edit. It does not arise in practice: a generated floor has no
+diagonal-only pinches, measured.
+
+`spec` now covers a single tile, a checkerboard (every saddle case at once), a
+diagonal thread, fully solid, fully empty, five degenerate windows, and a
+200x200 noisy region against the step cap.
+
 ## The walls came out inside-out
 
 v1.8.0 shipped with the floor painted green and the walls black.

@@ -7438,3 +7438,57 @@ describe("the wall path fills the walls", () => {
     expect(signs.length).toBeGreaterThan(0);
   });
 });
+
+describe("the contour survives shapes a cave will not produce", () => {
+  const closed = (l: readonly { x: number; y: number }[]): boolean => {
+    const a = l[0], b = l[l.length - 1];
+    if (a === undefined || b === undefined) return false;
+    return Math.hypot(a.x - b.x, a.y - b.y) < 1.01;
+  };
+
+  it("a single tile, a checkerboard and a diagonal thread all close", () => {
+    // The checkerboard is every saddle case at once, and the thread is the one
+    // that broke chaining when saddles were resolved as connected -- it
+    // produced ZERO loops and would have erased the wall from the screen.
+    const cases: [string, (x: number, y: number) => boolean][] = [
+      ["single tile", (x, y) => x === 5 && y === 5],
+      ["checkerboard", (x, y) => ((x + y) & 1) === 0],
+      ["diagonal thread", (x, y) => x === y && x >= 2 && x <= 18],
+      ["full", () => true],
+      ["empty", () => false],
+    ];
+    for (const [name, solid] of cases) {
+      const loops = contour(solid, 0, 0, 20, 20);
+      for (const [i, l] of loops.entries()) {
+        expect(closed(l), `${name} loop ${String(i)} does not close`).toBe(true);
+      }
+      if (name !== "full" && name !== "empty") {
+        expect(loops.length, `${name} produced no contour at all`)
+          .toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("a degenerate window never throws", () => {
+    const nul = { moveTo: () => undefined, lineTo: () => undefined,
+                  quadraticCurveTo: () => undefined, closePath: () => undefined };
+    for (const [x0, y0, x1, y1] of [[0, 0, 0, 0], [5, 5, 4, 4], [-3, -3, 3, 3],
+                                    [0, 0, 1, 0], [10, 10, 10, 20]] as const) {
+      expect(() => traceContour(nul, () => true, x0, y0, x1, y1, 1, 0.1, 0.2),
+             `window ${String(x0)},${String(y0)}..${String(x1)},${String(y1)}`)
+        .not.toThrow();
+    }
+  });
+
+  it("a large noisy region stays bounded", () => {
+    // The chaining walk has a step cap: a hang is a far worse failure than a
+    // missing wall, and a table typo could otherwise loop for ever.
+    const rng = makeRng(7);
+    const noise = (x: number, y: number): boolean =>
+      ((x * 73856093) ^ (y * 19349663) ^ rng.int(1)) % 3 === 0;
+    const t0 = Date.now();
+    expect(() => contour(noise, 0, 0, 200, 200)).not.toThrow();
+    expect(Date.now() - t0, "a 200x200 noisy region took too long")
+      .toBeLessThan(4000);
+  });
+});

@@ -12,7 +12,6 @@ export { r_drawHud } from "./hud_render.js";
 import { r_drawOffer } from "./hud_render.js";
 import { BIN_CAP } from "./plasmid.js";
 import { SIZES } from "./behaviour.js";
-import { BARRIERS } from "./barrier.js";
 import { boundsOf, centreOf, stretchOf } from "./footprint.js";
 import { cloudAlpha, cloudTiles } from "./projectile.js";
 import { describe as describeSlot, drawBinList, drawItemCard, drawRing }
@@ -30,6 +29,7 @@ import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
 import { WALL_SPREAD } from "./walls.js";
 import { wallSilhouette } from "./wall_path.js";
+import { r_barriers } from "./barrier_render.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
 import { drawContainer, drawLab, drawNotes, drawResearch, ellipsise }
@@ -387,27 +387,12 @@ export function r_draw(_g: Game): void {
       }
     }
 
-    // Barriers, drawn as material rather than as doors.
-    for (const b of _g.level.barriers) {
-      if (!isSeen(sight, b.x, b.y)) continue;
-      const def = BARRIERS[b.id];
-      ctx.globalAlpha = isVisible(sight, b.x, b.y) ? 0.85 : 0.4;
-      ctx.fillStyle = def.colour;
-      ctx.fillRect(b.x * px, b.y * px, px, px);
-      ctx.globalAlpha = isVisible(sight, b.x, b.y) ? 0.35 : 0.15;
-      ctx.fillStyle = "#000000";
-      for (let i = 0; i < 4; i++) {
-        const j = jitter(b.x * 31 + b.y, i);
-        ctx.fillRect((b.x + 0.5 + j.x * 0.32) * px, (b.y + 0.5 + j.y * 0.32) * px,
-                     px * 0.2, px * 0.2);
-      }
-      ctx.globalAlpha = 1;
-      if (b.work > 0) {
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = Math.max(px * 0.05, 1);
-        ctx.strokeRect(b.x * px + px * 0.12, b.y * px + px * 0.12, px * 0.76, px * 0.76);
-      }
-    }
+    // Barriers, drawn as MATERIAL rather than as doors -- and as one mass per
+    // material rather than a grid of squares. They are crusts and mats that
+    // grew into a gap; a square-edged one reads as a door, which is the one
+    // thing they are not, and it looked especially wrong next to walls that
+    // had just stopped being square.
+    r_barriers(_g, px, hc);
 
     // Loot on the floor: a lozenge per tile, marked when it is a pile.
     for (const d of _g.drops) {
