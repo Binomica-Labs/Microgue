@@ -747,6 +747,32 @@ class Game {
 
 
   startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void {
+    // A new strain inherits NOTHING about what the last one was doing.
+    //
+    // These are all field initialisers, which run once when the Game is
+    // constructed -- not once per run. They are also transient, so a reload
+    // does not clear them either. Die while auto-exploring, inoculate the
+    // next culture, and it walked off on its own before the player had
+    // touched anything.
+    //
+    // Reset here rather than at death: death is not the only way a run ends,
+    // and this is the one place a run BEGINS.
+    this.exploring = false;
+    this.walk = null;
+    this.target = null;
+    this.strikeAfterTravel = null;
+    this.path = null;
+    this.offer = null;
+    this.openDrop = null;
+    // Screens too. Inoculating from the lab left the lab OPEN over the new
+    // run, and the map screen showed the old floor until it was reopened.
+    this.showMap = false;
+    this.showLab = false;
+    this.showNotes = false;
+    this.showPlasmid = false;
+    const ex = this.buttons.find((b) => b.id === "explore");
+    if (ex) ex.active = false;
+
     this.slot = slot;
     // The lab outlives every strain, so it is read here rather than from the
     // slot file: dying, or deleting a save, must not cost the meta-progression.

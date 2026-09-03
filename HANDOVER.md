@@ -64,6 +64,31 @@ not a trade, a countdown. It carries katG now, which is also more correct: a
 cyanobacterium that could not handle its own peroxide would not exist. Catalase
 is a precondition for oxygenic photosynthesis, not an upgrade.
 
+## A new strain inherited what the last one was doing
+
+Reported as "the game starts and immediately in autoexplore mode". It does:
+`exploring` is a field INITIALISER, which runs once when the Game is
+constructed and not once per run, and it is transient so a reload does not
+clear it either. Die while auto-exploring, inoculate the next culture, and it
+walks off on its own before the player has touched anything.
+
+Reset in `startRun` rather than at death -- death is not the only way a run
+ends, and that is the one place a run BEGINS.
+
+**The general test found more than the report did.** A field-by-field
+comparison of a dirtied Game against a fresh one caught the screens as well:
+inoculating from the lab left the LAB OPEN over the new run, and the map screen
+showed the old floor until it was reopened. Neither had been noticed.
+
+That is the shape worth keeping: given one instance of "state leaked across a
+boundary", the useful move is to diff EVERY field across that boundary rather
+than fix the one that was reported.
+
+Two wrong theories checked first, both cheap and both worth recording:
+`exploring` is not in the save (it is correctly transient), and a single tap on
+the class picker does not leak through to the button underneath (pointerDown
+consumes it and clears the gesture).
+
 ## contour.ts — marching squares (BUILT, NOT YET WIRED)
 
 The walls are drawn PER TILE: each wall square with its corners rounded. That

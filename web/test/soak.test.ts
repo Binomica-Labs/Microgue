@@ -1418,8 +1418,10 @@ describe("the chromosome is reachable from play", () => {
     g.player.atp = g.player.atpMax;
     const row = g.researchRows.find((r) => r.kind === "expand");
     if (!row) return;
-    g.pointerDown(row.box.x + 10, row.box.y + 10);
-    g.pointerUp(row.box.x + 10, row.box.y + 10);
+    // Tap the RIGHT side of the card, where the button column will be.
+    const tx = row.box.x + row.box.w - 20, ty = row.box.y + row.box.h / 2;
+    g.pointerDown(tx, ty);
+    g.pointerUp(tx, ty);
     expect(g.genome.usableSlots, "integrating did nothing").toBe(before + 1);
   });
 
@@ -2141,8 +2143,10 @@ describe("a class is chosen once, before inoculation", () => {
     const row = g.classRows[2];
     expect(row, "the picker drew no classes").toBeDefined();
     if (!row) return;
-    g.pointerDown(row.box.x + 10, row.box.y + 10);
-    g.pointerUp(row.box.x + 10, row.box.y + 10);
+    // Tap the RIGHT side of the card, where the button column will be.
+    const tx = row.box.x + row.box.w - 20, ty = row.box.y + row.box.h / 2;
+    g.pointerDown(tx, ty);
+    g.pointerUp(tx, ty);
     expect(g.started, "choosing a class did not start the run").toBe(true);
     expect(g.strainClass, "the choice was not applied").toBe(row.id);
     expect(g.pickingClassFor).toBeNull();
@@ -2363,5 +2367,95 @@ describe("the recorder records enough to debug from", () => {
     for (let i = 1; i < all.length; i++) {
       expect(all[i]?.t ?? 0).toBeGreaterThanOrEqual(all[i - 1]?.t ?? 0);
     }
+  });
+});
+
+describe("a new strain starts still", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("auto-explore does not carry over from the previous run", async () => {
+    // `exploring` is a field INITIALISER, not something startRun resets, and
+    // it is transient so a reload does not clear it either. Die while
+    // exploring, inoculate the next strain, and it walks off on its own before
+    // the player has touched anything.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.press("explore");
+    expect(g.exploring, "the fixture is not exploring").toBe(true);
+
+    g.startRun(1);
+    expect(g.exploring, "the new strain inherited auto-explore").toBe(false);
+    expect(g.walk, "it inherited a walk queue too").toBeNull();
+  });
+
+  it("nor does a queued walk, a target, or a pending strike", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.walk = { nodes: [{ x: 1, y: 1 }], i: 0 };
+    g.target = g.level.mobs[0] ?? null;
+    g.exploring = true;
+    g.startRun(2);
+    expect(g.exploring).toBe(false);
+    expect(g.walk).toBeNull();
+    expect(g.target, "it inherited a target from a dead strain").toBeNull();
+  });
+});
+
+describe("nothing about the last run survives into the next", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("every per-run field is reset by startRun", async () => {
+    // The general form of the auto-explore bug: a transient field is a field
+    // INITIALISER, which runs once per Game and not once per run. Anything
+    // describing what the current strain is doing has to be cleared where a
+    // run begins, or the next strain inherits it.
+    const { Game } = await import("../src/main.js");
+    const mk = () => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+
+    // What a fresh Game looks like on its first run, field by field.
+    const fresh = mk();
+    fresh.startRun(0);
+    const clean = JSON.stringify({
+      exploring: fresh.exploring, walk: fresh.walk, target: fresh.target,
+      path: fresh.path, offer: fresh.offer, openDrop: fresh.openDrop,
+      dead: fresh.dead, showMap: fresh.showMap, showLab: fresh.showLab,
+      showNotes: fresh.showNotes, showPlasmid: fresh.showPlasmid,
+    });
+
+    // Now dirty every one of them and start again.
+    const g = mk();
+    g.startRun(0);
+    g.exploring = true;
+    g.walk = { nodes: [{ x: 2, y: 2 }], i: 0 };
+    g.target = g.level.mobs[0] ?? null;
+    g.path = [{ x: 1, y: 1 }];
+    g.showMap = true;
+    g.showLab = true;
+    g.showNotes = true;
+    g.startRun(1);
+
+    expect(JSON.stringify({
+      exploring: g.exploring, walk: g.walk, target: g.target,
+      path: g.path, offer: g.offer, openDrop: g.openDrop,
+      dead: g.dead, showMap: g.showMap, showLab: g.showLab,
+      showNotes: g.showNotes, showPlasmid: g.showPlasmid,
+    }), "a new strain inherited state from the last one").toBe(clean);
   });
 });
