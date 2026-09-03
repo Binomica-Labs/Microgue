@@ -485,6 +485,8 @@ function nearestHostile(_g: Game): Mob | null {
 }
 
 export function i_press(_g: Game, id: string): void {
+  // Every press, with the state it produced. Which screen is open, and what
+  // the toggles are, is exactly what you cannot reconstruct from a bug report.
   _g.trace.push(_g.clock.turn, "input", `press ${id}`);
     switch (id) {
       case "plasmid": _g.openPlasmid(!_g.showPlasmid); _g.showMap = false; break;
@@ -504,6 +506,8 @@ export function i_press(_g: Game, id: string): void {
         _g.autoAttack = !_g.autoAttack;
         // Persist it: as a bare field it silently reset on reload.
         _g.settings = { ..._g.settings, autoAttack: _g.autoAttack };
+        _g.trace.push(_g.clock.turn, "ui",
+                      `auto-attack ${_g.autoAttack ? "on" : "off"}`);
         const btn = _g.buttons.find((b) => b.id === "auto");
         if (btn) btn.active = _g.autoAttack;
         if (_g.autoAttack) { _g.walk = null; _g.note("Auto-attack engaged."); }

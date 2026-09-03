@@ -25,7 +25,23 @@ export type TraceKind =
    * Logged only when the pool is actually falling -- a line every turn would
    * fill a 400-entry ring in seven minutes and push out everything else.
    */
-  | "atp";
+  | "atp"
+  /**
+   * A periodic snapshot of the variables.
+   *
+   * Events tell you what HAPPENED; they do not tell you what the world looked
+   * like while it was happening. A bug reported as "my ATP is draining" or
+   * "the bar is not moving" is a question about STATE over time, and the log
+   * could not answer either. One compact line every SNAPSHOT_EVERY turns, plus
+   * one on any transition worth anchoring to.
+   */
+  | "state"
+  /** Installing, removing, evolving -- everything that edits the chromosome.
+   *  A build that stops working is nearly always something you changed. */
+  | "build"
+  /** Screens opened and closed, and settings changed. Cheap, and it is how
+   *  you tell a misread UI from a misbehaving one. */
+  | "ui";
 
 export interface TraceEvent {
   /** Turn number, so events line up with the game clock. */
@@ -34,9 +50,20 @@ export interface TraceEvent {
   readonly what: string;
 }
 
-/** Kept. Enough to cover a long fight and its lead-up, small enough to hold
- *  in a save or paste into a report. */
-export const TRACE_CAP = 400;
+/**
+ * Kept.
+ *
+ * Raised from 400 once the recorder started logging builds, screens and
+ * periodic state: at 400 a busy few minutes evicted the beginning of the
+ * session, which is usually where the cause is. Entries are small -- a kind,
+ * a turn number and a bounded string -- so this is well under a hundred
+ * kilobytes.
+ */
+export const TRACE_CAP = 900;
+
+/** Turns between state snapshots. Small enough to see a drift develop, large
+ *  enough that snapshots are a minority of the ring. */
+export const SNAPSHOT_EVERY = 20;
 
 export class Trace {
   private readonly ring: TraceEvent[] = [];

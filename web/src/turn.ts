@@ -15,6 +15,7 @@ export { t_acquire, t_catabolise, t_die, t_expand, t_research, t_win }
 import { WILD_TYPE, rollAllele } from "./allele.js";
 import { describeLevel, strainLevel } from "./strain.js";
 import { atpCeiling } from "./chromosome.js";
+import { isSnapshotTurn, snapshot } from "./snapshot.js";
 import * as bio from "./biology.js";
 import * as say from "./flavour.js";
 import { BARRIERS, barrierAt, blockedBy, degrade } from "./barrier.js";
@@ -204,7 +205,14 @@ export function t_upkeep(_g: Game): void {
     // it computed the pool from last turn's strain, so the ATP ceiling lagged
     // a level behind for one turn after every advance.
     const before = _g.genome.strain;
-    if (level !== before) _g.genome.strain = level;
+    if (level !== before) {
+      _g.genome.strain = level;
+      // Anchored with a full snapshot: a level change moves ring positions,
+      // kilobases and the ATP ceiling all at once, and "everything shifted
+      // around turn 300" is otherwise very hard to place.
+      _g.trace.push(_g.clock.turn, "state",
+        `strain L${String(before)} -> L${String(level)}; ${snapshot(_g)}`);
+    }
 
     // The energy a cell can hold scales with how big and how adapted it is.
     // Without this the ceiling sat at 100 for ever and most of the growth
@@ -236,6 +244,12 @@ export function t_upkeep(_g: Game): void {
     const gain = _g.genome.atpGain(d);
     const cost = _g.genome.atpCost(d);
     _g.repairSpend = 0;                  // set below if anything is repaired
+
+    // A periodic picture of every variable, so the log can answer a question
+    // about STATE and not only about events.
+    if (isSnapshotTurn(_g.clock.turn)) {
+      _g.trace.push(_g.clock.turn, "state", snapshot(_g));
+    }
     _g.player.atp = Math.min(_g.player.atp + gain, _g.player.atpMax);
     if (cost <= _g.player.atp) {
       _g.player.atp -= cost;

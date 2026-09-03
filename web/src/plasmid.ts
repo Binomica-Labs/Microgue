@@ -545,7 +545,26 @@ export class Plasmid {
    * the invariant matters more than the individual write.
    */
   private ensureOrigin(): void {
-    if (this.slots.some((s) => s?.kind === "gene" && s.id === "ori")) return;
+    // EXACTLY one, not at least one.
+    //
+    // A fresh plasmid is constructed with an origin at its default position.
+    // `applySave` then writes the saved ring one `put` at a time, and if the
+    // player had ever spun the ring the saved origin lands somewhere else --
+    // so the constructed one was never displaced and the plasmid came back
+    // with two. Both drew, and neither could be excised, because `remove`
+    // refuses to take an origin.
+    //
+    // Removing the extras here rather than in `applySave` keeps the rule in
+    // the one place that owns it: every write goes through `touch`, so there
+    // is no path that can produce a second and escape this.
+    let seen = false;
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i];
+      if (s?.kind !== "gene" || s.id !== "ori") continue;
+      if (seen) this.slots[i] = null;
+      seen = true;
+    }
+    if (seen) return;
     const free = this.slots.findIndex((s, i) => s === null && this.usable(i));
     const at = free >= 0 ? free
       : this.slots.findIndex((s, i) => this.usable(i) && s?.kind !== "gene");

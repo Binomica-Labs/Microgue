@@ -443,8 +443,10 @@ class Game {
     const r = this.genome.install(i, free);
     if (!r.ok) { this.toasts.push(r.err, "warn", this.now); return; }
     this.selected = free;
-    this.trace.push(this.clock.turn, "input",
-                    `install ${part.kind} at slot ${String(free)}`);
+    this.trace.push(this.clock.turn, "build",
+      `install ${part.kind === "gene" ? part.id : part.kind} at ${String(free)}`
+      + ` (${String(this.genome.free())} free, `
+      + `${this.genome.used().toFixed(1)}kb)`);
     this.save();
   }
 
@@ -831,6 +833,7 @@ class Game {
   /** Single entry point, so nothing can open the screen without also parking
    *  the world. An in-flight walk used to keep stepping underneath it. */
   openPlasmid(open: boolean): void {
+    this.trace.push(this.clock.turn, "ui", `plasmid ${open ? "open" : "close"}`);
     this.showPlasmid = open;
     this.selected = null;
     this.dragFrom = null;

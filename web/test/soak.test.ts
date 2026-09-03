@@ -2291,3 +2291,77 @@ describe("the ATP readout accounts for everything that spends it", () => {
   });
 
 });
+
+describe("the recorder records enough to debug from", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("an ordinary session produces every kind of entry", async () => {
+    // The recorder had eleven kinds declared and logged from sixteen sites,
+    // none of which covered chromosome edits, screens or state over time. Most
+    // reported bugs are questions about STATE -- "my ATP is draining", "the
+    // bar is not moving" -- and a list of events cannot answer one.
+    const g = await game();
+    g.startRun(0);
+    g.press("explore");
+    for (let i = 0; i < 60; i++) { g.press("wait"); g.frame(i * 40); }
+    g.openPlasmid(true);
+    g.installFromBin(0);
+    g.openPlasmid(false);
+
+    const kinds = new Set(g.trace.all().map((e) => e.kind));
+    for (const want of ["input", "state", "ui"]) {
+      expect(kinds.has(want as never), `nothing of kind "${want}" was recorded`)
+        .toBe(true);
+    }
+  });
+
+  it("a snapshot names every variable a bug report asks about", async () => {
+    const { snapshot } = await import("../src/snapshot.js");
+    const g = await game();
+    g.startRun(0);
+    g.press("wait");
+    const s = snapshot(g);
+    for (const part of ["hp", "atp", "net", "pow", "kb", "slots", "bin", "mobs"]) {
+      expect(s.includes(part), `the snapshot omits ${part}: "${s}"`).toBe(true);
+    }
+    // One line, or nobody reads it.
+    expect(s.includes("\n")).toBe(false);
+    expect(s.length, `${String(s.length)} characters is not one line`)
+      .toBeLessThan(160);
+  });
+
+  it("snapshots are a minority of the ring, not most of it", async () => {
+    // A snapshot every turn would evict the events that explain the state.
+    const g = await game();
+    g.startRun(0);
+    for (let i = 0; i < 200; i++) g.press("wait");
+    const all = g.trace.all();
+    const snaps = all.filter((e) => e.kind === "state").length;
+    expect(snaps, "no snapshots at all over 200 turns").toBeGreaterThan(3);
+    expect(snaps / all.length, "snapshots crowded out the events")
+      .toBeLessThan(0.5);
+  });
+
+  it("the ring never exceeds its cap however long the session", async () => {
+    const { TRACE_CAP } = await import("../src/trace.js");
+    const g = await game();
+    g.startRun(0);
+    for (let i = 0; i < 1500; i++) g.press("wait");
+    expect(g.trace.all().length).toBeLessThanOrEqual(TRACE_CAP);
+    // And the newest entry is still the newest.
+    const all = g.trace.all();
+    for (let i = 1; i < all.length; i++) {
+      expect(all[i]?.t ?? 0).toBeGreaterThanOrEqual(all[i - 1]?.t ?? 0);
+    }
+  });
+});

@@ -62,6 +62,8 @@ export function t_look(_g: Game): void {
         ? `a ${names[0] ?? ""}`
         : `${String(threats.length)} things`;
       _g.note(`You stop. ${what.charAt(0).toUpperCase()}${what.slice(1)} comes into view.`);
+      _g.trace.push(_g.clock.turn, "ui",
+        `explore halted by ${threats.map((x) => x.name).join(", ")}`);
       _g.toasts.push(`${what} in view.`, "warn", _g.now);
     }
   }

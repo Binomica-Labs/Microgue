@@ -1,3 +1,37 @@
+# v1.7.0 — a recorder you can debug from
+
+It had eleven kinds declared and logged from sixteen sites, none of which
+covered chromosome edits, screens, or STATE. Most reported bugs are questions
+about state over time -- "my ATP is draining", "the bar is not moving", "the
+damage came from nowhere" -- and a list of events cannot answer one of them.
+
+Three additions:
+
+* **`state`** -- one compact line every 20 turns, and on any transition worth
+  anchoring to (a strain level change moves ring positions, kilobases and the
+  ATP ceiling at once). Everything in about 120 characters: floor, position,
+  hp, atp, NET balance, power, kb, slots, level, kills, bin, live mobs, status.
+  One line, because a snapshot that wraps is one nobody reads.
+* **`build`** -- every chromosome edit, with what it left behind
+  (`install promoter at 7 (2 free, 3.7kb)`). A build that stops working is
+  nearly always something you changed.
+* **`ui`** -- screens opened and closed, settings toggled, auto-explore halts
+  and what halted them. Cheap, and it is how you tell a misread interface from
+  a misbehaving one.
+
+`TRACE_CAP` went 400 to 900: at 400 a busy few minutes evicted the beginning of
+the session, which is usually where the cause is.
+
+`microgue.report()` returns version, viewport, full state and the whole ring as
+one string -- what you paste into a bug report without being asked three
+follow-up questions. `microgue.traceOf(kind)` filters when the log is long and
+the question is narrow.
+
+`spec` covers the shape rather than the content: every kind appears in an
+ordinary session, a snapshot names every variable a report asks about, snapshots
+stay a MINORITY of the ring (one per turn would evict the events that explain
+the state), and the ring never exceeds its cap or comes back out of order.
+
 # v1.6.0 — you choose what goes into the column
 
 Chosen ONCE, on an empty slot, before anything is created. An occupied slot
@@ -29,6 +63,28 @@ hazard, so the default class took a point of damage every turn from turn one --
 not a trade, a countdown. It carries katG now, which is also more correct: a
 cyanobacterium that could not handle its own peroxide would not exist. Catalase
 is a precondition for oxygenic photosynthesis, not an upgrade.
+
+## Two origins
+
+A fresh plasmid is CONSTRUCTED with an origin at its default position.
+`applySave` then writes the saved ring back one `put` at a time -- and if the
+player had ever spun the ring, the saved origin lands somewhere else, so the
+constructed one was never displaced. The plasmid came back with two. Both drew,
+and neither could be excised, because `remove` refuses to take an origin.
+
+`ensureOrigin` enforced AT LEAST one. It enforces EXACTLY one now, stripping
+extras. Kept there rather than in `applySave` because every write goes through
+`touch`, so there is no path that can make a second and escape it -- and anyone
+already carrying a two-origin save has it repaired on the first write.
+
+The comment on that function had anticipated the missing case and named
+`applySave` as the reason for it. It did not occur to me that the same path
+could produce a surplus.
+
+Guarded three ways: a saved ring replayed at six different rotations, a
+200-seed fuzz asserting exactly one origin after every single edit, and a
+planted second origin being cleaned up on the next write. Verified by
+restoring the old rule: five failures.
 
 ## "Losing ATP at +0.1"
 

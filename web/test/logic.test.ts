@@ -7219,3 +7219,66 @@ describe("strain classes", () => {
            "every class starts with the same chromosome").toBeGreaterThan(1);
   });
 });
+
+describe("there is exactly one origin, always", () => {
+  const origins = (p: Plasmid): number =>
+    p.slots.filter((s) => s?.kind === "gene" && s.id === "ori").length;
+
+  it("a saved ring written back through put() does not duplicate it", () => {
+    // A fresh plasmid is CONSTRUCTED with an origin at its default position.
+    // `applySave` then writes the saved ring one `put` at a time, and if the
+    // player had ever spun the ring the saved origin lands elsewhere -- so the
+    // constructed one was never displaced and the plasmid came back with two.
+    // Both drew, and neither could be excised, because `remove` refuses to
+    // take an origin.
+    for (const spin of [0, 1, 3, 7, -2, 11]) {
+      const src = new Plasmid();
+      src.integrated = 6;
+      src.put(5, { kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+      src.rotate(spin);
+      const ring = src.slots.slice();
+
+      const dst = new Plasmid();
+      dst.integrated = 6;
+      for (const [i, part] of ring.entries()) if (part) dst.put(i, part);
+      expect(origins(dst), `spin ${String(spin)} produced `
+        + `${String(origins(dst))} origins`).toBe(1);
+    }
+  });
+
+  it("no sequence of edits can produce a second", () => {
+    const genes = (Object.keys(bio.GENES) as bio.GeneId[]).filter((g) => g !== "ori");
+    for (let seed = 0; seed < 200; seed++) {
+      const p = new Plasmid();
+      p.integrated = seed % 9;
+      const rng = makeRng(seed * 13);
+      for (let step = 0; step < 30; step++) {
+        const g = genes[rng.int(genes.length)];
+        switch (rng.int(7)) {
+          case 0:
+            if (g) p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+            break;
+          case 1: p.install(rng.int(Math.max(p.bin.length, 1)), rng.int(p.usableSlots)); break;
+          case 2: p.swap(rng.int(p.usableSlots), rng.int(p.usableSlots)); break;
+          case 3: p.rotate(rng.int(24) - 12); break;
+          case 4: p.remove(rng.int(p.usableSlots)); break;
+          case 5: p.uninstall(rng.int(p.usableSlots)); break;
+          case 6: p.integrated = rng.int(9); break;
+        }
+        expect(origins(p), `seed ${String(seed)} step ${String(step)}: `
+          + `${String(origins(p))} origins`).toBe(1);
+      }
+    }
+  });
+
+  it("a save carrying two is repaired on load", () => {
+    // Anyone already playing has one of these on disk. Loading must fix it,
+    // not preserve it.
+    const p = new Plasmid();
+    p.integrated = 6;
+    p.slots[7] = { kind: "gene", id: "ori", level: 1, mods: [], allele: WILD_TYPE };
+    // Force the repair the way any real write would.
+    p.put(9, { kind: "terminator", id: "rrnbt1" });
+    expect(origins(p), "a plasmid with a planted second origin kept it").toBe(1);
+  });
+});

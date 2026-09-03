@@ -13,7 +13,12 @@ import type { Game } from "./main.js";
 
 export interface Console_ {
   trace(n?: number): string;
+  /** Only one kind, for when the log is long and the question is narrow. */
+  traceOf(kind: string, n?: number): string;
   state(): unknown;
+  /** Everything, as one string: version, state, and the whole ring. What you
+   *  paste into a bug report without being asked three follow-up questions. */
+  report(): string;
   press(id: string): void;
   start(slot?: number): void;
   game: Game;
@@ -33,6 +38,18 @@ export function installConsole(game: Game): void {
       dead: game.dead, won: game.won,
       toasts: game.toasts.all().map((t) => `${t.level}: ${t.text}`),
     }),
+    traceOf: (kind, n = 200) => game.trace.all()
+      .filter((e) => e.kind === kind)
+      .slice(-n)
+      .map((e) => `T${String(e.t).padStart(5)}  ${e.what}`)
+      .join("\n"),
+    report: () => [
+      `microgue ${VERSION}`,
+      `${String(innerWidth)}x${String(innerHeight)} dpr ${String(devicePixelRatio)}`,
+      JSON.stringify(api.state(), null, 1),
+      "",
+      game.trace.dump(),
+    ].join("\n"),
     press: (id) => { game.press(id); },
     start: (slot = 0) => { game.startRun(slot); },
     game,
