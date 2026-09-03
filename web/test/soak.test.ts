@@ -2459,3 +2459,57 @@ describe("nothing about the last run survives into the next", () => {
     }), "a new strain inherited state from the last one").toBe(clean);
   });
 });
+
+describe("floor cleared means the floor was sealed", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  /** Kill an elite on the current floor and return what was announced. */
+  const killElite = (g: Awaited<ReturnType<typeof game>>): string[] => {
+    const before = g.toasts.all().length;
+    const proto = g.level.mobs[0];
+    if (!proto) return [];
+    g.level.mobs.push({ ...proto, elite: true, alive: true, hp: 1,
+                        x: g.player.x + 1, y: g.player.y,
+                        ax: g.player.x + 1, ay: g.player.y });
+    g.attack(g.level.mobs[g.level.mobs.length - 1] as never);
+    return g.toasts.all().slice(before).map((t) => t.text);
+  };
+
+  it("an elite on an ordinary floor does not clear it", async () => {
+    // `isCleared` answers "is the seal holding", and on a floor with no seal
+    // it is trivially true -- so this announced that a way down had opened
+    // which had never been shut, on every elite kill on every floor.
+    const g = await game();
+    g.startRun(0);
+    expect(g.level.boss, "the fixture landed on a boss floor").toBe(false);
+    expect(killElite(g).join(" "), "an ordinary floor announced itself cleared")
+      .not.toContain("cleared");
+  });
+
+  it("and it does not announce twice on a boss floor", async () => {
+    const g = await game();
+    g.startRun(0);
+    // Force a sealed floor with nothing else alive on it.
+    g.level.boss = true;
+    g.level.cleared = false;
+    for (const m of g.level.mobs) m.alive = false;
+
+    const first = killElite(g).join(" ");
+    expect(first, "a boss floor did not announce clearing").toContain("cleared");
+    expect(g.level.cleared, "the transition was not latched").toBe(true);
+
+    const second = killElite(g).join(" ");
+    expect(second, "it announced clearing a second time")
+      .not.toContain("cleared");
+  });
+});

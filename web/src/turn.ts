@@ -516,7 +516,16 @@ export function t_attack(_g: Game, m: Mob): void {
       // counted, as cataloguing. See strain.ts -- the term saturates, so
       // this rewards fighting without rewarding grinding.
       _g.run.killed += 1;
-      if (m.elite && Dungeon.isCleared(_g.level)) {
+      // Only on a BOSS floor, and only once.
+      //
+      // `isCleared` answers "is the seal holding", and on a floor with no seal
+      // it is trivially true -- so this fired on every elite kill on every
+      // floor, announcing that a way down had opened which had never been
+      // shut. `cleared` was declared on Level and never read or written by
+      // anything; it latches the transition now, which is what it was for.
+      if (m.elite && _g.level.boss && !_g.level.cleared
+          && Dungeon.isCleared(_g.level)) {
+        _g.level.cleared = true;
         _g.note("The floor goes quiet. The way down is clear.");
         _g.toasts.push("Floor cleared.", "info", _g.now);
         if (_g.dungeon.floor >= MAX_FLOOR) _g.win();

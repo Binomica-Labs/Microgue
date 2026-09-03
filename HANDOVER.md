@@ -24,6 +24,25 @@ A per-vertex outward bulge replaces the old per-vertex radius: a pure contour
 cuts through tile midpoints, which reads slightly thinner than the tiles it
 represents. Deterministic, so the silhouette never shimmers between frames.
 
+## "Floor cleared" on every elite kill
+
+`Dungeon.isCleared` answers "is the seal holding":
+
+    return !lvl.boss || !lvl.mobs.some((m) => m.alive && m.elite);
+
+On a floor with no seal that is trivially TRUE, so killing any elite anywhere
+announced that a way down had opened which had never been shut -- and announced
+it again for the next elite.
+
+The condition is now boss-floor only and latched on `Level.cleared`, a field
+that was declared in the interface and NEVER READ OR WRITTEN by anything. It
+existed for exactly this and had been left unwired.
+
+The name is the trap. `isCleared` reads like "the floor has been cleared" and
+means "nothing is holding the stairs" -- true by default rather than earned.
+A predicate whose true case is the DEFAULT needs a name that says so; `sealed`
+is what the HUD already calls the inverse, and it is the honest way round.
+
 ## The same mistake twice in two versions
 
 v1.8.2's barrier renderer carried this comment:
