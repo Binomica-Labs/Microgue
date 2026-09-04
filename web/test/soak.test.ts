@@ -2513,3 +2513,38 @@ describe("floor cleared means the floor was sealed", () => {
       .not.toContain("cleared");
   });
 });
+
+describe("tapping a part on the ring describes it", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a tap on an installed part opens its card", async () => {
+    // It used to fall through every branch: the drag handler required
+    // `target !== dragFrom`, which a tap never satisfies, so tapping a part on
+    // the chromosome did nothing while tapping the same part in the bin
+    // described it.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(30);
+
+    // Find a slot that actually holds something, and tap its centre.
+    const i = g.genome.slots.findIndex((s, n) => s !== null && g.genome.usable(n));
+    expect(i, "the fixture found no installed part").toBeGreaterThanOrEqual(0);
+    // Computed here rather than exposed on Game: main.ts is at the 900-line
+    // ceiling and a method that exists only for a test is the wrong thing to
+    // spend those lines on.
+    const { slotCentre } = await import("../src/plasmid_ui.js");
+    const c = slotCentre(g.ring, i);
+    g.card = null;
+    g.pointerDown(c.x, c.y);
+    g.pointerUp(c.x, c.y);
+    expect(g.card, "tapping a part on the ring described nothing").not.toBeNull();
+    expect(g.cardIndex, "it was treated as a bin row").toBe(-1);
+  });
+});

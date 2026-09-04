@@ -314,6 +314,19 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
             }
           }
         } else if (_g.dragFrom !== null) {
+          // A tap that never moved and landed where it started is an INSPECT.
+          // It used to fall through every branch -- `target !== _g.dragFrom`
+          // fails, so tapping a part already on the chromosome did nothing at
+          // all, while tapping the same part in the bin described it.
+          if (_g.panMoved < 8 && target === _g.dragFrom) {
+            _g.card = _g.genome.slots[_g.dragFrom] ?? null;
+            _g.cardIndex = -1;                 // it is on the ring, not the bin
+            _g.selected = _g.dragFrom;
+            _g.dragFrom = null;
+            _g.dragXY = null;
+            _g.gesture = "none";
+            return;
+          }
           if (_g.binRows.some((r) => inBoxOf(r.box, x, y))) {
             const r = _g.genome.uninstall(_g.dragFrom);   // ring -> bin
             if (r.ok) { _g.selected = null; _g.save(); } else _g.note(r.err);

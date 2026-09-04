@@ -1,3 +1,33 @@
+# v1.9.0 — rarity on the ring, and taps that describe
+
+A rarity band on the INNER edge of each wedge. The wedge itself is coloured by
+part TYPE -- promoter, gene, terminator -- which is what you need while
+building an operon, so rarity could only be read one part at a time and a
+legendary allele on the ring looked exactly like the wild type it replaced.
+
+Inner rather than outer: the outer edge already carries the operon arc, and two
+rings of meaning on one edge read as one. `common` gets no band, because a band
+on every wedge is the same as a band on none.
+
+## Two things found while doing it
+
+**`_g.cardIndex = null` did not compile.** The tap-to-inspect branch on the ring
+assigns null to a field declared `cardIndex = -1`, so it was a type error
+sitting in the tree -- which means the build shipping to the phone cannot have
+contained it, and tapping a part on the chromosome did nothing. Fixed to the
+`-1` sentinel that the rest of the code already uses.
+
+**I wrote a `partRarity` that already existed.** `plasmid_ui.ts` has had one
+since the bin was rewritten; mine went in `items.ts`, shadowed it at the call
+site, and produced a lint error about a comparison with no overlap -- which is
+the only reason I found the duplicate at all. Deleted; the existing one does
+the same job and returns a `Rarity` rather than a colour, which is the better
+shape.
+
+**A method that exists only for a test is the wrong thing to spend the ceiling
+on.** `slotCentreAt` pushed main.ts to exactly 900 lines. The test imports
+`slotCentre` and computes it itself.
+
 # v1.8.0 — the staircase is gone
 
 `traceWalls` drew each wall SQUARE with its corners rounded. That is why a

@@ -7563,3 +7563,37 @@ describe("a filled shape fills itself, not its bounding box", () => {
     expect(Math.abs(a - walls)).toBeLessThan(Math.abs(a - (g.w * g.h - walls)));
   });
 });
+
+describe("the ring shows rarity at a glance", () => {
+  it("a band is drawn for anything above common, and not for common", () => {
+    // The wedge is coloured by part TYPE, which is what you need while
+    // building an operon -- so rarity had to be read one part at a time, and a
+    // legendary allele on the ring looked exactly like the wild type it
+    // replaced.
+    const wild: Part = { kind: "gene", id: "psbA", level: 1, mods: [],
+                         allele: WILD_TYPE };
+    expect(partRarity(wild), "a wild-type allele is not common").toBe("common");
+
+    const epic: Part = { kind: "gene", id: "psbA", level: 1, mods: [],
+                         allele: { ...WILD_TYPE, kcat: 1.7, km: 0.55,
+                                   stability: 1.5, prefix: "hyperactive",
+                                   suffix: "highCopy", rarity: "legendary" } };
+    expect(partRarity(epic), "a rolled allele reported as common")
+      .not.toBe("common");
+    expect(RARITY[partRarity(epic)].colour,
+           "the rarity has no colour to draw").toBeTruthy();
+  });
+
+  it("every rarity a part can carry has a colour", () => {
+    // The band is drawn straight from this table; a missing entry would be an
+    // undefined stroke style, which silently draws nothing.
+    for (const id of Object.keys(PROMOTERS) as (keyof typeof PROMOTERS)[]) {
+      const c = RARITY[PROMOTERS[id].rarity].colour;
+      expect(c, `promoter ${id} has no rarity colour`).toBeTruthy();
+    }
+    for (const id of Object.keys(TERMINATORS) as (keyof typeof TERMINATORS)[]) {
+      const c = RARITY[TERMINATORS[id].rarity].colour;
+      expect(c, `terminator ${id} has no rarity colour`).toBeTruthy();
+    }
+  });
+});

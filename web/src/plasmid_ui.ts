@@ -347,6 +347,33 @@ export function drawRing(
     ctx.arc(g.cx, g.cy, mid, a0 + 0.018, a0 + step - 0.018);
     ctx.stroke();
 
+    // A rarity band on the INNER edge of the wedge.
+    //
+    // The wedge itself is coloured by part TYPE -- promoter, gene, terminator
+    // -- which is what you need while building an operon. Rarity was only
+    // visible by opening each part in turn, so a legendary allele sitting on
+    // the ring looked exactly like the wild type it replaced.
+    //
+    // Inner rather than outer: the outer edge already carries the operon arc,
+    // and two rings of meaning on the same edge read as one.
+    if (part && !dragging) {
+      // The wedge is coloured by part TYPE -- promoter, gene, terminator --
+      // which is what you need while building an operon. Rarity had to be
+      // read one part at a time, so a legendary allele on the ring looked
+      // exactly like the wild type it replaced.
+      //
+      // `common` is skipped: a band on every wedge is the same as none.
+      const rare = partRarity(part);
+      if (rare !== "common") {
+        ctx.strokeStyle = RARITY[rare].colour;
+        ctx.lineWidth = Math.max(band * 0.16, 2);
+        ctx.beginPath();
+        ctx.arc(g.cx, g.cy, g.rInner + Math.max(band * 0.08, 1),
+                a0 + 0.018, a0 + step - 0.018);
+        ctx.stroke();
+      }
+    }
+
     if (part && !dragging) {
       const c = slotCentre(g, i);
       const e = part.kind === "gene" ? p.expression(part.id, o.depth) : 1;

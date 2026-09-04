@@ -59,7 +59,6 @@ import { makeRng } from "./rng.js";
 import { Toasts } from "./toast.js";
 import { DEFAULT_SETTINGS, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX, ZOOM_PREF_MIN, readSave, type SaveData, type Settings } from "./save.js";
 
-
 /** Tiles across the SHORT viewport axis at the default zoom. Sight radius
  *  reaches 11, so the lit disc is 23 across; this fits it on every device. */
 export const TILES_ACROSS = 26;
@@ -341,7 +340,6 @@ class Game {
 
   ascend(): void { t_ascend(this); }
 
-
   // ------------------------------------------------------------- combat
   atk(): number { return 3 + this.genome.power(this.dungeon.depth) * 0.9; }
 
@@ -349,13 +347,10 @@ class Game {
    *  sulfide aura burns anything adjacent. */
   upkeep(): void { t_upkeep(this); }
 
-
   attack(m: Mob): void { t_attack(this, m); }
-
 
   /** The world as the invariants see it. */
   world(): WorldView { return t_world(this); }
-
 
   /**
    * Check the sacred invariants and surface any violation.
@@ -366,21 +361,16 @@ class Game {
    */
   audit(): void { t_audit(this); }
 
-
   mobTurn(): void { t_mobTurn(this); }
 
-
   step(x: number, y: number): boolean { return t_step(this, x, y); }
-
 
   /** Take one item. Substrates are metabolised on the spot; cassettes go to
    *  the bin. Returns false if the bin had no room. */
   take(it: Item): boolean { return t_take(this, it); }
 
-
   /** What is on a tile, in words. */
   describeTile(x: number, y: number): void { t_describeTile(this, x, y); }
-
 
   /** Scatter `n` substrate drops appropriate to this level. */
   scatter(level: Level, n: number): void {
@@ -404,18 +394,14 @@ class Game {
   /** A visible thing that can actually hurt you; see sight.ts. */
   visibleHostile(): Mob | null { return t_visibleHostile(this); }
 
-
   /** Called after the player lands on a tile. */
   onTile(x: number, y: number): void { t_onTile(this, x, y); }
-
 
   /** One turn of chasing. Returns true if anything happened. */
   takeTurn(): boolean { return t_takeTurn(this); }
 
-
   /** Spend on directed evolution, or attach a held modifier. */
   research(row: ResearchRow): void { t_research(this, row); }
-
 
   /** The bottom of the column, with the last thing on it dead. */
   win(): void { t_win(this); }
@@ -478,12 +464,10 @@ class Game {
     return [...out];
   }
 
-
   /** The run ends. The lineage keeps the loci it has had longest and starts
    *  again at the surface -- "resynthesized with some of the genes you
    *  acquired in the previous run". */
   die(): void { t_die(this); }
-
 
   stairs(): boolean {
     const { x, y } = this.player;
@@ -495,7 +479,6 @@ class Game {
 
   // -------------------------------------------------------------- input
   repath(): void { t_repath(this); }
-
 
   tap(tx: number, ty: number): void {
     this.trace.push(this.clock.turn, "input", `tap ${String(tx)},${String(ty)}`);
@@ -553,20 +536,15 @@ class Game {
 
   bindInput(): void { i_bindInput(this); }
 
-
   onKey(e: KeyboardEvent): void { i_onKey(this, e); }
 
-
   bindPinch(): void { i_bindPinch(this); }
-
 
   // ------------------------------------------------------------ persist
   save(): void { p_save(this); }
 
-
   /** Load a parsed save into live state. Shared by slot loading and boot. */
   applySave(s: SaveData): void { p_applySave(this, s); }
-
 
   load(): boolean {
     migrateLegacy();
@@ -705,45 +683,33 @@ class Game {
 
   step_(t: number): void { t_step_(this, t); }
 
-
   draw(): void { r_draw(this); }
-
 
   /** World-space effects, drawn inside the camera transform. */
   drawFx(px: number): void { r_drawFx(this, px); }
 
-
   /** Screen-space effects: the level-transition wipe. */
   drawScreenFx(W: number, H: number): void { r_drawScreenFx(this, W, H); }
 
-
   drawHud(W: number, H: number): void { r_drawHud(this, W, H); }
-
 
   drawPlasmid(W: number, H: number): void { r_drawPlasmid(this, W, H); }
 
-
   inClose(x: number, y: number): boolean { return i_inClose(this, x, y); }
-
 
   pointerDown(x: number, y: number): void { i_pointerDown(this, x, y); }
 
-
   pointerMove(x: number, y: number): void { i_pointerMove(this, x, y); }
 
-
   pointerUp(x: number, y: number): void { i_pointerUp(this, x, y); }
-
 
   /** Minimal renderer for when draw() itself has failed. Touches only the
    *  context and the message, so it cannot fail for the same reason. */
   drawEmergency(msg: string): void { r_drawEmergency(this, msg); }
 
-
   /** Toasts, drawn above everything. A silent failure on a phone with no
    *  console is the worst outcome there is. */
   drawToasts(W: number, H: number): void { r_drawToasts(this, W, H); }
-
 
 
   startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void {
@@ -840,11 +806,9 @@ class Game {
    *  feature, not lifecycle, and main.ts is only allowed to hold lifecycle. */
   exportPlasmid(): void { x_export(this); }
 
-
   /** A lysate opened: its contents as slots, like any RPG container. */
 
   drawMapScreen(W: number, H: number): void { r_drawMapScreen(this, W, H); }
-
 
   /** Graph-space point for a screen point, accounting for the header offset. */
   /** @internal: public because input routing lives in input.ts */
