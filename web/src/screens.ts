@@ -648,3 +648,71 @@ export function drawLab(
     : "close to send the next strain down", W / 2, H - ins.bottom - 18 * u);
   return { close: drawClose(ctx, W, ins, u), maxScroll };
 }
+
+/**
+ * Confirm an order.
+ *
+ * Modal over the lab. The shop is a scrolling list on a phone and an order was
+ * a single tap, so a scroll that ended on a row bought whatever it landed on
+ * -- with credit that takes several runs to earn and no way to undo it.
+ *
+ * The cost is repeated here, and so is what is left afterwards: the number
+ * that matters at the moment of spending is not the price but the balance you
+ * are about to have.
+ */
+export function drawConfirm(
+  ctx: CanvasRenderingContext2D, W: number, H: number, u: number,
+  name: string, cost: number, credit: number,
+): { yes: Box; no: Box } {
+  ctx.fillStyle = "rgba(0,0,0,0.78)";
+  ctx.fillRect(0, 0, W, H);
+
+  const w = Math.min(W - 48 * u, 340 * u);
+  const h = 152 * u;
+  const x = (W - w) / 2, y = (H - h) / 2;
+
+  ctx.fillStyle = "#0e1411";
+  ctx.strokeStyle = "rgba(200,230,210,0.35)";
+  ctx.lineWidth = Math.max(1.4 * u, 1.2);
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 10 * u);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `${13 * u}px ui-monospace,monospace`;
+  ctx.fillText("order this?", x + w / 2, y + 28 * u);
+
+  ctx.fillStyle = "#cfe04a";
+  ctx.font = `${12 * u}px ui-monospace,monospace`;
+  ctx.fillText(name, x + w / 2, y + 52 * u);
+
+  const short = cost > credit;
+  ctx.fillStyle = short ? "#e08a5a" : "#8fa89a";
+  ctx.font = `${10 * u}px ui-monospace,monospace`;
+  ctx.fillText(short
+    ? `${String(cost)} credit \u2014 you have ${String(credit)}`
+    : `${String(cost)} credit, leaving ${String(credit - cost)}`,
+    x + w / 2, y + 74 * u);
+
+  const bw = (w - 44 * u) / 2, bh = 38 * u, by = y + h - bh - 16 * u;
+  const no: Box = { x: x + 16 * u, y: by, w: bw, h: bh };
+  const yes: Box = { x: x + w - bw - 16 * u, y: by, w: bw, h: bh };
+
+  for (const [box, label, colour] of [
+    [no, "cancel", "rgba(255,255,255,0.5)"],
+    [yes, short ? "not enough" : "order", short ? "rgba(255,255,255,0.25)" : "#7fe0a4"],
+  ] as [Box, string, string][]) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = Math.max(1.3 * u, 1.1);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 7 * u);
+    ctx.stroke();
+    ctx.fillStyle = colour;
+    ctx.font = `${12 * u}px ui-monospace,monospace`;
+    ctx.fillText(label, box.x + box.w / 2, box.y + box.h / 2 + 4 * u);
+  }
+  return { yes, no };
+}

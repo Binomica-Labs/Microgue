@@ -101,13 +101,19 @@ export const CLASSES: Readonly<Record<ClassId, StrainClass>> = {
     id: "heterotroph",
     name: "Heterotroph",
     blurb: "Digests everything. Makes nothing.",
-    genes: ["celA", "katG"],
+    // celA AND flhD. Pseudomonas is the textbook motile bacterium, and no
+    // class carried a motility gene at all -- which is why new strains stopped
+    // growing a flagellum when classes replaced the old fixed starting kit.
+    // Catalase was my choice rather than a requirement here; motility is the
+    // more characteristic thing and the more visible one.
+    genes: ["celA", "flhD"],
     trait: "partitioned",
     sites: 2,
     native: [1, 8],
     pros: [
       "chews through crusts and sealed pockets earliest",
       "catabolises DNA well -- other people's genes are food",
+      "flagellated from the start: it goes and finds things",
       "par locus: intermediates never accumulate",
     ],
     cons: [

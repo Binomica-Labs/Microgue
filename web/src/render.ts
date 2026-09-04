@@ -34,6 +34,7 @@ import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
 import { drawContainer, drawLab, drawNotes, drawResearch, ellipsise }
   from "./screens.js";
+import { drawConfirm } from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
 import { Effects, easeOutQuad }
   from "./fx.js";
@@ -523,6 +524,11 @@ export function r_draw(_g: Game): void {
       _g.closeBox = lab.close;
       _g.shopMaxScroll = lab.maxScroll;
       ctx.globalAlpha = 1;
+      // Modal over the shop, drawn last so nothing overlaps it.
+      _g.confirmBoxes = _g.pendingOrder
+        ? drawConfirm(ctx, W, H, u, _g.pendingOrder.name, _g.pendingOrder.price,
+                      _g.lab.credit)
+        : null;
       r_drawToasts(_g, W, H);
       return;
     }

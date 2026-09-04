@@ -201,6 +201,16 @@ export const MORPHOLOGY: Readonly<Record<string, readonly Shape[]>> = {
   ],
 
   // D8 -- methanogenic floor
+  methylomonas: [
+    // A rod stacked with internal membranes. Type I methanotrophs pack their
+    // cytoplasm with parallel membrane sheets carrying the monooxygenase --
+    // the enzyme is IN the membrane, so more membrane is more of it.
+    el(0.50, 0.50, 0.40, 0.26, "dark"),
+    el(0.50, 0.50, 0.36, 0.22, "body"),
+    { k: "poly", role: "accent", pts: [[0.20,0.40],[0.80,0.40],[0.80,0.43],[0.20,0.43]] },
+    { k: "poly", role: "accent", pts: [[0.20,0.485],[0.80,0.485],[0.80,0.515],[0.20,0.515]] },
+    { k: "poly", role: "accent", pts: [[0.20,0.57],[0.80,0.57],[0.80,0.60],[0.20,0.60]] },
+  ],
   methanosarcina: [
     // sarcina: a cuboidal packet held in a common matrix
     { k: "poly", role: "dark", pts: [[0.13,0.13],[0.87,0.13],[0.87,0.87],[0.13,0.87]] },

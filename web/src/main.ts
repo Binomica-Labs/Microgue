@@ -155,6 +155,10 @@ class Game {
   deathAt = 0;
   showLab = false;
   shopRows: ShopRow[] = [];
+  /** An order awaiting confirmation. Credit takes runs to earn and a misfired
+   *  tap on a scrolling list cannot be undone. */
+  pendingOrder: Offer | null = null;
+  confirmBoxes: { yes: Box; no: Box } | null = null;
   /** First visible row of the order form, and how far it can go. */
   shopScroll = 0;
   shopMaxScroll = 0;
@@ -446,7 +450,19 @@ class Game {
   explore(): void { t_explore(this); }
 
   /** Order a construct with banked credit. */
+  /**
+   * Ask before spending.
+   *
+   * The shop is a scrolling list on a phone and an order was a single tap, so
+   * a scroll that ended on a row bought whatever it landed on -- with credit
+   * that took several runs to earn and no way to undo it.
+   */
+  askOrder(offer: Offer): void {
+    this.pendingOrder = offer;
+  }
+
   order(offer: Offer): void {
+    this.pendingOrder = null;
     const r = buy(this.lab, offer);
     if (!r.ok) { this.toasts.push(r.err, "warn", this.now); return; }
     writeLab(this.lab);

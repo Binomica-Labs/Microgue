@@ -28,7 +28,12 @@ export type GeneId =
   | "nirS" | "norB" | "sat" | "nxrA" | "luxAB"
   | "chiA" | "celA" | "dspB"
   | "bd" | "cbbM" | "nifD" | "anfG" | "phsA" | "ttrA" | "frdA" | "cooS" | "pceA" | "arsC" | "arrA" | "mnhA" | "atpB" | "groL" | "dnaK" | "recA" | "uvrA" | "cheA" | "flhD" | "pilA"
-  | "ccoN" | "cyoA" | "sodA" | "psaA" | "hao" | "nrfA" | "napA" | "mtrB" | "cymA" | "mtoA" | "pioA" | "pufL" | "crtI" | "bchG" | "dsrB" | "qmoA" | "hynL" | "cdhA" | "ackA" | "fwdB";
+  | "ccoN" | "cyoA" | "sodA" | "psaA" | "hao" | "nrfA" | "napA" | "mtrB" | "cymA" | "mtoA" | "pioA" | "pufL" | "crtI" | "bchG" | "dsrB" | "qmoA" | "hynL" | "cdhA" | "ackA" | "fwdB"
+  // v1.11: the thin pathways. `methane` had two genes against nitrogen's
+  // twelve, and pathway membership drives the operon synergy bonus -- so a
+  // thin pathway is not merely fewer options, it is a build that cannot
+  // come together.
+  | "pmoA" | "mmoX" | "frhA" | "mtrH" | "hzsA" | "hdh" | "acsB" | "otsA" | "cspA";
 
 export type Teap = "O2" | "NO3-" | "Mn(IV)" | "Fe(III)" | "S0" | "H2S" | "SO4" | "CO2";
 
@@ -117,6 +122,28 @@ export const GENES: Readonly<Record<GeneId, Gene>> = {
   cheA: { id:"cheA", name:"cheA", kb:2.0, product:"chemotaxis histidine kinase", tier:4, desc:"The kinase at the centre of chemotaxis. Tells the flagellum which way not to go.", discovery:"Bacterial chemotaxis became the model two-component system after Adler's experiments in the 1960s showed bacteria genuinely choose.", pathway:"defense" },
   flhD: { id:"flhD", name:"flhD", kb:0.4, product:"flagellar master regulator", tier:2, desc:"Decides whether to build flagella at all. Motility is expensive and not always worth it.", discovery:"The flagellar regulon is one of the largest coordinated gene programmes known, and flhDC sits at the top of it.", pathway:"defense" },
   pilA: { id:"pilA", name:"pilA", kb:0.5, product:"type IV pilin", tier:3, desc:"The subunit Geobacter polymerises into conductive pili. Twitching motility, and wires.", discovery:"Type IV pili were long known for twitching motility before anyone suspected some of them conduct electrons.", pathway:"iron" },
+
+  // --- added in v1.11: the thin strata and the thin pathways -------------
+  //
+  // `methane` had two genes against nitrogen's twelve, and D5 to D8 carried
+  // seven or eight each against D2's eighteen. Since pathway membership drives
+  // the operon synergy bonus, a thin pathway is not merely fewer options -- it
+  // is a build that can never come together.
+
+  pmoA: { id:"pmoA", name:"pmoA", kb:0.8, product:"particulate methane monooxygenase", tier:5, desc:"Oxidise methane to methanol. Eat the gas everything below you makes.", discovery:"Methanotrophs consume most of the methane produced in sediments before it ever reaches the atmosphere, which is why the seabed is not a chimney.", pathway:"methane" },
+  mmoX: { id:"mmoX", name:"mmoX", kb:1.6, product:"soluble methane monooxygenase", tier:6, desc:"The copper-free version. Slower, and it works when copper runs out.", discovery:"Methanotrophs switch between the particulate and soluble enzymes on copper availability -- the 'copper switch', one of the cleanest examples of a metal regulating which enzyme a cell builds.", pathway:"methane" },
+  frhA: { id:"frhA", name:"frhA", kb:1.3, product:"F420-reducing hydrogenase", tier:6, desc:"Feed electrons into methanogenesis from hydrogen.", discovery:"Coenzyme F420 fluoresces blue-green under UV, which is how methanogens were first identified in a sample before anyone could culture them.", pathway:"methane" },
+  mtrH: { id:"mtrH", name:"mtrH", kb:1.0, product:"methyl-H4MPT methyltransferase", tier:7, desc:"The sodium-pumping step. Methanogenesis pays here or not at all.", discovery:"This complex pumps sodium rather than protons, and it is the only energy-conserving step in hydrogenotrophic methanogenesis.", pathway:"methane" },
+
+
+  hzsA: { id:"hzsA", name:"hzsA", kb:2.4, product:"hydrazine synthase", tier:6, desc:"Make hydrazine from ammonium and nitrite. Rocket fuel, as an intermediate.", discovery:"Anammox was predicted thermodynamically in 1977 and not found until a Delft wastewater reactor kept losing ammonium in the 1990s. It turns out to produce a large share of the nitrogen gas in the ocean.", pathway:"nitrogen" },
+  hdh:  { id:"hdh", name:"hdh", kb:1.7, product:"hydrazine dehydrogenase", tier:6, desc:"Oxidise hydrazine to N2. The step that pays for the previous one.", discovery:"Anammox bacteria hold hydrazine inside an anammoxosome bounded by ladderane lipids -- membranes built from fused cyclobutane rings, found nowhere else in biology.", pathway:"nitrogen" },
+
+  acsB: { id:"acsB", name:"acsB", kb:2.1, product:"acetyl-CoA synthase", tier:6, desc:"Fix carbon on a nickel-iron cluster. The oldest way to do it.", discovery:"The Wood-Ljungdahl pathway is the only carbon fixation route that also conserves energy, and its nickel-iron-sulfur active site is often argued to be a relic of the first metabolism.", pathway:"carbon" },
+
+  otsA: { id:"otsA", name:"otsA", kb:1.4, product:"trehalose-6-phosphate synthase", tier:3, desc:"Stack trehalose against osmotic shock. Survive drying out.", discovery:"Trehalose lets tardigrades and resurrection plants survive desiccation by replacing the water around their proteins -- vitrification rather than repair.", pathway:"defense" },
+  cspA: { id:"cspA", name:"cspA", kb:0.4, product:"cold shock protein A", tier:2, desc:"Keep RNA from folding shut in the cold. Cheap and always useful.", discovery:"CspA can reach a tenth of total cell protein within minutes of a temperature drop, one of the fastest known responses to a physical stress.", pathway:"defense" },
+
   ori:  { id:"ori",  name:"oriV", kb:0.7, product:"broad-host-range origin",       tier:0, desc:"Origin of replication. Without one, nothing replicates.", discovery:"Broad-host-range origins like those of RK2 and RSF1010 were characterised in the 1970s and 80s. Without one a plasmid is just a linear piece of DNA that vanishes at the next division.", pathway:"core" },
 };
 
@@ -144,7 +171,7 @@ export const MICROBES: readonly Microbe[] = [
   { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL","luxAB","psaA","atpB","recA"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" , weapon:"melee" },
   { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG","luxAB","celA","sodA","uvrA","groL"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG","psaA","sodA","uvrA","atpB"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" , facing:"rotate" , behaviour:"glide", size:"medium" , weapon:"melee" },
-  { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA","hao","dnaK","cheA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
+  { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA","hao","dnaK","cheA","hzsA","hdh"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitrobacter",     name:"Nitrobacter",     depth:2, hp:9,  atk:3,  glyph:"N", genes:["nxrA","cyoA","bd","frdA"],        note:"Nitrite oxidiser. Completes nitrification." , pigment:"#bfae8e" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"pseudomonas",     name:"Pseudomonas",     depth:2, hp:12, atk:4,  glyph:"p", genes:["narG","nirS","norB","nosZ","dspB","napA","nrfA","ccoN","frdA","flhD","cheA","arsC"], note:"Facultative denitrifier. Carries the whole chain." , pigment:"#cfe04a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"spear" },
   { id:"beggiatoa",       name:"Beggiatoa",       depth:3, hp:16, atk:5,  glyph:"B", genes:["soxB","sqr","chiA","cymA","bd","phsA"],  note:"Gliding sulfur mat. Stores S0 granules internally." , pigment:"#f2f2e6" , facing:"rotate" , behaviour:"glide", size:"filament" , weapon:"melee" },
@@ -155,11 +182,15 @@ export const MICROBES: readonly Microbe[] = [
   { id:"rhodospirillum",  name:"Rhodospirillum",  depth:4, hp:15, atk:5,  glyph:"r", genes:["pufM","nifH","crtI","cbbM","cooS","nifD"], note:"Purple non-sulfur. Photoheterotroph, fixes N2." , pigment:"#b0527a" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"melee" },
   { id:"allochromatium",  name:"Allochromatium",  depth:5, hp:22, atk:8,  glyph:"C", genes:["pufM","sqr","pufL","crtI","cbbM","nifD"],  note:"Purple sulfur. Intracellular S0 globules." , pigment:"#b34a86" , facing:"rotate" , behaviour:"swarm", size:"large" , weapon:"melee" },
   { id:"thiocapsa",       name:"Thiocapsa",       depth:5, hp:20, atk:8,  glyph:"h", genes:["pufM","crtI","pioA","pufL","nifD","anfG"],        note:"Purple sulfur, capsulate. Colonies in slime." , pigment:"#a34fa8" , facing:"none" , behaviour:"sessile", size:"large" , weapon:"melee" },
-  { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA","bchG","pioA","anfG","dnaK"], note:"Green sulfur. Photosynthesis at near-zero photon flux." , pigment:"#5fd47a" , facing:"rotate" , behaviour:"drift", size:"medium" , weapon:"melee" },
+  { id:"chlorobium",      name:"Chlorobium",      depth:6, hp:24, atk:9,  glyph:"L", genes:["fmoA","csmA","bchG","pioA","anfG","dnaK","cspA"], note:"Green sulfur. Photosynthesis at near-zero photon flux." , pigment:"#5fd47a" , facing:"rotate" , behaviour:"drift", size:"medium" , weapon:"melee" },
   { id:"prosthecochloris",name:"Prosthecochloris",depth:6, hp:22, atk:10, glyph:"P", genes:["csmA","aclB","bchG"], note:"Prosthecate green sulfur. Fixes carbon via rTCA." , pigment:"#4fc98e" , facing:"none" , behaviour:"sessile", size:"medium" , weapon:"packet" },
-  { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA","dsrB","qmoA","hynL","pceA","mnhA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." , pigment:"#a6acb6" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"cloud" },
+  { id:"desulfovibrio",   name:"Desulfovibrio",   depth:7, hp:28, atk:11, glyph:"D", genes:["dsrA","hydA","dsrB","qmoA","hynL","pceA","mnhA","otsA"], note:"Sulfate reducer. Exhaled H2S blackens the sediment." , pigment:"#a6acb6" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"cloud" },
   { id:"desulfobacter",   name:"Desulfobacter",   depth:7, hp:30, atk:12, glyph:"b", genes:["dsrA","aprA","sat","qmoA","hynL","dsrB","pceA","cooS","mnhA"], note:"Oxidises acetate completely to CO2." , pigment:"#949ba6" , facing:"rotate" , behaviour:"drift", size:"large" , weapon:"melee" },
-  { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB","cdhA","ackA","fwdB","cooS","mnhA","recA"], note:"The most metabolically flexible methanogen known." , pigment:"#dcc179" , facing:"none" , behaviour:"sessile", size:"large" , weapon:"packet" },
+  { id:"methanosarcina",  name:"Methanosarcina",  depth:8, hp:36, atk:14, glyph:"M", genes:["mcrA","hdrB","cdhA","ackA","fwdB","cooS","mnhA","recA","frhA","mtrH","acsB"], note:"The most metabolically flexible methanogen known." , pigment:"#dcc179" , facing:"none" , behaviour:"sessile", size:"large" , weapon:"packet" },
+  // A methanotroph, which the column had no room for until pmoA existed:
+  // it sits ABOVE the methanogens and eats what they make. Most of the
+  // methane produced in sediment never reaches the water, and this is why.
+  { id:"methylomonas",    name:"Methylomonas",    depth:7, hp:26, atk:10,  glyph:"m", genes:["pmoA","mmoX","katG","sodA","atpB","groL"], note:"Methanotroph. Oxidises the methane rising from below." , pigment:"#9fd8a8" , facing:"rotate" , behaviour:"chase", size:"medium" , weapon:"melee" },
   { id:"methanobacterium",name:"Methanobacterium",depth:8, hp:32, atk:13, glyph:"m", genes:["mcrA","fwdB","cdhA"],        note:"Hydrogenotrophic. CO2 + H2. The last respiration." , pigment:"#cdba8b" , facing:"rotate" , behaviour:"drift", size:"medium" , weapon:"melee" },
 ];
 

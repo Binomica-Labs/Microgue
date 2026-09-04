@@ -672,7 +672,18 @@ describe("the order form is reachable", () => {
     if (!row) return;
     g.pointerDown(row.box.x + 5, row.box.y + 5);
     g.pointerUp(row.box.x + 5, row.box.y + 5);
-    expect(g.lab.stock.length, "a tap did not order").toBeGreaterThan(0);
+    // A tap now ASKS. Ordering is the second tap, on the confirm -- the shop
+    // is a scrolling list and a single tap bought whatever the scroll landed
+    // on, with credit that takes several runs to earn.
+    expect(g.pendingOrder, "a tap on a row did not ask").not.toBeNull();
+    expect(g.lab.stock.length, "a single tap still bought it").toBe(0);
+    g.frame(60);
+    const yes = g.confirmBoxes?.yes;
+    expect(yes, "the confirm drew no buttons").toBeDefined();
+    if (!yes) return;
+    g.pointerUp(yes.x + yes.w / 2, yes.y + yes.h / 2);
+    expect(g.pendingOrder, "confirming left the prompt open").toBeNull();
+    expect(g.lab.stock.length, "confirming did not order").toBeGreaterThan(0);
   });
 });
 
@@ -1659,16 +1670,28 @@ describe("a surplus cassette is a choice, not a refusal", () => {
     expect(here?.items.length, "leaving it destroyed it").toBeGreaterThan(0);
   });
 
-  it("a full BIN is still a plain refusal, not an offer", async () => {
-    // The distinction matters: a full stack means "you have enough of this",
-    // which is a choice. A full bin means "no room", which is not.
+  it("a full BIN offers the same choice a full stack does", async () => {
+    // It used to be a plain refusal, on the reasoning that a full stack means
+    // "you have enough of this" while a full bin means "no room". But the
+    // thing on the floor is still DNA either way, and eating it is exactly
+    // what a cell would do -- a full bin turned every cassette into litter you
+    // had to walk past.
     const g = await game();
     g.startRun(0);
     while (g.genome.stash({ kind: "terminator", id: "rrnbt1" }).ok) { /* fill */ }
     g.drops.push({ x: g.player.x, y: g.player.y,
                    items: [{ kind: "cassette", gene: "psbA", allele: WILD_TYPE }] });
     g.onTile(g.player.x, g.player.y);
-    expect(g.offer, "a full bin produced an offer").toBeNull();
+    expect(g.offer, "a full bin refused instead of offering").not.toBeNull();
+
+    // And eating it must actually pay, not just clear the prompt. Drain the
+    // pool first: at the ceiling there is nowhere for the yield to go.
+    g.player.atp = 10;
+    const atp = g.player.atp;
+    g.eatOffered();
+    expect(g.offer, "the offer stayed open").toBeNull();
+    expect(g.player.atp, "catabolising a surplus paid nothing")
+      .toBeGreaterThan(atp);
   });
 });
 
@@ -1697,6 +1720,7 @@ describe("state that should persist, does", () => {
     researchRows: "hit boxes, per frame", dropBoxes: "hit boxes, per frame",
     closeBox: "hit box, per frame", cardBoxes: "hit boxes, per frame",
     offerBoxes: "hit boxes, per frame", miniBox: "layout, per frame",
+    pendingOrder: "an unanswered prompt", confirmBoxes: "hit boxes, per frame",
     classRows: "hit boxes, per frame",
     pickingClassFor: "a choice in progress, before anything is created",
     // Momentary interaction state: meaningless after a reload.

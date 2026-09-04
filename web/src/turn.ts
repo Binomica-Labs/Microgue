@@ -15,6 +15,7 @@ export { t_acquire, t_catabolise, t_die, t_expand, t_research, t_win }
 import { WILD_TYPE, rollAllele } from "./allele.js";
 import { describeLevel, strainLevel } from "./strain.js";
 import { atpCeiling } from "./chromosome.js";
+export { t_eatOffered, t_declineOffered } from "./offer.js";
 import { isSnapshotTurn, snapshot } from "./snapshot.js";
 import * as bio from "./biology.js";
 import * as say from "./flavour.js";
@@ -43,9 +44,9 @@ export { t_look, t_visibleHostile } from "./sight.js";
 import { MAX_STACK, countOf, fullStackIndex, stackIndex, stacks }
   from "./stack.js";
 import { ELITES, type EliteStrain } from "./elite.js";
-import { quality } from "./allele.js";
 import { distanceTo } from "./pursuit.js";
 import { headingOf, turnToward } from "./motion.js";
+import { BIN_CAP } from "./plasmid.js";
 import type { Part } from "./plasmid.js";
 import type { Game } from "./main.js";
 
@@ -682,14 +683,23 @@ export function t_take(_g: Game, it: Item): boolean {
     if (it.kind === "cassette") {
       const part: Part = { kind: "gene", id: it.gene, level: 1, mods: [],
                            allele: it.allele };
-      // A full stack is not a refusal, it is a CHOICE: the copy on the floor
-      // is still DNA, and eating it is a real option. Anything else -- a full
-      // bin, say -- is just a refusal.
-      if (fullStackIndex(_g.genome.bin, part) >= 0
-          && stackIndex(_g.genome.bin, part) < 0) {
+      // A copy you cannot hold is not a refusal, it is a CHOICE: the thing on
+      // the floor is still DNA, and eating it is a real option.
+      //
+      // That was true of a full STACK and not of a full BIN, which just said
+      // no -- so a full bin turned every cassette on the floor into litter you
+      // had to walk past, when catabolising it is exactly what a cell would
+      // do. Same offer, same reasons, different cause.
+      const stackFull = fullStackIndex(_g.genome.bin, part) >= 0
+        && stackIndex(_g.genome.bin, part) < 0;
+      const binFull = _g.genome.bin.length >= BIN_CAP
+        && stackIndex(_g.genome.bin, part) < 0;
+      if (stackFull || binFull) {
         _g.offer = { part, at: { x: _g.player.x, y: _g.player.y } };
-        _g.note(`Already carrying ${String(MAX_STACK)} of `
-          + `${bio.GENES[it.gene].name}. Catabolise this one, or leave it.`);
+        _g.note(stackFull
+          ? `Already carrying ${String(MAX_STACK)} of `
+            + `${bio.GENES[it.gene].name}. Catabolise this one, or leave it.`
+          : `No room for ${bio.GENES[it.gene].name}. Catabolise it, or leave it.`);
         return false;
       }
       const r = _g.genome.stash(part);
@@ -853,43 +863,4 @@ export function t_explore(_g: Game): void {
 }
 
 
-/**
- * Eat the copy you could not carry.
- *
- * A full stack leaves a cassette on the floor. It is still DNA, and the cell
- * can still digest it -- so the offer is catabolise or leave, not a bare
- * refusal. Yields the same as eating one from the bin, because it is the same
- * molecule; the only difference is that it never got picked up.
- */
-export function t_eatOffered(_g: Game): void {
-  if (_g.dead) return;
-  const offer = _g.offer;
-  if (!offer) return;
-  const part = offer.part;
-  if (part.kind !== "gene") { _g.offer = null; return; }
 
-  const kb = bio.GENES[part.id].kb;
-  const grade = quality(part.allele);
-  const hp = Math.max(Math.round(kb * 2.4 * grade), 1);
-  const atp = Math.max(Math.round(kb * 5.5 * grade), 1);
-
-  _g.offer = null;
-  _g.player.hp = Math.min(_g.player.hp + hp, _g.player.maxhp);
-  _g.player.atp = Math.min(_g.player.atp + atp, _g.player.atpMax);
-  // And take it off the floor: it has been eaten.
-  const drop = dropAt(_g.drops, offer.at.x, offer.at.y);
-  if (drop) {
-    const i = drop.items.findIndex(
-      (x) => x.kind === "cassette" && x.gene === part.id);
-    if (i >= 0) drop.items.splice(i, 1);
-    if (drop.items.length === 0) removeDrop(_g.drops, drop);
-  }
-  _g.note(`You digest it where it lies. +${String(hp)} hp, +${String(atp)} ATP.`);
-  _g.trace.push(_g.clock.turn, "loot", `ate a surplus ${bio.GENES[part.id].name}`);
-  _g.save();
-}
-
-/** Leave it. The offer lapses; the cassette stays where it is. */
-export function t_declineOffered(_g: Game): void {
-  _g.offer = null;
-}

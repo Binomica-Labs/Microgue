@@ -138,7 +138,18 @@ describe("organisms", () => {
       if (m.genes.includes("fmoA")) expect(m.depth).toBe(6);
     }
   });
-  it("all 20 organisms ported", () => { expect(bio.MICROBES).toHaveLength(20); });
+  it("every organism is complete", () => {
+    // Counting them was the old test, and it only ever said "someone added
+    // one". These are the things a new organism actually has to have, and the
+    // audit suite covers its sprite, vector fallback and gene list.
+    expect(bio.MICROBES.length).toBeGreaterThanOrEqual(21);
+    for (const m of bio.MICROBES) {
+      expect(m.genes.length, `${m.id} carries nothing`).toBeGreaterThan(0);
+      expect(m.hp, `${m.id} has no hp`).toBeGreaterThan(0);
+      expect(m.depth, `${m.id} is nowhere`).toBeGreaterThan(0);
+      expect(m.note.length, `${m.id} has no description`).toBeGreaterThan(10);
+    }
+  });
 });
 
 describe("pathfinding", () => {
@@ -7594,6 +7605,92 @@ describe("the ring shows rarity at a glance", () => {
     for (const id of Object.keys(TERMINATORS) as (keyof typeof TERMINATORS)[]) {
       const c = RARITY[TERMINATORS[id].rarity].colour;
       expect(c, `terminator ${id} has no rarity colour`).toBeTruthy();
+    }
+  });
+});
+
+describe("every pathway can actually be built", () => {
+  it("has enough genes to earn its own operon synergy", () => {
+    // Pathway membership drives the synergy bonus, so a thin pathway is not
+    // merely fewer options -- it is a build that can never come together.
+    // `methane` had TWO genes; three is the minimum for a bonus at all.
+    const count = new Map<string, number>();
+    for (const id of Object.keys(bio.GENES) as bio.GeneId[]) {
+      const p = bio.GENES[id].pathway;
+      count.set(p, (count.get(p) ?? 0) + 1);
+    }
+    for (const [p, n] of count) {
+      if (p === "core") continue;       // the origin, alone, by design
+      expect(n, `pathway "${p}" has only ${String(n)} genes`)
+        .toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it("and those genes are obtainable together somewhere", () => {
+    // A pathway whose members are scattered one per stratum can be listed but
+    // never assembled on one chromosome in one run.
+    const paths = new Set(
+      (Object.keys(bio.GENES) as bio.GeneId[]).map((g) => bio.GENES[g].pathway));
+    for (const p of paths) {
+      if (p === "core") continue;
+      let best = 0;
+      for (let d = 1; d <= 8; d++) {
+        const here = new Set(bio.microbesAt(d).flatMap((m) => [...m.genes]));
+        const n = [...here].filter((g) => bio.GENES[g].pathway === p).length;
+        if (n >= 3) best = d;
+      }
+      expect(best, `pathway "${p}" never has 3 genes obtainable at one depth`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("every new gene has a real organism and a real source", () => {
+    // The audit suite covers the tables; this covers the intent. A gene no
+    // organism carries is unfindable, and one with no NCBI entry has no
+    // provenance -- both are ways for a gene to exist and mean nothing.
+    const carried = new Set(bio.MICROBES.flatMap((m) => [...m.genes]));
+    for (const id of ["pmoA", "mmoX", "frhA", "mtrH", "hzsA", "hdh",
+                      "acsB", "otsA", "cspA"] as bio.GeneId[]) {
+      expect(carried.has(id), `${id} is carried by no organism`).toBe(true);
+      expect(bio.GENES[id].discovery.length,
+             `${id} has no discovery note`).toBeGreaterThan(40);
+    }
+  });
+});
+
+describe("no organism is out of place in its own stratum", () => {
+  it("nothing is more than a stratum's worth weaker than its neighbours", () => {
+    // Methylomonas shipped at hp 16 / atk 5 into a D7 whose other residents
+    // are 28-30 hp and 11-12 atk -- weaker than a D3 organism, at depth seven.
+    // I copied plausible numbers without checking the neighbourhood.
+    for (let d = 1; d <= 8; d++) {
+      const here = bio.MICROBES.filter((m) => m.depth === d);
+      if (here.length < 2) continue;
+      const atk = here.map((m) => m.atk);
+      const hp = here.map((m) => m.hp);
+      // Ratio OR small absolute gap. A pure ratio flags D1's 1-to-3 attack,
+      // which is a 3x spread and two points -- at the shallow end a small
+      // absolute difference is a large ratio and means nothing.
+      const ok = (v: number[], slack: number): boolean => {
+        const lo = Math.min(...v), hi = Math.max(...v);
+        return hi - lo <= slack || lo >= hi / 2;
+      };
+      expect(ok(atk, 3), `D${String(d)} attack spans ${String(Math.min(...atk))}`
+        + `-${String(Math.max(...atk))}`).toBe(true);
+      expect(ok(hp, 8), `D${String(d)} hp spans ${String(Math.min(...hp))}`
+        + `-${String(Math.max(...hp))}`).toBe(true);
+    }
+  });
+
+  it("the column gets harder, never easier", () => {
+    let prev = 0;
+    for (let d = 1; d <= 8; d++) {
+      const here = bio.MICROBES.filter((m) => m.depth === d);
+      if (here.length === 0) continue;
+      const mean = here.reduce((a, m) => a + m.atk, 0) / here.length;
+      expect(mean, `D${String(d)} is easier than the stratum above it`)
+        .toBeGreaterThan(prev - 0.5);
+      prev = mean;
     }
   });
 });

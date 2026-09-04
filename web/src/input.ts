@@ -266,8 +266,16 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
     _g.shopFrom = null;
     _g.shopAnchor = _g.shopScroll;
     if (wasDrag) return;                    // a scroll is not an order
+    // A pending order is modal over the shop: nothing else on the screen
+    // responds until it is answered.
+    const cb = _g.confirmBoxes;
+    if (_g.pendingOrder && cb) {
+      if (inBoxOf(cb.yes, x, y)) _g.order(_g.pendingOrder);
+      else if (inBoxOf(cb.no, x, y)) _g.pendingOrder = null;
+      return;
+    }
     const hit = _g.shopRows.find((r) => inBoxOf(r.box, x, y));
-    if (hit) { _g.order(hit.offer); return; }
+    if (hit) { _g.askOrder(hit.offer); return; }
     if (_g.inClose(x, y)) {
       _g.showLab = false;
       _g.shopScroll = 0;

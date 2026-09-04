@@ -1,3 +1,91 @@
+# v1.11.0 — nine genes, and a methanotroph
+
+69 to 78. Pathway membership drives the operon synergy bonus, so a thin pathway
+is not merely fewer options -- it is a build that can never come together, and
+`methane` had TWO genes against nitrogen's twelve.
+
+    pmoA mmoX      methanotrophy: eat the gas everything below you makes
+    frhA mtrH      methanogenesis: the F420 hydrogenase and the sodium-pumping step
+    hzsA hdh       ANAMMOX: hydrazine as an intermediate, in a ladderane vesicle
+    acsB           Wood-Ljungdahl, the only carbon fixation that also pays
+    otsA cspA      trehalose against drying, cold shock against the cold
+
+**Methylomonas**, a methanotroph at D7, sitting ABOVE the methanogens and
+eating what they make. The column had no room for one until pmoA existed, and
+most of the methane produced in sediment never reaches the water for exactly
+this reason.
+
+D7 went 10 genes to 17, D8 8 to 11, and every pathway can now reach three
+obtainable genes at some depth -- which is the minimum for a synergy bonus at
+all. `methane` went from unbuildable to viable at D8.
+
+Five of my fourteen candidates ALREADY EXISTED -- fmoA, csmA, aclB, amoA, cooS
+-- and I only found out because TypeScript rejected the duplicate keys. Reading
+the table first would have been quicker than writing them twice.
+
+## The organism I added was too weak for where I put it
+
+Methylomonas shipped at hp 16 / atk 5 into a D7 whose other residents are 28-30
+hp and 11-12 atk -- weaker than a D3 organism, at depth seven. I copied
+plausible-looking numbers without checking the neighbourhood, and it dragged
+D7's mean attack from 11 to 9.3. Now 26 / 10.
+
+`spec` checks every stratum's spread, and the first version of that test was
+WRONG: a pure ratio flagged D1's 1-to-3 attack, which is a 3x spread and two
+points. At the shallow end a small absolute difference is a large ratio and
+means nothing. It takes a ratio OR a small absolute gap now.
+
+Also guarded: the column's mean attack never decreases with depth.
+
+Everything else came back clean against the expanded set -- every gene
+expresses somewhere, every kb and tier in range, every gene's tier within four
+of where it first drops, every barrier still openable, every class still able
+to build its opening, 16000 randomised plasmid operations, and relicts now
+reaching 68 off-stratum genes.
+
+## The audit suite earned its keep
+
+Adding one organism and nine genes tripped: sprite table, vector fallback
+table, NCBI source table, and a test that counted organisms. Every one was a
+real hole that would have shipped as a blank creature or a gene with no
+provenance. The count test is now a completeness test -- counting only ever
+said "someone added one".
+
+# v1.10.0 — the flagellum, a full bin, and a confirm
+
+## Where the flagellum went
+
+Nowhere: `flhD`+`cheA` still express and still draw. NO STARTING CLASS CARRIED
+A MOTILITY GENE. Classes replaced the old fixed starting kit and I never
+checked what the kit had contained, so every new strain lost its flagellum the
+day classes shipped.
+
+The heterotroph is `celA` + `flhD` now instead of `celA` + `katG`. Pseudomonas
+is the textbook motile bacterium; catalase was my choice rather than a
+requirement, and motility is the more characteristic thing and the more visible
+one.
+
+## A full bin is a choice too
+
+A full STACK offered catabolise-or-leave. A full BIN was a plain refusal, on
+the reasoning that "you have enough of this" is a choice and "no room" is not.
+But the thing on the floor is still DNA either way, and a full bin turned every
+cassette into litter you had to walk past. Same offer, same reasons.
+
+## Confirm before spending
+
+The shop is a scrolling list on a phone and an order was a single tap, so a
+scroll that ended on a row bought whatever it landed on -- with credit that
+takes several runs to earn and no undo. The modal repeats the price AND what is
+left afterwards, because the number that matters when spending is the balance
+you are about to have.
+
+## NOT DONE, and why
+
+The intro lab scene and the gene expansion are both real pieces of work and
+neither is started. Doing either badly at the end of a turn spent on three
+other things would produce something to redo.
+
 # v1.9.0 — rarity on the ring, and taps that describe
 
 A rarity band on the INNER edge of each wedge. The wedge itself is coloured by
