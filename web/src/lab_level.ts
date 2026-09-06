@@ -118,8 +118,11 @@ export const LAB_STRATUM: Stratum = {
   teap: "O2",
   e0: 820,
   light: 1,
-  wall: "#e8eeeb",
-  floor: "#f6f9f8",
+  // A wall you can SEE against the floor. Near-white on near-white left the
+  // room with no readable edge -- the shape came entirely from the fog, and
+  // there is no fog in here.
+  wall: "#9cada6",
+  floor: "#f4f8f6",
   accent: "#2a3a34",
   hatch: 0,
   density: 0.5,

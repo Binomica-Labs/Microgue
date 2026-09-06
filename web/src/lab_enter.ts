@@ -41,6 +41,14 @@ export function g_enterLab(_g: Game, slot: number): void {
   // -- twenty-eight of them -- was getting D1 while the player stood in the
   // lab.
   _g.dungeon.floor = 0;
+  // A clean researcher. The previous strain's damage, poisoning and spent ATP
+  // are not this person's, and carrying them in is how a walk across an empty
+  // room killed someone.
+  _g.player.status.length = 0;
+  _g.player.hp = _g.player.maxhp;
+  _g.player.atp = _g.player.atpMax;
+  _g.dead = false;
+
   _g.intro = lvl;
   _g.showSplash = false;
   // TRUE. The lab is a Level being played, and `started` is what gates the

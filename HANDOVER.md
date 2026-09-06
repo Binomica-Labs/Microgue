@@ -25,6 +25,62 @@ returns you to the room; the INCUBATOR is the way out, and it refuses until
 there is something to send -- walking in early would inoculate a default nobody
 picked.
 
+## The lab looked like a whitewashed cave
+
+Three things, all of them the column's rendering applied to a room:
+
+* **The surround was the floor colour.** In the column that is right -- the
+  disc mask keeps the map's edge off screen, so there is no outside to see. A
+  room HAS an outside, and filling it with near-white made the lab bleed to
+  every edge with no sense of a wall. It is `#050706` in there.
+* **The sediment motif was painted on the walls.** The eight stratum textures
+  are grains, laminae and framboids. On plaster they read as a cave someone
+  had whitewashed.
+* **The wall was near-white on near-white**, 21% apart in luminance against the
+  column's 39-68%. The room's shape was coming entirely from the fog, and there
+  is no fog in there. Now 31% -- lower contrast than a cave, which is right for
+  a bright room, but readable.
+
+## A test I wrote twice and deleted
+
+Asserting that no sediment texture is painted:
+
+* the first version counted CANVASES and saw the minimap and the sprite cache;
+* the second looked for a non-string fillStyle and saw the wall's depth
+  GRADIENT.
+
+Both measured something real; neither measured the pattern. Deleted with a note
+rather than fudged into passing. The surround test that survives identifies the
+rect by its COLOUR, which meant teaching the render stub to record fillStyle --
+worth doing, and it is the reason that one can be trusted.
+
+## Dead in the lab, from the previous strain
+
+`death: F0 by Oxidative stress` -- two steps into a new culture. The status was
+on the player when the LAST strain died, `enterLab` never cleared it, and it
+kept ticking in a room with nothing in it.
+
+Two fixes, deliberately:
+
+* `enterLab` resets status, hp, ATP and `dead`. The previous strain's damage is
+  not this person's.
+* **No upkeep at all in the lab.** `t_upkeep` returns early there. Clearing the
+  status alone would have fixed this one bug; stopping upkeep fixes the CLASS
+  -- every hazard, drain, repair cost and status that has not been written yet.
+  A researcher crossing a room is not metabolising.
+
+## Why the soak missed it
+
+The soak entered the lab from a FRESH Game. There was no previous strain, so
+there was nothing to inherit -- it was testing a state the player never reaches.
+
+It now arrives the way a player does: start a run, take damage, take a status,
+THEN walk into the lab. That is the general lesson and it is worth more than
+the fix: a soak of a surface has to ARRIVE at that surface the way the player
+arrives, or it exercises a state that only exists in the test.
+
+Verified by removing both fixes: six failures.
+
 ## The room had nothing in it
 
 The stations were FLOOR TILES with no drawing. The room rendered as a white

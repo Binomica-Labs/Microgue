@@ -26,7 +26,9 @@ const VIEWPORTS: readonly (readonly [string, number, number])[] = [
   ["ultrawide", 2560, 1080],
 ];
 
-interface Rect { x: number; y: number; w: number; h: number }
+/** `fill` is the fillStyle in force when the rect was drawn: the surround
+ *  is identified by its colour, not its position. */
+interface Rect { x: number; y: number; w: number; h: number; fill: string }
 
 /** Every rect and text position a frame produced. */
 interface Trace {
@@ -57,7 +59,7 @@ interface Trace {
  */
 function stubCtx(t: Trace): CanvasRenderingContext2D {
   let font = "10px x";
-  const state: { align: string } = { align: "left" };
+  const state: { align: string; fill: string } = { align: "left", fill: "" };
   interface Xf { tx: number; ty: number; sx: number; sy: number; rot: boolean }
   const stack: Xf[] = [{ tx: 0, ty: 0, sx: 1, sy: 1, rot: false }];
   const top = (): Xf => stack[stack.length - 1] ?? { tx: 0, ty: 0, sx: 1, sy: 1, rot: false };
@@ -66,7 +68,8 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
     get: (_o, p: string) => {
       if (p === "font") return font;
       if (p === "textAlign") return state.align;
-      if (["fillStyle", "strokeStyle", "textBaseline", "globalAlpha", "lineWidth",
+      if (p === "fillStyle") return state.fill;
+      if (["strokeStyle", "textBaseline", "globalAlpha", "lineWidth",
            "lineCap", "lineJoin", "filter", "imageSmoothingEnabled"].includes(p)) return "";
       return (...a: unknown[]) => {
         const x0 = top();
@@ -90,7 +93,8 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
         if (p === "fillRect" || p === "strokeRect") {
           const [x, y, w, h] = a as number[];
           t.rects.push({ x: (x ?? 0) * x0.sx + x0.tx, y: (y ?? 0) * x0.sy + x0.ty,
-                         w: (w ?? 0) * x0.sx, h: (h ?? 0) * x0.sy });
+                         w: (w ?? 0) * x0.sx, h: (h ?? 0) * x0.sy,
+                         fill: state.fill });
         }
         if (p === "arc") t.arcs.push(a as number[]);
         if (p === "createLinearGradient") t.gradients++;
@@ -114,6 +118,7 @@ function stubCtx(t: Trace): CanvasRenderingContext2D {
     set: (_o, p: string, v: unknown) => {
       if (p === "font") font = String(v);
       if (p === "textAlign") state.align = String(v);
+      if (p === "fillStyle") state.fill = typeof v === "string" ? v : "";
       return true;
     },
   });
@@ -824,4 +829,40 @@ describe("the wall silhouette is a contour", () => {
         .toBeLessThan(0.02);
     }
   });
+});
+
+describe("the lab is drawn as a room", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("outside it is black, and the column's surround is not", async () => {
+    // In the column the surround is the floor colour, because the disc mask
+    // keeps the map's edge off screen. The lab is a ROOM: it has an outside,
+    // and filling that with the lab's near-white made it bleed to every edge
+    // with no sense of a wall at all.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.enterLab(0);
+    t.rects.length = 0;
+    g.frame(60);
+    // The first full-screen rect of the frame is the surround.
+    const first = t.rects.find((r) => r.w >= 393 && r.h >= 852);
+    expect(first, "no surround was drawn").toBeDefined();
+    expect(first?.fill, `the lab surround is ${String(first?.fill)}`)
+      .toBe("#050706");
+
+    g.introChosen = true;
+    g.startRun(0, "phototroph");
+    t.rects.length = 0;
+    g.frame(120);
+    const col = t.rects.find((r) => r.w >= 393 && r.h >= 852);
+    expect(col?.fill, "the column's surround turned black too")
+      .not.toBe("#050706");
+  });
+
+  // A test that the lab paints no sediment texture was written twice and
+  // removed. The first counted CANVASES and saw the minimap and the sprite
+  // cache; the second looked for a non-string fillStyle and saw the wall's
+  // depth GRADIENT. Both measured something real and neither measured the
+  // pattern. The behaviour is one branch in render.ts and is better read than
+  // asserted badly.
 });

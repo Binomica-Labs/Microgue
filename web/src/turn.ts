@@ -394,6 +394,15 @@ export function t_mobTurn(_g: Game): void {
   }
 
 export function t_upkeep(_g: Game): void {
+    // No metabolism in the lab. You are a person crossing a room: nothing to
+    // burn, nothing to repair, no hazards, and no status ticking down.
+    //
+    // A strain that died of oxidative stress left the status on the player,
+    // `enterLab` did not clear it, and it kept ticking in a room with nothing
+    // in it -- two steps into a new culture and dead on F0. Clearing the
+    // status alone would have fixed that one; stopping upkeep fixes the class,
+    // including every hazard and drain that has not been written yet.
+    if (_g.intro) return;
     const d = _g.dungeon.depth;
     // Conditional and inducible promoters read this. Without it every promoter
     // would silently behave as constitutive.

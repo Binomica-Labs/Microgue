@@ -8,6 +8,7 @@ import * as mg from "../src/mapgen.js";
 import { findPath } from "../src/path.js";
 import { makeRng } from "../src/rng.js";
 import { BARRIERS } from "../src/barrier.js";
+import { LAB_STRATUM } from "../src/lab_level.js";
 import { contour, type Solid } from "../src/contour.js";
 import { signedArea2, traceContour } from "../src/wall_path.js";
 import { CLASSES, CLASS_IDS } from "../src/classes.js";
@@ -7691,6 +7692,35 @@ describe("no organism is out of place in its own stratum", () => {
       expect(mean, `D${String(d)} is easier than the stratum above it`)
         .toBeGreaterThan(prev - 0.5);
       prev = mean;
+    }
+  });
+});
+
+describe("the lab reads as a room", () => {
+  const lum = (hex: string): number => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return (((n >> 16) & 255) * 0.30 + ((n >> 8) & 255) * 0.59
+            + (n & 255) * 0.11) / 255;
+  };
+
+  it("its wall is visible against its floor", () => {
+    // Near-white on near-white left the room with no readable edge -- the
+    // shape came entirely from the fog, and there is no fog in there. Lower
+    // contrast than the column is right for a bright room; NO contrast is not.
+    const gap = Math.abs(lum(LAB_STRATUM.wall) - lum(LAB_STRATUM.floor));
+    expect(gap, `only ${(gap * 100).toFixed(0)}% apart`).toBeGreaterThan(0.25);
+    // And it should still be the brightest place in the game.
+    for (const s of bio.STRATA) {
+      expect(lum(LAB_STRATUM.floor),
+             `D${String(s.depth)} has a brighter floor than the lab`)
+        .toBeGreaterThan(lum(s.floor));
+    }
+  });
+
+  it("it is depth 0, which is what keeps it out of the column's tables", () => {
+    expect(LAB_STRATUM.depth).toBe(0);
+    for (const s of bio.STRATA) {
+      expect(s.depth, "a real stratum collides with the lab").not.toBe(0);
     }
   });
 });

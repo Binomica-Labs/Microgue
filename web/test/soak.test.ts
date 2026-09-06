@@ -2932,7 +2932,17 @@ describe("soak: the lab under random input", () => {
       addEventListener: () => undefined,
       getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
     } as unknown as HTMLCanvasElement);
-    g.enterLab(0);
+    // Arrive at the lab THE WAY A PLAYER DOES: after a strain died. Entering
+    // from a fresh Game is why this soak passed while "two steps and dead in
+    // the lab" was shipping -- there was no previous strain to inherit a
+    // status, damage or a hazardous genome from.
+    const { apply } = await import("../src/status.js");
+    g.startRun(0);
+    for (let i = 0; i < 5; i++) g.press("wait");
+    apply(g.player.status, "oxidative", 4, 60);
+    g.player.hp = 1;
+    g.enterLab(1);
+
     const rng = makeRng(4242);
     const ids = g.buttons.map((b) => b.id);
 
@@ -2972,5 +2982,79 @@ describe("soak: the lab under random input", () => {
       expect(g.started, "it left the lab without starting a run").toBe(true);
       expect(g.dungeon.floor, "it left the lab onto the wrong floor").toBe(1);
     }
+  });
+});
+
+describe("the lab does not inherit the last strain's death", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("a status that killed the last strain does not tick in the lab", async () => {
+    // Reported as "two steps in a new file and the player died in the lab",
+    // with `death: F0 by Oxidative stress`. The status was on the player when
+    // the previous strain died, `enterLab` did not clear it, and it kept
+    // ticking in a room with nothing in it.
+    //
+    // The soak missed this because it entered the lab from a FRESH Game, where
+    // there is no previous strain to inherit from. A soak of a surface has to
+    // arrive at that surface the way the player does.
+    const { apply } = await import("../src/status.js");
+    const g = await game();
+    g.startRun(0);
+    for (let i = 0; i < 3; i++) g.press("wait");
+    apply(g.player.status, "oxidative", 4, 40);
+    g.player.hp = 3;
+
+    g.enterLab(1);
+    expect(g.player.status.length, "the lab inherited a status").toBe(0);
+    expect(g.player.hp, "the lab inherited damage").toBe(g.player.maxhp);
+    expect(g.dead, "it inherited death itself").toBe(false);
+
+    for (let i = 0; i < 60; i++) g.press("wait");
+    expect(g.dead, "the researcher died in an empty room").toBe(false);
+    expect(g.player.hp, "the researcher lost hp in an empty room")
+      .toBe(g.player.maxhp);
+  });
+
+  it("no hazard fires in the lab, whatever the genome expresses", async () => {
+    // psbA without katG is a peroxide hazard. The researcher is a PERSON --
+    // nothing to burn, nothing to repair, and no genome that applies to them.
+    const { WILD_TYPE } = await import("../src/allele.js");
+    const g = await game();
+    g.startRun(0);
+    for (let i = 0; i < 3; i++) g.press("wait");
+    // Strip catalase and keep the photosystem: hazardous in the column.
+    const i = g.genome.slots.findIndex(
+      (s) => s?.kind === "gene" && s.id === "katG");
+    if (i >= 0) g.genome.remove(i);
+    g.genome.stash({ kind: "gene", id: "psbA", level: 1, mods: [],
+                     allele: WILD_TYPE });
+
+    g.enterLab(1);
+    const hp = g.player.hp;
+    for (let i2 = 0; i2 < 80; i2++) g.press("wait");
+    expect(g.player.hp, "a hazard fired in the lab").toBe(hp);
+    expect(g.dead).toBe(false);
+  });
+
+  it("upkeep resumes the moment the run starts", async () => {
+    // Stopping upkeep in the lab must not leak into the column.
+    const g = await game();
+    g.enterLab(0);
+    g.introChosen = true;
+    g.startRun(0, "phototroph");
+    const atp = g.player.atp;
+    for (let i = 0; i < 10; i++) g.press("wait");
+    expect(g.player.atp, "the ATP pool never moved after leaving the lab")
+      .not.toBe(atp);
   });
 });

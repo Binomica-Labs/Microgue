@@ -70,7 +70,13 @@ export function r_draw(_g: Game): void {
     const s = _g.level.stratum;
     const hc = _g.settings.highContrast;
 
-    ctx.fillStyle = hc ? "#000" : s.floor;
+    const inLab = _g.intro !== null;
+    // Everything outside the map. In the column it is the floor colour,
+    // because the cave has no edge you can see -- the disc mask keeps the
+    // boundary off screen. The lab is a ROOM: it has an outside, and filling
+    // it with the lab's near-white made the room bleed into the whole screen
+    // with no sense of a wall at all.
+    ctx.fillStyle = hc ? "#000" : inLab ? "#050706" : s.floor;
     ctx.fillRect(0, 0, W, H);
 
     const px = TILE * _g.zoom;
@@ -97,7 +103,6 @@ export function r_draw(_g: Game): void {
     // Measured on the same region, mean tangent swing went 77 degrees to 8.
     //
     // Whole-floor and cached: it changes only when a barrier dissolves.
-    const inLab = _g.intro !== null;
     const grid = _g.level.grid;
     const solidAt = (gx: number, gy: number): boolean =>
       gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h || grid.isWall(gx, gy);
@@ -159,7 +164,11 @@ export function r_draw(_g: Game): void {
     // per wall tile -- which is the entire budget on a phone. It is rasterised
     // once per stratum and tile size now; see wallPattern.
     if (!hc) {
-      const pat = wallPattern(ctx, s.depth, px, s.floor, s.wall, s.accent);
+      // No motif on a lab wall. The eight stratum textures are sediment --
+      // grains, laminae, framboids -- and painting them on plaster is what
+      // made the room look like a cave someone had whitewashed.
+      const pat = inLab ? null
+        : wallPattern(ctx, s.depth, px, s.floor, s.wall, s.accent);
       if (pat) {
         // The pattern is rasterised at a ROUNDED tile size, because rebuilding
         // it on every frame of a pinch would cost more than it saves. The
