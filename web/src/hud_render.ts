@@ -130,8 +130,8 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     // Shortened and measured: the long form clipped off the right edge.
     const tailX = barX + hpW * 2 + 18 * u;
     const room = W - ins.right - 6 * u - tailX;
-    const long = `${ops} operon${ops === 1 ? "" : "s"}   ${_g.dungeon.aliveCount()} hostile`;
-    const short = `${ops}op  ${_g.dungeon.aliveCount()}hp`;
+    const long = `${ops} operon${ops === 1 ? "" : "s"}   ${_g.level.mobs.filter((m) => m.alive).length} hostile`;
+    const short = `${ops}op  ${_g.level.mobs.filter((m) => m.alive).length}hp`;
     // The SHORT form was never measured either; on a 320-wide phone it
     // overflows too, and there is nothing below it to fall back to.
     const tail = ctx.measureText(long).width <= room ? long

@@ -1725,7 +1725,9 @@ describe("state that should persist, does", () => {
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",
-    introBench: "where the bench is on the lab floor",
+    introStations: "where the stations are on the lab floor",
+    atStation: "which station is underfoot",
+    introChosen: "whether the culture bench has been used",
     classRows: "hit boxes, per frame",
     pickingClassFor: "a choice in progress, before anything is created",
     // Momentary interaction state: meaningless after a reload.
@@ -2168,14 +2170,15 @@ describe("a class is chosen once, before inoculation", () => {
     expect(g.intro, "an empty slot did not open the lab").not.toBeNull();
     expect(g.intro, "it left the lab").not.toBeNull();
     // Walk onto the bench, which is what opens the choice.
-    const b = g.introBench[0];
-    expect(b, "the lab has no bench").toBeDefined();
+    const b = g.introStations.culture[0];
+    expect(b, "the lab has no culture bench").toBeDefined();
     if (!b) return;
-    g.player.x = b.x; g.player.y = b.y;
-    g.step(0, 0);
+    g.player.x = b.x; g.player.y = b.y + 1;
+    g.step(b.x, b.y);
     g.pickingClassFor ??= 0;
 
-    // Choose one.
+    // Choose one. In the lab that returns you to the room -- the incubator is
+    // what sends the culture down.
     g.frame(40);
     const row = g.classRows[2];
     expect(row, "the picker drew no classes").toBeDefined();
@@ -2184,9 +2187,17 @@ describe("a class is chosen once, before inoculation", () => {
     const tx = row.box.x + row.box.w - 20, ty = row.box.y + row.box.h / 2;
     g.pointerDown(tx, ty);
     g.pointerUp(tx, ty);
-    expect(g.started, "choosing a class did not start the run").toBe(true);
-    expect(g.strainClass, "the choice was not applied").toBe(row.id);
+    // Choosing at the bench does not start the run any more -- the incubator
+    // does. It records the choice and returns you to the room.
     expect(g.pickingClassFor).toBeNull();
+    expect(g.introChosen, "the bench did not record a choice").toBe(true);
+    const chosen = g.introClass;
+    const inc = g.introStations.incubator[0];
+    if (!inc) return;
+    g.player.x = inc.x; g.player.y = inc.y + 1;
+    g.step(inc.x, inc.y);
+    expect(g.started, "the incubator did not start the run").toBe(true);
+    expect(g.strainClass, "the run lost the choice").toBe(chosen);
 
     // Now the slot is occupied: tapping it must RESUME, not re-ask. The class
     // is fixed for the life of the strain and offering a choice that cannot be
@@ -2634,13 +2645,14 @@ describe("the lab is a floor you walk", () => {
   it("reaching the bench opens the choice", async () => {
     const g = await game();
     g.enterLab(0);
-    const b = g.introBench[0];
-    expect(b, "the lab plan has no bench").toBeDefined();
+    const b = g.introStations.culture[0];
+    expect(b, "the lab plan has no culture bench").toBeDefined();
     if (!b) return;
     // Stand next to it and step on.
     g.player.x = b.x; g.player.y = b.y + 1;
     g.step(b.x, b.y);
-    expect(g.pickingClassFor, "the bench did not open the choice").toBe(0);
+    expect(g.pickingClassFor, "the culture bench did not open the choice")
+      .toBe(0);
     expect(g.intro, "the bench left the lab before a class was chosen")
       .not.toBeNull();
   });
@@ -2650,12 +2662,15 @@ describe("the lab is a floor you walk", () => {
     const { labGrid } = await import("../src/lab_level.js");
     const { findPath } = await import("../src/path.js");
     const plan = labGrid();
-    for (const b of plan.bench) {
-      expect(findPath(plan.grid, plan.entry, b),
-             `no route from the door to the bench at ${String(b.x)},${String(b.y)}`)
-        .not.toBeNull();
+    for (const id of Object.keys(plan.stations) as (keyof typeof plan.stations)[]) {
+      const tiles = plan.stations[id];
+      expect(tiles.length, `station "${id}" has no tiles`).toBeGreaterThan(0);
+      for (const b of tiles) {
+        expect(findPath(plan.grid, plan.entry, b),
+               `no route from the door to ${id} at ${String(b.x)},${String(b.y)}`)
+          .not.toBeNull();
+      }
     }
-    expect(plan.bench.length, "the plan has no bench").toBeGreaterThan(0);
     expect(plan.desks.length, "the room is empty of other people")
       .toBeGreaterThan(3);
   });
@@ -2736,5 +2751,225 @@ describe("the lab survives the buttons the player has just learned", () => {
     g.save();
     const { loadSlot } = await import("../src/saves.js");
     expect(loadSlot(0), "the lab wrote a save").toBeNull();
+  });
+});
+
+describe("the lab and the column do not overlap", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a lab tile never holds a microbe from the floor below", async () => {
+    // The lab is a Level the player stands on while the DUNGEON still points
+    // at F1. `mobAt` read `current().mobs`, so it answered with F1's
+    // inhabitants for lab coordinates: you would walk across an empty room,
+    // step onto a tile that happened to hold a microbe on a floor you had
+    // never seen, attack it, and be killed by something invisible in a room
+    // with nothing in it. Measured at up to FOUR such tiles per seed.
+    const { Dungeon } = await import("../src/dungeon.js");
+    const { labGrid } = await import("../src/lab_level.js");
+    const { Game } = await import("../src/main.js");
+    const plan = labGrid();
+
+    // Find a seed where an F1 microbe really does stand on the lab floor.
+    let seed = -1;
+    for (let s = 0; s < 60 && seed < 0; s++) {
+      const d = new Dungeon(96, 96, s);
+      if (d.level(1).mobs.some((m) => m.alive && plan.grid.isFloor(m.x, m.y))) {
+        seed = s;
+      }
+    }
+    expect(seed, "no seed overlaps -- the fixture proves nothing")
+      .toBeGreaterThanOrEqual(0);
+
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.enterLab(0);
+    g.dungeon = new Dungeon(96, 96, seed);
+    const ghost = g.dungeon.level(1).mobs.find(
+      (m) => m.alive && plan.grid.isFloor(m.x, m.y));
+    if (!ghost) return;
+
+    // Walk onto exactly that tile. Nothing should be there.
+    expect(g.dungeon.mobAt(ghost.x, ghost.y, g.level),
+           "a microbe from F1 is standing in the lab").toBeUndefined();
+    // Settle maxhp first: it is derived from the genome and corrected on the
+    // first upkeep, so a fresh Game clamps hp on turn one and that reads as
+    // damage.
+    for (let i = 0; i < 3; i++) g.press("wait");
+    g.player.x = ghost.x; g.player.y = ghost.y + 1;
+    const hp = g.player.hp;
+    g.step(ghost.x, ghost.y);
+    expect(g.player.hp, "something invisible hit the researcher").toBe(hp);
+  });
+
+  it("the column invariants do not fire on the lab floor", async () => {
+    // `the level matches the floor it claims` and `the stratum is a real one`
+    // both describe the COLUMN, and the lab is deliberately outside it at
+    // depth 0 while the dungeon still says floor 1.
+    const { firstViolation } = await import("../src/invariants.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.enterLab(0);
+    const w = {
+      plasmid: g.genome, level: g.level, player: g.player, drops: g.drops,
+      packets: g.packets, clouds: g.clouds, barriers: g.level.barriers,
+      run: g.run, floor: g.dungeon.floor, dead: g.dead,
+    };
+    const v = firstViolation(w);
+    expect(v ? v.name : null, "an invariant fired in the lab").toBeNull();
+  });
+});
+
+
+describe("the lab is internally consistent", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const inLab = async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.enterLab(0);
+    return g;
+  };
+
+  it("the level and the dungeon agree on where you are", async () => {
+    // They are the same position only by convention, and twenty-eight places
+    // read `dungeon.depth`. While that said 1 and the level said 0, everything
+    // from the HUD's chemistry to the vitality curve to what the plasmid
+    // expresses was running D1 physics in a room with the lights on.
+    const g = await inLab();
+    expect(g.dungeon.floor, "the dungeon is on a different floor")
+      .toBe(g.level.floor);
+    expect(g.dungeon.depth, "the dungeon is at a different depth")
+      .toBe(g.level.depth);
+    expect(g.level.depth, "the lab is not depth 0").toBe(0);
+  });
+
+  it("stays consistent for the whole visit, and after leaving", async () => {
+    const g = await inLab();
+    for (let i = 0; i < 40; i++) {
+      g.press("wait");
+      g.frame(100 + i * 40);
+      expect(g.dungeon.floor, `turn ${String(i)}: they diverged`)
+        .toBe(g.level.floor);
+    }
+    // And the column is normal again on the way out.
+    g.introChosen = true;
+    g.startRun(0, "phototroph");
+    expect(g.dungeon.floor, "the run did not start on floor 1").toBe(1);
+    expect(g.dungeon.depth).toBe(1);
+    expect(g.level.floor).toBe(1);
+    expect(g.intro, "the lab did not close").toBeNull();
+  });
+
+  it("no invariant fires at any point in a full visit", async () => {
+    // Every check EXCEPT the two that describe the column must hold in there.
+    const { firstViolation } = await import("../src/invariants.js");
+    const g = await inLab();
+    const view = () => ({
+      plasmid: g.genome, level: g.level, player: g.player, drops: g.drops,
+      packets: g.packets, clouds: g.clouds, barriers: g.level.barriers,
+      run: g.run, floor: g.dungeon.floor, dead: g.dead,
+    });
+    for (let i = 0; i < 30; i++) {
+      g.press("wait");
+      const v = firstViolation(view());
+      expect(v ? `${v.name}: ${v.detail}` : null,
+             `turn ${String(i)} in the lab`).toBeNull();
+    }
+    // Through each station, and out.
+    for (const id of ["notes", "sequencer", "culture"] as const) {
+      const t = g.introStations[id][0];
+      if (!t) continue;
+      g.player.x = t.x; g.player.y = t.y + 1;
+      g.step(t.x, t.y);
+      const v = firstViolation(view());
+      expect(v ? `${v.name}: ${v.detail}` : null, `at the ${id} station`)
+        .toBeNull();
+      g.pickingClassFor = null;
+      g.showNotes = false;
+    }
+  });
+
+  it("the HUD reads the lab, not the floor below it", async () => {
+    // `F1/24 Preparation lab` was the visible symptom: the stratum name came
+    // from the level and the floor number from the dungeon.
+    const g = await inLab();
+    expect(g.level.stratum.name).toBe("Preparation lab");
+    expect(g.dungeon.floor).toBe(0);
+    expect(g.level.mobs.filter((m) => m.alive).length,
+           "the hostile counter has something to count").toBe(0);
+  });
+});
+
+describe("soak: the lab under random input", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("500 random actions in the lab break nothing", async () => {
+    // Three broken versions of this room shipped in a row, each fixed one at a
+    // time from a screenshot. This is the test that should have existed first:
+    // hammer it, and check the things that must ALWAYS hold rather than the
+    // one that happened to be visible.
+    const { Game } = await import("../src/main.js");
+    const { firstViolation } = await import("../src/invariants.js");
+    const { makeRng } = await import("../src/rng.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.enterLab(0);
+    const rng = makeRng(4242);
+    const ids = g.buttons.map((b) => b.id);
+
+    for (let i = 0; i < 500; i++) {
+      switch (rng.int(4)) {
+        case 0: {
+          const id = ids[rng.int(ids.length)];
+          if (id) g.press(id);
+          break;
+        }
+        case 1:
+          g.step(g.player.x + rng.int(3) - 1, g.player.y + rng.int(3) - 1);
+          break;
+        case 2: g.frame(100 + i * 37); break;
+        default: g.press("wait"); break;
+      }
+      // Whatever happened, these hold.
+      expect(g.dead, `died in the lab at step ${String(i)}`).toBe(false);
+      expect(g.player.hp, `lost hp in the lab at step ${String(i)}`)
+        .toBeGreaterThan(0);
+      if (g.intro) {
+        expect(g.dungeon.floor, `floors diverged at step ${String(i)}`)
+          .toBe(g.level.floor);
+        expect(g.level.mobs.length, `something spawned at step ${String(i)}`)
+          .toBe(0);
+        const v = firstViolation({
+          plasmid: g.genome, level: g.level, player: g.player, drops: g.drops,
+          packets: g.packets, clouds: g.clouds, barriers: g.level.barriers,
+          run: g.run, floor: g.dungeon.floor, dead: g.dead,
+        });
+        expect(v ? `${v.name}: ${v.detail}` : null, `step ${String(i)}`)
+          .toBeNull();
+      }
+    }
+    // And it either stayed in the lab or left through the incubator properly.
+    if (!g.intro) {
+      expect(g.started, "it left the lab without starting a run").toBe(true);
+      expect(g.dungeon.floor, "it left the lab onto the wrong floor").toBe(1);
+    }
   });
 });

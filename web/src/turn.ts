@@ -15,6 +15,7 @@ export { t_acquire, t_catabolise, t_die, t_expand, t_research, t_win }
 import { WILD_TYPE, rollAllele } from "./allele.js";
 import { describeLevel, strainLevel } from "./strain.js";
 import { atpCeiling } from "./chromosome.js";
+import { labStation } from "./lab_station.js";
 export function t_descend(_g: Game): void {
   if (_g.dead) return;             // a lost strain does not act
   //  is the lab floor but  is NOT -- separate objects -- so
@@ -140,7 +141,7 @@ export function t_describeTile(_g: Game, x: number, y: number): void {
     if (!isVisible(s, x, y)) { _g.note("You remember the ground there."); return; }
 
     const parts: string[] = [];
-    const mob = _g.dungeon.mobAt(x, y);
+    const mob = _g.dungeon.mobAt(x, y, _g.level);
     if (mob) parts.push(`A ${mob.name}. ${mob.note}`);
     const d = dropAt(_g.drops, x, y);
     if (d) {
@@ -318,7 +319,7 @@ export function t_mobTurn(_g: Game): void {
     // shot fired this turn does not also land this turn.
     const arm = _g.genome.armour(_g.dungeon.depth);
     for (const h of stepPackets(_g.packets, _g.level.grid, _g.player,
-                                (x, y) => _g.dungeon.mobAt(x, y) !== undefined)) {
+                                (x, y) => _g.dungeon.mobAt(x, y, _g.level) !== undefined)) {
       hurt(_g, Math.max(h.dmg * arm, 1), "a tailocin particle");
       if (h.inflicts) applyStatus(_g.player.status, h.inflicts, 5, 1);
       _g.fx.add({ kind: "burst", t0: _g.now, dur: 380, x: _g.player.x,
@@ -681,7 +682,7 @@ export function t_step(_g: Game, x: number, y: number): boolean {
   if (_g.dead) return false;
   _g.trace.push(_g.clock.turn, "move",
                 `to ${String(x)},${String(y)} from ${String(_g.player.x)},${String(_g.player.y)}`);
-    const m = _g.dungeon.mobAt(x, y);
+    const m = _g.dungeon.mobAt(x, y, _g.level);
     if (m) { _g.attack(m); return false; }
     if (!_g.level.grid.isFloor(x, y)) return false;
 
@@ -710,14 +711,7 @@ export function t_step(_g: Game, x: number, y: number): boolean {
     _g.facingAt = null;
     _g.look();
 
-    // The bench. Reaching it is the whole of the lab floor -- there is nothing
-    // else to do there, and the walk was the point.
-    if (_g.intro && _g.introBench.some((b) => b.x === x && b.y === y)) {
-      _g.pickingClassFor = _g.introSlot;
-      _g.walk = null;
-      _g.exploring = false;
-      return true;
-    }
+    if (_g.intro && labStation(_g, x, y)) return true;
     _g.onTile(x, y);
     _g.mobTurn();
     return true;

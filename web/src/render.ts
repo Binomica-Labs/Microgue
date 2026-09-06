@@ -23,7 +23,7 @@ import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
 import { drawBody, paletteForPigment, playerSprite, sprite, wallPattern }
   from "./paint.js";
-import { wallPatternSize } from "./paint.js";
+import { RESEARCHER_PALETTE, wallPatternSize } from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
 import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
@@ -265,7 +265,15 @@ export function r_draw(_g: Game): void {
     // The body is tinted by what the plasmid is EXPRESSING, so a
     // photoferrotroph and a methanogen no longer look alike.
     const ph = phenotypeOf(_g.genome, _g.dungeon.depth);
-    const me = hc ? null : playerSprite(px * 0.92, ph);
+    // In the LAB you are a person, not a cell. Drawing the microbe there --
+    // squashing, flagellum beating, tinted by an expression profile that does
+    // not exist yet -- was the single most wrong thing on that screen: it
+    // showed the thing you are about to send while you are still the one
+    // sending it.
+    const inLab = _g.intro !== null;
+    const me = hc ? null
+      : inLab ? sprite("researcher", px * 0.92, RESEARCHER_PALETTE)
+      : playerSprite(px * 0.92, ph);
     if (me) {
       const v = travel(_g.player.ax, _g.player.ay, _g.player.x, _g.player.y);
       const sq = squashFor(v);
@@ -273,7 +281,9 @@ export function r_draw(_g: Game): void {
       // just a wire; the motion is what makes it read as one.
       // The filament reads as strongly as the cell actually expresses it. A
       // strain with no flagellar genes should not be trailing one.
-      const flag = ph.flagellum <= 0.02 ? null : {
+      // No flagellum on a person, and no squash: a researcher walks, and the
+      // jetting is what read as "weird".
+      const flag = inLab || ph.flagellum <= 0.02 ? null : {
         phase: _g.now / (_g.settings.reduceMotion ? 1e9 : 130 - v * 60),
         colour: ph.accent,
         len: 0.34 + ph.flagellum * 0.3,
@@ -339,7 +349,7 @@ export function r_draw(_g: Game): void {
       ctx.strokeRect(tb.minX * px, tb.minY * px,
                      (tb.maxX - tb.minX + 1) * px, (tb.maxY - tb.minY + 1) * px);
     }
-    const under = _g.dungeon.mobAt(_g.cursor.x, _g.cursor.y);
+    const under = _g.dungeon.mobAt(_g.cursor.x, _g.cursor.y, _g.level);
     // Red means "this is what I am going to kill". Orange is merely hovered.
     const isTarget = under !== undefined && under === _g.target;
     ctx.strokeStyle = hc ? "#ff0"

@@ -13,6 +13,7 @@ import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box } from "./chrome.js";
 import { loadSlot } from "./saves.js";
+import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
 import type { Point } from "./mapgen.js";
@@ -114,7 +115,15 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       if (hit) {
         const slot = _g.pickingClassFor;
         _g.pickingClassFor = null;
-        _g.startRun(slot, hit.id);
+        if (_g.intro) {
+          // Back to the room. Choosing at the bench is one of the things you
+          // do in the lab, not the moment you leave it -- the incubator is.
+          _g.introClass = hit.id;
+          _g.introChosen = true;
+          _g.note(`${CLASSES[hit.id].name} prepared. Take it to the column.`);
+        } else {
+          _g.startRun(slot, hit.id);
+        }
       } else if (_g.inClose(x, y)) {
         _g.pickingClassFor = null;      // back to the slots
       }

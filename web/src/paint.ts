@@ -40,6 +40,10 @@ export function paletteForPigment(pigment: string): Palette {
   return pal;
 }
 
+/** The person at the bench: white coat, dark hair, warm skin. */
+export const RESEARCHER_PALETTE: Palette =
+  { body: "#f4f7f6", dark: "#c9d2ce", accent: "#2f2a26", hi: "#c98f6a" };
+
 const PLAYER_PALETTE: Palette =
   { body: "#ffffff", dark: "#1d2b33", accent: "#cfe8f5", hi: "#6fe6ff" };
 

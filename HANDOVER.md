@@ -1,3 +1,102 @@
+# v1.13.0 — a room, not a cave with white walls
+
+The lab shipped drawing the MICROBE: squashing, flagellum beating, tinted by an
+expression profile that does not exist yet. Under fog of war. In a room whose
+walls were drawn by the cave contourer. It showed the thing you are about to
+send while you are still the one sending it, and it looked like the column with
+the palette swapped -- the one thing it exists not to look like.
+
+* **A person.** `researcher` in pixels.ts, seen from above: head, shoulders,
+  coat. No flagellum, no squash -- a researcher walks, and the jetting was what
+  read as weird.
+* **Lights on.** `litSight` fills seen and visible, and `t_look` refuses to
+  recompute FOV in there. Fog belongs to a cave you are feeling your way
+  through.
+* **Four stations**, because character creation is several decisions and one
+  bench that opened a menu of menus is a menu with a floor around it:
+
+      C  culture bench   which organism goes in -- the class
+      S  sequencer       the strain designation
+      N  notes           the field notebook
+      I  the incubator   the column. Walking in sends it down.
+
+Choosing at the bench no longer starts the run. It records the choice and
+returns you to the room; the INCUBATOR is the way out, and it refuses until
+there is something to send -- walking in early would inoculate a default nobody
+picked.
+
+## Floor 0 means depth 0
+
+Three broken versions of the lab shipped in a row, each fixed one at a time
+from a screenshot. The root was always the same and I kept patching leaves.
+
+`enterLab` built a Level at depth 0 and left the DUNGEON on floor 1. Twenty-
+eight places read `dungeon.depth` and ten read `dungeon.floor`: the HUD's
+chemistry, the vitality curve, what the plasmid expresses, which organisms can
+appear, the wall material -- all of it was running D1 physics in a room with
+the lights on, and the HUD said `F1/24 Preparation lab` because the number came
+from one and the name from the other.
+
+`strataOf` clamped floor 0 up to depth 1. It returns 0 now, and `enterLab` puts
+the dungeon on floor 0 as well. One change, thirty-eight call sites correct by
+construction. Patching them individually was never going to end: I did it twice
+-- `mobAt`, then `aliveCount` -- and there were thirty-six more waiting.
+
+Verified that depth 0 is safe through every depth-indexed function:
+`stratum`, `microbesAt`, `substratesAt`, `vitality`, `atpBalance`, `power`,
+`expression`, `hazards`, `toxicity`, `phenotypeOf`, `materialFor`.
+
+## The test that should have existed first
+
+`soak: the lab under random input` -- 500 random actions, and after each one:
+not dead, hp above zero, floors agree, nothing has spawned, and no invariant
+fires. Three screenshots' worth of bugs would each have been caught by it on
+the version they shipped in.
+
+The lesson is not about the lab. When a new SURFACE is added -- a screen, a
+level type, a mode -- the thing to write is not a test of the feature but a
+soak of the surface, because the failures come from everything the surface
+touches rather than from the surface itself.
+
+## The lab and F1 were overlaid
+
+`enterLab` builds a Level and calls `enter()`, but the DUNGEON is untouched --
+it still points at floor 1. `Dungeon.mobAt` read `current().mobs`, so it
+answered with F1's inhabitants for lab coordinates.
+
+You would walk across an empty room, step onto a tile that happened to hold a
+microbe on a floor you had never seen, attack it, and be killed by something
+invisible in a room with nothing in it. Measured: up to FOUR such tiles per
+seed. That is the "dies instantly" and the "Killed by Oxidative stress".
+
+`mobAt` takes the level now, defaulting to `current()` for every other caller.
+`aliveCount` in the HUD had the same fault and counted F1's population while
+you stood in the lab.
+
+The general form, and it is the third time this shape has appeared: `level` is
+what you are standing on, `dungeon.current()` is where the dungeon thinks you
+are, and they are the same object only by convention. Anything that reads the
+second when it means the first is a bug waiting for a place where they differ.
+
+`spec` finds a seed where the overlap really occurs -- and asserts the fixture
+found one, because a test for an overlap that does not happen proves nothing --
+then walks onto the tile and checks nothing is there and no hp is lost.
+
+## The invariant it was tripping
+
+`the level matches the floor it claims` and `the stratum is a real one` both
+describe the COLUMN, and the lab is deliberately outside it at depth 0 and
+floor 0. They are skipped BY NAME in there rather than the check being skipped
+wholesale: everything else -- the plasmid, the ATP pool, the position -- must
+still hold, and a blanket exemption is a place bugs hide.
+
+## Two copies of the same test
+
+The class-choice flow was asserted in two places and I updated one, so the
+suite kept failing on an assertion I had already fixed elsewhere. Worth
+grepping for the message rather than trusting that the failure is where the
+edit was.
+
 # v1.12.1 — the lab is a floor, not a picture
 
 v1.12.0 shipped the lab as a PAINTED SCENE with its own state machine and its

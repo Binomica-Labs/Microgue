@@ -22,7 +22,11 @@ export function t_look(_g: Game): void {
     // the glow only helps in the oxic zone, which is where you least need it.
     const glow = _g.genome.expression("luxAB", _g.dungeon.depth) > 0 ? 2 : 0;
     const lit = lightAt(_g.level.stratum.light, _g.clock);
-    computeFov(s, _g.level.grid, _g.player.x, _g.player.y,
+    // The lab has the lights on. Recomputing FOV there would re-fog a room
+    // that is lit, and a lab drawn dark looks like the column with a white
+    // palette -- the one thing it exists not to look like.
+    if (_g.intro) { s.visible.fill(1); s.seen.fill(1); }
+    else computeFov(s, _g.level.grid, _g.player.x, _g.player.y,
                sightRadius(lit) + glow);
 
     // Keyed on the INSTANCE. Keying on species-plus-position re-fired every

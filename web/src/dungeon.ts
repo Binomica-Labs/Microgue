@@ -56,9 +56,21 @@ export interface Level {
 export const FLOORS_PER_STRATUM = 3;
 export const MAX_FLOOR = MAX_DEPTH * FLOORS_PER_STRATUM;
 
-/** Stratum index (1..8) for a floor (1..24). */
+/**
+ * Stratum index for a floor: 1..8 for floors 1..24, and 0 for the lab.
+ *
+ * Floor 0 is the preparation lab, which is outside the column. It used to
+ * clamp to 1, which meant the DUNGEON said depth 1 while the LEVEL said depth
+ * 0 -- and twenty-eight places read `dungeon.depth`. Everything from the
+ * chemistry in the HUD to the vitality curve to what the plasmid expresses was
+ * running D1 physics in a room with the lights on.
+ *
+ * Making floor 0 mean depth 0 fixes all twenty-eight at once, which is the
+ * only kind of fix worth making when the count is that high.
+ */
 export const strataOf = (floor: number): number =>
-  Math.min(Math.max(Math.ceil(floor / FLOORS_PER_STRATUM), 1), MAX_DEPTH);
+  floor <= 0 ? 0
+    : Math.min(Math.max(Math.ceil(floor / FLOORS_PER_STRATUM), 1), MAX_DEPTH);
 
 /** The last floor of a stratum is where its boss stands. */
 export const isBossFloor = (floor: number): boolean =>
@@ -465,9 +477,18 @@ export class Dungeon {
     return !lvl.boss || !lvl.mobs.some((m) => m.alive && m.elite);
   }
 
-  /** Any mob whose FOOTPRINT covers this tile, not merely its anchor. */
-  mobAt(x: number, y: number): Mob | undefined {
-    return this.current().mobs.find(
+  /**
+   * Any mob whose FOOTPRINT covers this tile, not merely its anchor.
+   *
+   * Takes the level rather than assuming `current()`. The preparation lab is a
+   * Level the player is standing on while the DUNGEON is still pointing at F1
+   * -- so this returned F1's inhabitants for lab coordinates. You would walk
+   * across an empty room, step onto a tile that happened to hold a microbe on
+   * a floor you had never seen, attack it, and be killed by something invisible
+   * in a room with nothing in it.
+   */
+  mobAt(x: number, y: number, lvl: Level = this.current()): Mob | undefined {
+    return lvl.mobs.find(
       (m) => m.alive && covers(SIZES[m.size].footprint, m.x, m.y, m.heading, x, y));
   }
 

@@ -4,6 +4,7 @@
 import { CLASSES, DEFAULT_CLASS, type ClassId } from "./classes.js";
 import type { ClassRow } from "./class_ui.js";
 import { g_enterLab } from "./lab_enter.js";
+import { noStations, type StationId } from "./lab_level.js";
 import { g_openPlasmid } from "./plasmid_open.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
@@ -161,8 +162,13 @@ class Game {
   /** Held between choosing a class and the drip finishing. */
   introSlot = -1;
   introClass: ClassId = DEFAULT_CLASS;
-  /** Bench tiles, so stepping on one opens the choice. */
-  introBench: { x: number; y: number }[] = [];
+  /** Each station's tiles, so stepping on one opens what it does. */
+  introStations: Record<StationId, { x: number; y: number }[]> = noStations();
+  /** Which station is underfoot, so arriving fires once. */
+  atStation: StationId | null = null;
+  /** Whether the culture bench has actually been used. The incubator refuses
+   *  until it has: walking in early would inoculate a default nobody picked. */
+  introChosen = false;
   classRows: ClassRow[] = [];
   /** A cassette that would not fit on a full stack, awaiting a choice. */
   offer: { part: Part; at: { x: number; y: number } } | null = null;
@@ -521,7 +527,7 @@ class Game {
   tap(tx: number, ty: number): void {
     this.trace.push(this.clock.turn, "input", `tap ${String(tx)},${String(ty)}`);
     if (tx === this.player.x && ty === this.player.y) { if (this.stairs()) return; }
-    const m = this.dungeon.mobAt(tx, ty);
+    const m = this.dungeon.mobAt(tx, ty, this.level);
     if (m !== undefined) {
       // Tapping a microbe means "go kill that": approach it and land ONE blow.
       // This used to call takeTurn() directly, which is a single step -- so
@@ -763,7 +769,7 @@ class Game {
     // Reset here rather than at death: death is not the only way a run ends,
     // and this is the one place a run BEGINS.
     this.intro = null;                 // the lab is behind you
-    this.introBench = [];
+    this.introStations = noStations();
     this.exploring = false;
     this.walk = null;
     this.target = null;

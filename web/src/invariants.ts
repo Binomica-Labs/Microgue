@@ -350,7 +350,18 @@ export function check(w: WorldView): Violation[] {
  * only to discard 22 of them was paying full price for a yes-or-no answer.
  */
 export function firstViolation(w: WorldView): Violation | null {
+  // The preparation lab is depth 0 and floor 0, deliberately: numbering it
+  // outside the column is what keeps it out of every depth-indexed table
+  // without a special case. Two invariants describe the COLUMN and are simply
+  // not about it -- the floor number and the stratum range.
+  //
+  // Skipping the pair by name rather than skipping the whole check: everything
+  // else -- the plasmid, the ATP pool, the player's position -- must still
+  // hold in there, and a blanket exemption would be a place bugs could hide.
+  const inLab = w.level.depth === 0;
   for (const [name, fn] of ENTRIES) {
+    if (inLab && (name === "the level matches the floor it claims"
+                  || name === "the stratum is a real one")) continue;
     let detail: string | null;
     try {
       detail = fn(w);
