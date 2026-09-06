@@ -1,3 +1,42 @@
+# v1.14.0 — deep audit
+
+Went through the whole codebase rather than the latest screenshot. Findings:
+
+## Two dead modules, deleted
+
+`replicon.ts` (172 lines) and `genome.ts` (130 lines) were both orphaned --
+nothing imported from either. `replicon.ts` was superseded by `chromosome.ts`
+when growth replaced the Inc-group system; `genome.ts` by `plasmid.ts`. Both
+were still compiling and shipping in the bundle. 290 lines gone, 91 modules
+now.
+
+## A crash on a corrupt part id
+
+`transcribe` did `PROMOTERS[head.id].strength` with no guard. A promoter, gene,
+terminator or modifier whose id is outside its table crashed on the first frame
+that computed expression -- reading `.strength` of undefined.
+
+The UI cannot produce one (typed constructors) and the LOAD path already
+validates ids through `parsePart`/`isGeneId`, so a player cannot reach it. But a
+hand-edited or version-skewed save could, and a crash is the worst possible
+response to a bad save. Unknown promoter/terminator/modifier is now ignored --
+the operon does not start, or the part has no effect. The lookups are typed to
+admit a miss so the guard is real to the compiler, not an eslint suppression.
+
+## What the audit did NOT find
+
+No TODO, FIXME, HACK, @ts-ignore or eslint-disable anywhere in src. parseSave
+survives thirteen kinds of garbage. 300 seeds x 60 random plasmid mutations
+produce zero NaN. Degenerate grids (1x1 up to 200x200) are handled. The economy
+does not drift. The 300/300 "invariant violation" in the fuzz was a bad FIXTURE
+-- the test placed the player in rock -- not a bug.
+
+## Watch: three modules at the ceiling
+
+main.ts 898, turn.ts 896, render.ts 889 -- all one to eleven lines under the
+900 guard. The next feature that touches any of them will need an extraction
+first. Not a bug, but the next split is overdue rather than optional.
+
 # v1.13.0 — a room, not a cave with white walls
 
 The lab shipped drawing the MICROBE: squashing, flagellum beating, tinted by an

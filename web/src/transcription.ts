@@ -59,7 +59,12 @@ export function modEffect(mods: readonly ModifierId[]): {
 } {
   let expression = 1, kb = 0, power = 1, upkeep = 1, relief = 0;
   for (const m of mods) {
-    const e = MODIFIERS[m].effect;
+    // `as` widens the total-looking table to admit a miss: a hand-edited save
+    // can hold an id outside the type, and the compiler otherwise proves this
+    // branch dead and forbids the guard that stops the crash.
+    const def = (MODIFIERS as Record<string, typeof MODIFIERS[ModifierId] | undefined>)[m];
+    if (!def) continue;
+    const e = def.effect;
     expression *= e.expression ?? 1;
     kb += e.kb ?? 0;
     power *= e.power ?? 1;
@@ -90,7 +95,13 @@ export function transcribe(
   for (let p = 0; p < n; p++) {
     const head = slots[p];
     if (head?.kind !== "promoter") continue;
-    const def = PROMOTERS[head.id];
+    // A promoter whose id is not in the table. The UI cannot make one -- every
+    // part comes from a typed constructor -- but a hand-edited or
+    // version-skewed save can, and dereferencing `def` blind turned that into a
+    // crash on the first frame that computed expression. Treat an unknown
+    // promoter as no promoter: the operon simply does not start here.
+    const def = (PROMOTERS as Record<string, typeof PROMOTERS[PromoterId] | undefined>)[head.id];
+    if (!def) continue;
     const output = def.strength * Math.min(Math.max(def.active(ctx), 0), 1);
     const readings: Reading[] = [];
 
@@ -104,7 +115,8 @@ export function transcribe(
       if (part.kind === "promoter") break;          // the next unit starts here
 
       if (part.kind === "terminator") {
-        flow *= TERMINATORS[part.id].readthrough;
+        const term = (TERMINATORS as Record<string, typeof TERMINATORS[TerminatorId] | undefined>)[part.id];
+        flow *= term ? term.readthrough : 1;   // unknown terminator: no effect
         if (flow < FLOOR) break;
         continue;                                   // and keep reading
       }

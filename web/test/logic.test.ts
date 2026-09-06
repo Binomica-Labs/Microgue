@@ -7724,3 +7724,26 @@ describe("the lab reads as a room", () => {
     }
   });
 });
+
+describe("a corrupt part id cannot crash transcription", () => {
+  it("an unknown promoter, terminator or modifier is ignored, not dereferenced", () => {
+    // The UI cannot make one -- every part comes from a typed constructor, and
+    // the load path validates ids -- but a hand-edited or version-skewed save
+    // can, and `transcribe` dereferenced the lookup blind. That crashed on the
+    // first frame that computed expression.
+    const p = new Plasmid();
+    p.integrated = 6;
+    // Forge parts with ids outside the tables.
+    p.slots[1] = { kind: "promoter", id: "nonesuch" as never };
+    p.slots[2] = { kind: "gene", id: "psbA", level: 1,
+                   mods: ["fake" as never], allele: WILD_TYPE };
+    p.slots[3] = { kind: "terminator", id: "bogus" as never };
+    for (const d of [0, 1, 8]) {
+      expect(() => p.power(d), `power at D${String(d)}`).not.toThrow();
+      expect(() => p.expression("psbA", d), `expression at D${String(d)}`)
+        .not.toThrow();
+      expect(Number.isFinite(p.power(d)), `power finite at D${String(d)}`)
+        .toBe(true);
+    }
+  });
+});
