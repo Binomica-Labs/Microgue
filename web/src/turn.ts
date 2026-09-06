@@ -15,6 +15,222 @@ export { t_acquire, t_catabolise, t_die, t_expand, t_research, t_win }
 import { WILD_TYPE, rollAllele } from "./allele.js";
 import { describeLevel, strainLevel } from "./strain.js";
 import { atpCeiling } from "./chromosome.js";
+export function t_descend(_g: Game): void {
+  if (_g.dead) return;             // a lost strain does not act
+  //  is the lab floor but  is NOT -- separate objects -- so
+  // this moved the dungeon and dropped the researcher into D1 with no class.
+  if (_g.intro) { _g.note("Not from here. The column is on the bench."); return; }
+  _g.trace.push(_g.clock.turn, "floor", `descend from F${String(_g.dungeon.floor)}`);
+    if (!Dungeon.isCleared(_g.level)) {
+      _g.note("The way down is choked. Something here has to die first.");
+      _g.toasts.push("Clear the floor before descending.", "warn", _g.now);
+      return;
+    }
+    const r = _g.dungeon.descend();
+    if ("err" in r) { _g.note(r.err); return; }
+    _g.enter(r.level, r.arrive);
+    _g.audit();
+  }
+
+export function t_ascend(_g: Game): void {
+  if (_g.dead) return;             // a lost strain does not act
+  if (_g.intro) { _g.note("Not from here. The column is on the bench."); return; }
+    const r = _g.dungeon.ascend();
+    if ("err" in r) { _g.note(r.err); return; }
+    _g.enter(r.level, r.arrive);
+  }
+
+
+export function t_onTile(_g: Game, x: number, y: number): void {
+  if (_g.dead) return;             // a lost strain does not act
+    const room = roomAt(_g.level.rooms, x, y);
+    if (room && room !== _g.inRoom) {
+      _g.inRoom = room;
+      // A relict says WHICH layer it is, because that is the whole reason to
+      // break into one: it tells you what metabolism you are about to be
+      // handed, several strata out of place.
+      const where = room.kind === "relict" && room.from !== undefined
+        ? ` This came from the ${bio.STRATA[
+            Math.min(Math.max(room.from - 1, 0), bio.STRATA.length - 1)
+          ]?.name ?? "column above"}.`
+        : "";
+      _g.note(`${ROOM_STYLE[room.kind].name}. ${ROOM_STYLE[room.kind].note}${where}`);
+    } else if (!room) {
+      _g.inRoom = null;
+    }
+    const d = dropAt(_g.drops, x, y);
+    if (!d) return;
+    if (d.items.length === 1) {
+      const it = d.items[0];
+      if (it && _g.take(it)) removeDrop(_g.drops, d);
+      return;
+    }
+    // More than one: open it rather than swallowing it blind.
+    _g.openDrop = d;
+    _g.walk = null;
+  }
+
+export function t_take(_g: Game, it: Item): boolean {
+    if (it.kind === "cassette") {
+      const part: Part = { kind: "gene", id: it.gene, level: 1, mods: [],
+                           allele: it.allele };
+      // A copy you cannot hold is not a refusal, it is a CHOICE: the thing on
+      // the floor is still DNA, and eating it is a real option.
+      //
+      // That was true of a full STACK and not of a full BIN, which just said
+      // no -- so a full bin turned every cassette on the floor into litter you
+      // had to walk past, when catabolising it is exactly what a cell would
+      // do. Same offer, same reasons, different cause.
+      const stackFull = fullStackIndex(_g.genome.bin, part) >= 0
+        && stackIndex(_g.genome.bin, part) < 0;
+      const binFull = _g.genome.bin.length >= BIN_CAP
+        && stackIndex(_g.genome.bin, part) < 0;
+      if (stackFull || binFull) {
+        _g.offer = { part, at: { x: _g.player.x, y: _g.player.y } };
+        _g.note(stackFull
+          ? `Already carrying ${String(MAX_STACK)} of `
+            + `${bio.GENES[it.gene].name}. Catabolise this one, or leave it.`
+          : `No room for ${bio.GENES[it.gene].name}. Catabolise it, or leave it.`);
+        return false;
+      }
+      const r = _g.genome.stash(part);
+      if (!r.ok) { _g.toasts.push(r.err, "warn", _g.now); return false; }
+      recordLocus(_g.run, it.gene);
+      const held = _g.genome.bin.find((p) => stacks(p, part));
+      const n = held ? countOf(held) : 1;
+      _g.note(say.pickupLine(it, 0, null)
+        + (n > 1 ? ` You now hold ${String(n)}.` : ""));
+      return true;
+    }
+    // Regulatory parts go to the bin; only substrates are metabolised.
+    if (it.kind !== "substrate") {
+      // A modifier is not a ring part: it is held until attached to a gene.
+      if (it.kind === "modifier") {
+        _g.mods.push(it.id);
+        _g.note(say.pickupLine(it, 0, null));
+        _g.toasts.push(`${RARITY[it.rarity].name}: ${MODIFIERS[it.id].name}`,
+                         "info", _g.now);
+        return true;
+      }
+      const part: Part = it.kind === "promoter"
+        ? { kind: "promoter", id: it.id }
+        : { kind: "terminator", id: it.id };
+      const r = _g.genome.stash(part);
+      if (!r.ok) { _g.toasts.push(r.err, "warn", _g.now); return false; }
+      _g.note(say.pickupLine(it, 0, null));
+      if (it.rarity !== "common") {
+        _g.toasts.push(`${RARITY[it.rarity].name} part: ${itemName(it)}`,
+                         "info", _g.now);
+      }
+      return true;
+    }
+    const { atp, blocked } = yieldOf(it.id, (g) => _g.genome.has(g));
+    _g.player.atp = Math.min(_g.player.atp + atp, _g.player.atpMax);
+    _g.note(say.pickupLine(it, atp, blocked));
+    if (atp > 0) {
+      _g.fx.add({ kind: "text", t0: _g.now, dur: 700, x: _g.player.x,
+                    y: _g.player.y, text: `+${String(atp)}`, colour: "#7fc4e8" });
+    }
+    return true;
+  }
+
+export function t_describeTile(_g: Game, x: number, y: number): void {
+    const s = _g.level.sight;
+    if (!isSeen(s, x, y)) { _g.note("You have not been there."); return; }
+    if (!isVisible(s, x, y)) { _g.note("You remember the ground there."); return; }
+
+    const parts: string[] = [];
+    const mob = _g.dungeon.mobAt(x, y);
+    if (mob) parts.push(`A ${mob.name}. ${mob.note}`);
+    const d = dropAt(_g.drops, x, y);
+    if (d) {
+      parts.push(d.items.length === 1 && d.items[0]
+        ? `${itemName(d.items[0])} lies here.`
+        : `A lysate of ${String(d.items.length)} things lies here.`);
+    }
+    const bar = barrierAt(_g.level.barriers, x, y);
+    if (bar) parts.push(`${BARRIERS[bar.id].name}. ${BARRIERS[bar.id].note}`);
+    if (_g.level.down?.x === x && _g.level.down.y === y) {
+      parts.push("A way down into the next layer.");
+    }
+    if (x === _g.level.up.x && y === _g.level.up.y) parts.push("A way back up.");
+    if (parts.length > 0) _g.note(parts.join(" "));
+  }
+
+
+
+export function t_audit(_g: Game): void {
+  // Nothing to validate once the strain is gone: the run is over and hp 0 is
+  // the correct state for a dead one.
+  if (_g.dead) return;
+    const v = firstViolation(_g.world());
+    if (!v) return;
+    _g.toasts.push(`invariant: ${v.name} — ${v.detail}`, "error", _g.now);
+  }
+
+export function t_world(_g: Game): WorldView {
+    return {
+      plasmid: _g.genome, level: _g.level, player: _g.player,
+      drops: _g.drops, packets: _g.packets, clouds: _g.clouds,
+      barriers: _g.level.barriers, run: _g.run, floor: _g.dungeon.floor,
+      dead: _g.dead,
+    };
+  }
+
+export function t_takeTurn(_g: Game): boolean {
+    const act: Action = nextAction(
+      { x: _g.player.x, y: _g.player.y }, _g.level.mobs, _g.level.grid,
+      _g.target, _g.autoAttack,
+      { reach: _g.genome.reach(_g.dungeon.depth), maxRange: 24 });
+
+    switch (act.kind) {
+      case "attack":
+        _g.target = act.target;
+        _g.attack(act.target);
+        return true;
+      case "step":
+        _g.target = act.target;
+        _g.step(act.to.x, act.to.y);
+        return true;
+      case "idle":
+        _g.target = null;
+        return false;
+    }
+  }
+
+export function t_repath(_g: Game): void {
+    _g.path = findPath(_g.level.grid, { x: _g.player.x, y: _g.player.y },
+                         _g.cursor, { diagonal: _g.settings.diagonal });
+  }
+
+
+
+
+
+
+/**
+ * One leg of auto-explore.
+ *
+ * Called when the walk queue has emptied and nothing interrupted, so this
+ * either finds the next frontier or declares the level done. The interrupt
+ * itself lives in `look()`: anything coming into view clears `walk`, and
+ * clearing `exploring` alongside it is what makes the stop total.
+ */
+export function t_exploreStep(_g: Game): void {
+  if (_g.dead || !_g.exploring) return;
+  const r = nextExplore(_g.level.grid, _g.level.sight, _g.player);
+  if (r.kind === "done") {
+    _g.exploring = false;
+    const left = unexplored(_g.level.grid, _g.level.sight);
+    _g.note(left < 0.02
+      ? "The floor is fully mapped."
+      : `${r.why} ${String(Math.round(left * 100))}% of the floor is still dark.`);
+    const btn = _g.buttons.find((b) => b.id === "explore");
+    if (btn) btn.active = false;
+    return;
+  }
+  _g.walk = { nodes: [...r.path], i: 0 };
+}
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 import { isSnapshotTurn, snapshot } from "./snapshot.js";
 import * as bio from "./biology.js";
@@ -339,9 +555,18 @@ export function t_step_(_g: Game, t: number): void {
     const k = _g.settings.reduceMotion ? 1 : Math.min(_g.player.speed * dt, 1);
     _g.player.ax += (_g.player.x - _g.player.ax) * k;
     _g.player.ay += (_g.player.y - _g.player.ay) * k;
-    // Face the way you are actually travelling, easing round the short way.
+    // Face the way you are travelling, easing round the short way -- or the
+    // thing you are hitting.
+    //
+    // Travel alone meant a cell that attacked without moving kept whatever
+    // heading it arrived with, so you could be swinging at something directly
+    // behind you. Striking is as much a direction as walking is, and it
+    // OVERRIDES: the blow is the more recent intent.
     const TURN = 14;                              // radians per second
-    const ph = headingOf(_g.player.x - _g.player.ax, _g.player.y - _g.player.ay);
+    const struck = _g.facingAt;
+    const ph = struck !== null
+      ? headingOf(struck.x - _g.player.ax, struck.y - _g.player.ay)
+      : headingOf(_g.player.x - _g.player.ax, _g.player.y - _g.player.ay);
     if (ph !== null) {
       _g.player.heading = _g.player.heading === null
         ? ph : turnToward(_g.player.heading, ph, TURN * dt);
@@ -481,7 +706,18 @@ export function t_step(_g: Game, x: number, y: number): boolean {
       _g.note(`The ${r.def.name} gives way.`);
     }
     _g.player.x = x; _g.player.y = y;
+    // Moving is a newer intent than the last blow.
+    _g.facingAt = null;
     _g.look();
+
+    // The bench. Reaching it is the whole of the lab floor -- there is nothing
+    // else to do there, and the walk was the point.
+    if (_g.intro && _g.introBench.some((b) => b.x === x && b.y === y)) {
+      _g.pickingClassFor = _g.introSlot;
+      _g.walk = null;
+      _g.exploring = false;
+      return true;
+    }
     _g.onTile(x, y);
     _g.mobTurn();
     return true;
@@ -489,6 +725,9 @@ export function t_step(_g: Game, x: number, y: number): boolean {
 
 export function t_attack(_g: Game, m: Mob): void {
   if (_g.dead) return;             // a lost strain does not act
+    // Turn to face it. Held until the next move, so the swing and the
+    // recovery both point the right way rather than snapping back.
+    _g.facingAt = { x: m.x, y: m.y };
     const dmg = Math.max(Math.round(_g.atk()), 1);
     _g.trace.push(_g.clock.turn, "attack",
                   `${m.name} for ${String(dmg)} (had ${String(m.hp)})`);
@@ -628,218 +867,6 @@ export function t_attack(_g: Game, m: Mob): void {
   }
 
 
-export function t_descend(_g: Game): void {
-  if (_g.dead) return;             // a lost strain does not act
-  _g.trace.push(_g.clock.turn, "floor", `descend from F${String(_g.dungeon.floor)}`);
-    if (!Dungeon.isCleared(_g.level)) {
-      _g.note("The way down is choked. Something here has to die first.");
-      _g.toasts.push("Clear the floor before descending.", "warn", _g.now);
-      return;
-    }
-    const r = _g.dungeon.descend();
-    if ("err" in r) { _g.note(r.err); return; }
-    _g.enter(r.level, r.arrive);
-    _g.audit();
-  }
-
-export function t_ascend(_g: Game): void {
-  if (_g.dead) return;             // a lost strain does not act
-    const r = _g.dungeon.ascend();
-    if ("err" in r) { _g.note(r.err); return; }
-    _g.enter(r.level, r.arrive);
-  }
-
-
-export function t_onTile(_g: Game, x: number, y: number): void {
-  if (_g.dead) return;             // a lost strain does not act
-    const room = roomAt(_g.level.rooms, x, y);
-    if (room && room !== _g.inRoom) {
-      _g.inRoom = room;
-      // A relict says WHICH layer it is, because that is the whole reason to
-      // break into one: it tells you what metabolism you are about to be
-      // handed, several strata out of place.
-      const where = room.kind === "relict" && room.from !== undefined
-        ? ` This came from the ${bio.STRATA[
-            Math.min(Math.max(room.from - 1, 0), bio.STRATA.length - 1)
-          ]?.name ?? "column above"}.`
-        : "";
-      _g.note(`${ROOM_STYLE[room.kind].name}. ${ROOM_STYLE[room.kind].note}${where}`);
-    } else if (!room) {
-      _g.inRoom = null;
-    }
-    const d = dropAt(_g.drops, x, y);
-    if (!d) return;
-    if (d.items.length === 1) {
-      const it = d.items[0];
-      if (it && _g.take(it)) removeDrop(_g.drops, d);
-      return;
-    }
-    // More than one: open it rather than swallowing it blind.
-    _g.openDrop = d;
-    _g.walk = null;
-  }
-
-export function t_take(_g: Game, it: Item): boolean {
-    if (it.kind === "cassette") {
-      const part: Part = { kind: "gene", id: it.gene, level: 1, mods: [],
-                           allele: it.allele };
-      // A copy you cannot hold is not a refusal, it is a CHOICE: the thing on
-      // the floor is still DNA, and eating it is a real option.
-      //
-      // That was true of a full STACK and not of a full BIN, which just said
-      // no -- so a full bin turned every cassette on the floor into litter you
-      // had to walk past, when catabolising it is exactly what a cell would
-      // do. Same offer, same reasons, different cause.
-      const stackFull = fullStackIndex(_g.genome.bin, part) >= 0
-        && stackIndex(_g.genome.bin, part) < 0;
-      const binFull = _g.genome.bin.length >= BIN_CAP
-        && stackIndex(_g.genome.bin, part) < 0;
-      if (stackFull || binFull) {
-        _g.offer = { part, at: { x: _g.player.x, y: _g.player.y } };
-        _g.note(stackFull
-          ? `Already carrying ${String(MAX_STACK)} of `
-            + `${bio.GENES[it.gene].name}. Catabolise this one, or leave it.`
-          : `No room for ${bio.GENES[it.gene].name}. Catabolise it, or leave it.`);
-        return false;
-      }
-      const r = _g.genome.stash(part);
-      if (!r.ok) { _g.toasts.push(r.err, "warn", _g.now); return false; }
-      recordLocus(_g.run, it.gene);
-      const held = _g.genome.bin.find((p) => stacks(p, part));
-      const n = held ? countOf(held) : 1;
-      _g.note(say.pickupLine(it, 0, null)
-        + (n > 1 ? ` You now hold ${String(n)}.` : ""));
-      return true;
-    }
-    // Regulatory parts go to the bin; only substrates are metabolised.
-    if (it.kind !== "substrate") {
-      // A modifier is not a ring part: it is held until attached to a gene.
-      if (it.kind === "modifier") {
-        _g.mods.push(it.id);
-        _g.note(say.pickupLine(it, 0, null));
-        _g.toasts.push(`${RARITY[it.rarity].name}: ${MODIFIERS[it.id].name}`,
-                         "info", _g.now);
-        return true;
-      }
-      const part: Part = it.kind === "promoter"
-        ? { kind: "promoter", id: it.id }
-        : { kind: "terminator", id: it.id };
-      const r = _g.genome.stash(part);
-      if (!r.ok) { _g.toasts.push(r.err, "warn", _g.now); return false; }
-      _g.note(say.pickupLine(it, 0, null));
-      if (it.rarity !== "common") {
-        _g.toasts.push(`${RARITY[it.rarity].name} part: ${itemName(it)}`,
-                         "info", _g.now);
-      }
-      return true;
-    }
-    const { atp, blocked } = yieldOf(it.id, (g) => _g.genome.has(g));
-    _g.player.atp = Math.min(_g.player.atp + atp, _g.player.atpMax);
-    _g.note(say.pickupLine(it, atp, blocked));
-    if (atp > 0) {
-      _g.fx.add({ kind: "text", t0: _g.now, dur: 700, x: _g.player.x,
-                    y: _g.player.y, text: `+${String(atp)}`, colour: "#7fc4e8" });
-    }
-    return true;
-  }
-
-export function t_describeTile(_g: Game, x: number, y: number): void {
-    const s = _g.level.sight;
-    if (!isSeen(s, x, y)) { _g.note("You have not been there."); return; }
-    if (!isVisible(s, x, y)) { _g.note("You remember the ground there."); return; }
-
-    const parts: string[] = [];
-    const mob = _g.dungeon.mobAt(x, y);
-    if (mob) parts.push(`A ${mob.name}. ${mob.note}`);
-    const d = dropAt(_g.drops, x, y);
-    if (d) {
-      parts.push(d.items.length === 1 && d.items[0]
-        ? `${itemName(d.items[0])} lies here.`
-        : `A lysate of ${String(d.items.length)} things lies here.`);
-    }
-    const bar = barrierAt(_g.level.barriers, x, y);
-    if (bar) parts.push(`${BARRIERS[bar.id].name}. ${BARRIERS[bar.id].note}`);
-    if (_g.level.down?.x === x && _g.level.down.y === y) {
-      parts.push("A way down into the next layer.");
-    }
-    if (x === _g.level.up.x && y === _g.level.up.y) parts.push("A way back up.");
-    if (parts.length > 0) _g.note(parts.join(" "));
-  }
-
-
-
-export function t_audit(_g: Game): void {
-  // Nothing to validate once the strain is gone: the run is over and hp 0 is
-  // the correct state for a dead one.
-  if (_g.dead) return;
-    const v = firstViolation(_g.world());
-    if (!v) return;
-    _g.toasts.push(`invariant: ${v.name} — ${v.detail}`, "error", _g.now);
-  }
-
-export function t_world(_g: Game): WorldView {
-    return {
-      plasmid: _g.genome, level: _g.level, player: _g.player,
-      drops: _g.drops, packets: _g.packets, clouds: _g.clouds,
-      barriers: _g.level.barriers, run: _g.run, floor: _g.dungeon.floor,
-      dead: _g.dead,
-    };
-  }
-
-export function t_takeTurn(_g: Game): boolean {
-    const act: Action = nextAction(
-      { x: _g.player.x, y: _g.player.y }, _g.level.mobs, _g.level.grid,
-      _g.target, _g.autoAttack,
-      { reach: _g.genome.reach(_g.dungeon.depth), maxRange: 24 });
-
-    switch (act.kind) {
-      case "attack":
-        _g.target = act.target;
-        _g.attack(act.target);
-        return true;
-      case "step":
-        _g.target = act.target;
-        _g.step(act.to.x, act.to.y);
-        return true;
-      case "idle":
-        _g.target = null;
-        return false;
-    }
-  }
-
-export function t_repath(_g: Game): void {
-    _g.path = findPath(_g.level.grid, { x: _g.player.x, y: _g.player.y },
-                         _g.cursor, { diagonal: _g.settings.diagonal });
-  }
-
-
-
-
-
-
-/**
- * One leg of auto-explore.
- *
- * Called when the walk queue has emptied and nothing interrupted, so this
- * either finds the next frontier or declares the level done. The interrupt
- * itself lives in `look()`: anything coming into view clears `walk`, and
- * clearing `exploring` alongside it is what makes the stop total.
- */
-export function t_exploreStep(_g: Game): void {
-  if (_g.dead || !_g.exploring) return;
-  const r = nextExplore(_g.level.grid, _g.level.sight, _g.player);
-  if (r.kind === "done") {
-    _g.exploring = false;
-    const left = unexplored(_g.level.grid, _g.level.sight);
-    _g.note(left < 0.02
-      ? "The floor is fully mapped."
-      : `${r.why} ${String(Math.round(left * 100))}% of the floor is still dark.`);
-    const btn = _g.buttons.find((b) => b.id === "explore");
-    if (btn) btn.active = false;
-    return;
-  }
-  _g.walk = { nodes: [...r.path], i: 0 };
-}
 
 /** Start or stop exploring. */
 /** Anything alive and currently lit. Exploring with one of these in view is

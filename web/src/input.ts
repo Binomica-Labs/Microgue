@@ -128,8 +128,14 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
         // Occupied slots RESUME. The class was decided when that culture was
         // inoculated and asking again would be offering a choice that cannot
         // be honoured.
-        if (loadSlot(i)) _g.startRun(i);
-        else _g.pickingClassFor = i;
+        if (loadSlot(i)) {
+          _g.startRun(i);
+        } else {
+          // A new culture starts in the lab. You are the person who prepared
+          // it before you are the thing that goes in -- and crossing the room
+          // is where the controls are learned.
+          _g.enterLab(i);
+        }
       }
       _g.gesture = "none";
       return;

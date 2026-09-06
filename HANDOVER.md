@@ -1,3 +1,113 @@
+# v1.12.1 — the lab is a floor, not a picture
+
+v1.12.0 shipped the lab as a PAINTED SCENE with its own state machine and its
+own input handling. It looked right and taught nothing: the player watched an
+animation and then met tap-to-move, the camera, the buttons and the log for the
+first time on D1, with things that bite.
+
+It is a Level now. Same grid, same movement, same camera, same controls -- and
+no hostiles, so the twenty turns it takes to cross the room are twenty turns of
+learning them for free. The bench is a tile you walk onto; standing on it opens
+the class choice.
+
+`lab_level.ts` holds the plan as TEXT, hand-drawn rather than generated: a room
+has right angles and a cave generator will not make one, and being unlike
+everything below it is the point. `LAB_STRATUM` is depth 0, which keeps it out
+of every depth-indexed table without a special case.
+
+Desks are walkable floor. Blocking them would turn the room into a maze, and a
+tutorial whose first lesson is pathfinding round furniture is teaching the
+wrong thing.
+
+`spec` checks there is a route from the door to every bench tile -- a
+hand-drawn plan can trivially wall its own bench off -- and that forty turns in
+the lab cost no hp.
+
+Deleted: `lab_intro.ts`, `lab_render.ts`, `intro_render.ts`. The whole painted
+version, about 300 lines, replaced by a text plan and a Level literal.
+
+## The lab turned off the controls it exists to teach
+
+`enterLab` set `started = false`, reasoning that no run had begun. But
+`started` gates the FRAME LOOP, the input handler and the movement queue -- so
+tap-to-move, the camera and auto-explore were all dead in there. The one place
+whose entire purpose is learning the controls was the one place they did not
+work.
+
+It is TRUE now. What must not happen is a save, and `intro` is the flag for
+that: a save taken before a class is chosen would make the slot look occupied
+and resume into a strain that was never inoculated.
+
+Two things fell out of that change:
+
+* **Descend escaped the lab.** `level` is the lab floor and `dungeon` is not --
+  separate objects -- so descending moved the dungeon and dropped the
+  researcher into D1 with no class and no culture. Both stairs refuse from the
+  lab now.
+* **The class picker stopped drawing.** It lived inside the `!started` branch
+  of the renderer, which was fine while the lab left `started` false. It is
+  modal over everything now, which is what it always meant to be.
+
+`spec` presses EVERY button in the lab and frames after each, runs auto-explore
+to completion in there, and checks a save taken in the lab writes nothing.
+
+Three tests had to change because they used `started` to mean "the run has
+begun". It does not any more; it means "a level is being played", and the lab
+is one. They assert on `intro` instead.
+
+## Facing
+
+The heading followed TRAVEL only, so a cell that attacked without moving kept
+whatever heading it arrived with -- you could be swinging at something directly
+behind you. An attack sets `facingAt`, which overrides travel until the next
+step.
+
+## Container note
+
+The working tree was lost to a container reset partway through this session and
+restored from `microgue-web-v1.12.0.tar.gz`. The tarballs are the backup; that
+is worth knowing.
+
+# v1.12.0 — the bench
+
+Before a culture goes into the column, you are the person who prepared it. An
+empty slot now opens a bright room: colleagues drifting, daylight through high
+windows, a Winogradsky column already stratified on the bench. Tap the bench to
+walk over, choose a class there, and a pipette does the rest.
+
+The contrast is the whole point. Twenty-four floors of dark water land as a
+change of WORLD rather than a change of level if the thing before them is flat,
+cold and lit.
+
+It is a SCENE, not a level: no grid, no turns, no combat, no camera. Reusing
+the world renderer would have meant bending a stratum palette and a fog system
+around a room with windows in it. `lab_intro.ts` holds the state machine,
+`lab_render.ts` draws it, `intro_render.ts` owns its clock -- it is the only
+pre-game screen that animates, so there is nowhere else that runs while it is
+up.
+
+**Always skippable.** A scene you cannot skip on your fortieth run is an
+obstacle, and skipping goes to the class choice rather than past it.
+
+**The frame delta is clamped.** A backgrounded tab returns with a delta of
+minutes; unclamped that walks everyone through the wall and finishes the drip
+before it ever draws, starting the run without showing the scene at all.
+`spec` covers it with a single 400-second frame.
+
+## Facing
+
+The player's heading followed TRAVEL only, so a cell that attacked without
+moving kept whatever heading it arrived with -- you could be swinging at
+something directly behind you. An attack sets `facingAt` and it overrides
+travel until the next step: the blow is the more recent intent.
+
+## Not done
+
+Typed strain names. It needs an HTML input overlaid on the canvas -- there is
+no text entry anywhere in this project yet -- and doing it badly at the end of
+a turn that already built a scene would produce something to redo. The prebaked
+pool is still there.
+
 # v1.11.0 — nine genes, and a methanotroph
 
 69 to 78. Pathway membership drives the operon synergy bonus, so a thin pathway

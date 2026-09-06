@@ -56,8 +56,12 @@ export function r_draw(_g: Game): void {
     // line -- and because the toast renderer lives at the bottom of this same
     // function, the error it queued was never drawn either. Black screen, no
     // diagnostic, which is precisely the failure this was meant to prevent.
+    // The picker is modal over EVERYTHING, not only over the splash. It used
+    // to live inside the `!started` branch, which was fine while the lab left
+    // `started` false -- and stopped being fine the moment the lab became a
+    // level being played.
+    if (_g.pickingClassFor !== null) { r_drawPicker(_g, W, H); return; }
     if (_g.showSplash || !_g.started) {
-      if (_g.pickingClassFor !== null) { r_drawPicker(_g, W, H); return; }
       r_drawSplash(_g, W, H);
       return;
     }

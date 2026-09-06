@@ -3,6 +3,8 @@
 
 import { CLASSES, DEFAULT_CLASS, type ClassId } from "./classes.js";
 import type { ClassRow } from "./class_ui.js";
+import { g_enterLab } from "./lab_enter.js";
+import { g_openPlasmid } from "./plasmid_open.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
@@ -116,6 +118,9 @@ class Game {
   turnSeed = 1;
   /** The microbe being chased, if any. Cleared when it dies or is lost. */
   target: Mob | null = null;
+  /** What the cell is facing because it just struck, rather than because
+   *  it is travelling. Cleared on the next step. */
+  facingAt: { x: number; y: number } | null = null;
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;
@@ -141,6 +146,23 @@ class Game {
   /** Slot awaiting a class choice, or null. An EMPTY slot goes here
    *  first; an occupied one resumes and never does. */
   pickingClassFor: number | null = null;
+  /**
+   * The lab floor, while it is being walked. Null once the culture is in.
+   *
+   * Also the "do not save" flag. `started` is TRUE in the lab -- it has to be,
+   * because it gates the frame loop, the input handler and the movement
+   * queue, and leaving it false disabled the very controls the lab exists to
+   * teach. So this is what says a run has not really begun.
+   *
+   * A real Level with a real grid, so tap-to-move, the camera, the buttons and
+   * the log are all learned here rather than on D1 with things that bite.
+   */
+  intro: Level | null = null;
+  /** Held between choosing a class and the drip finishing. */
+  introSlot = -1;
+  introClass: ClassId = DEFAULT_CLASS;
+  /** Bench tiles, so stepping on one opens the choice. */
+  introBench: { x: number; y: number }[] = [];
   classRows: ClassRow[] = [];
   /** A cassette that would not fit on a full stack, awaiting a choice. */
   offer: { part: Part; at: { x: number; y: number } } | null = null;
@@ -557,7 +579,7 @@ class Game {
   bindPinch(): void { i_bindPinch(this); }
 
   // ------------------------------------------------------------ persist
-  save(): void { p_save(this); }
+  save(): void { if (!this.intro) p_save(this); }
 
   /** Load a parsed save into live state. Shared by slot loading and boot. */
   applySave(s: SaveData): void { p_applySave(this, s); }
@@ -727,6 +749,7 @@ class Game {
    *  console is the worst outcome there is. */
   drawToasts(W: number, H: number): void { r_drawToasts(this, W, H); }
 
+  enterLab(slot: number): void { g_enterLab(this, slot); }
 
   startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void {
     // A new strain inherits NOTHING about what the last one was doing.
@@ -739,6 +762,8 @@ class Game {
     //
     // Reset here rather than at death: death is not the only way a run ends,
     // and this is the one place a run BEGINS.
+    this.intro = null;                 // the lab is behind you
+    this.introBench = [];
     this.exploring = false;
     this.walk = null;
     this.target = null;
@@ -838,18 +863,7 @@ class Game {
 
   /** Single entry point, so nothing can open the screen without also parking
    *  the world. An in-flight walk used to keep stepping underneath it. */
-  openPlasmid(open: boolean): void {
-    this.trace.push(this.clock.turn, "ui", `plasmid ${open ? "open" : "close"}`);
-    this.showPlasmid = open;
-    this.selected = null;
-    this.dragFrom = null;
-    this.dragXY = null;
-    this.spinFrom = null;
-    if (open) {
-      this.walk = null;                     // stop mid-path movement
-      this.path = null;
-    }
-  }
+  openPlasmid(open: boolean): void { g_openPlasmid(this, open); }
 
   press(id: string): void { i_press(this, id); }
 

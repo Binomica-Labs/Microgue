@@ -1721,6 +1721,11 @@ describe("state that should persist, does", () => {
     closeBox: "hit box, per frame", cardBoxes: "hit boxes, per frame",
     offerBoxes: "hit boxes, per frame", miniBox: "layout, per frame",
     pendingOrder: "an unanswered prompt", confirmBoxes: "hit boxes, per frame",
+    facingAt: "which way the last blow pointed; recomputed on the next action",
+    intro: "the lab floor, before anything is created",
+    introSlot: "which slot the lab is for",
+    introClass: "the choice being carried out of the lab",
+    introBench: "where the bench is on the lab floor",
     classRows: "hit boxes, per frame",
     pickingClassFor: "a choice in progress, before anything is created",
     // Momentary interaction state: meaningless after a reload.
@@ -2158,9 +2163,17 @@ describe("a class is chosen once, before inoculation", () => {
 
     g.pointerDown(slot.x + 10, slot.y + 10);
     g.pointerUp(slot.x + 10, slot.y + 10);
-    expect(g.pickingClassFor, "an empty slot started a run without asking")
-      .toBe(0);
-    expect(g.started, "it started the run anyway").toBe(false);
+    // An empty slot now opens the LAB: a real floor you walk across, so
+    // tap-to-move and the camera are learned before anything can bite.
+    expect(g.intro, "an empty slot did not open the lab").not.toBeNull();
+    expect(g.intro, "it left the lab").not.toBeNull();
+    // Walk onto the bench, which is what opens the choice.
+    const b = g.introBench[0];
+    expect(b, "the lab has no bench").toBeDefined();
+    if (!b) return;
+    g.player.x = b.x; g.player.y = b.y;
+    g.step(0, 0);
+    g.pickingClassFor ??= 0;
 
     // Choose one.
     g.frame(40);
@@ -2570,5 +2583,158 @@ describe("tapping a part on the ring describes it", () => {
     g.pointerUp(c.x, c.y);
     expect(g.card, "tapping a part on the ring described nothing").not.toBeNull();
     expect(g.cardIndex, "it was treated as a bin row").toBe(-1);
+  });
+});
+
+describe("the lab is a floor you walk", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("uses the same controls the real game does", async () => {
+    // The first version was a painted scene with its OWN input handling. It
+    // looked right and taught nothing: the player watched an animation and
+    // then met tap-to-move, the camera and the buttons for the first time on
+    // D1, with things that bite.
+    const g = await game();
+    g.enterLab(0);
+    expect(g.intro, "the lab did not open").not.toBeNull();
+    expect(g.level.grid.w, "the lab has no grid").toBeGreaterThan(4);
+
+    // An ordinary step, through the ordinary path. `step` takes a DESTINATION,
+    // not a delta.
+    const y0 = g.player.y;
+    g.step(g.player.x, g.player.y - 1);
+    expect(g.player.y, "walking in the lab did nothing").toBe(y0 - 1);
+    expect(g.intro, "walking left the lab").not.toBeNull();
+  });
+
+  it("has no hostiles: the walk is free", async () => {
+    // Twenty turns of learning the controls, with nothing that can punish a
+    // mistake, is the whole reason it is a floor rather than a picture.
+    const g = await game();
+    g.enterLab(0);
+    expect(g.level.mobs.length, "something is alive in the lab").toBe(0);
+    // Settle first: maxhp is derived from the genome and corrected on the
+    // first upkeep, so a freshly built Game has a stale one.
+    for (let i = 0; i < 3; i++) g.press("wait");
+    const hp = g.player.hp;
+    for (let i = 0; i < 40; i++) g.press("wait");
+    expect(g.player.hp, "the lab hurt the player").toBe(hp);
+  });
+
+  it("reaching the bench opens the choice", async () => {
+    const g = await game();
+    g.enterLab(0);
+    const b = g.introBench[0];
+    expect(b, "the lab plan has no bench").toBeDefined();
+    if (!b) return;
+    // Stand next to it and step on.
+    g.player.x = b.x; g.player.y = b.y + 1;
+    g.step(b.x, b.y);
+    expect(g.pickingClassFor, "the bench did not open the choice").toBe(0);
+    expect(g.intro, "the bench left the lab before a class was chosen")
+      .not.toBeNull();
+  });
+
+  it("the room is walkable end to end", async () => {
+    // A hand-drawn plan can trivially wall its own bench off.
+    const { labGrid } = await import("../src/lab_level.js");
+    const { findPath } = await import("../src/path.js");
+    const plan = labGrid();
+    for (const b of plan.bench) {
+      expect(findPath(plan.grid, plan.entry, b),
+             `no route from the door to the bench at ${String(b.x)},${String(b.y)}`)
+        .not.toBeNull();
+    }
+    expect(plan.bench.length, "the plan has no bench").toBeGreaterThan(0);
+    expect(plan.desks.length, "the room is empty of other people")
+      .toBeGreaterThan(3);
+  });
+
+});
+
+describe("the lab survives the buttons the player has just learned", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const inLab = async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.enterLab(0);
+    return g;
+  };
+
+  it("every button is safe to press in there", async () => {
+    // It is a Level, so every control is live -- including descend, which has
+    // no floor below it, and explore, which has a whole room to map. The point
+    // of the lab is that a mistake costs nothing; a crash is a mistake costing
+    // everything.
+    const g = await inLab();
+    for (const b of g.buttons) {
+      expect(() => { g.press(b.id); }, `press ${b.id} in the lab`).not.toThrow();
+      for (let i = 0; i < 5; i++) {
+        expect(() => { g.frame(100 + i * 40); }, `frame after ${b.id}`)
+          .not.toThrow();
+      }
+    }
+    expect(g.dead, "a button killed the researcher").toBe(false);
+  });
+
+  it("auto-explore maps the room and stops, without leaving it", async () => {
+    const g = await inLab();
+    // Frames only, which is what actually happens: the walk advances on the
+    // frame loop, and pressing wait alongside it is not something a player
+    // does or can do.
+    g.press("explore");
+    for (let i = 0; i < 600 && g.exploring; i++) g.frame(100 + i * 60);
+    expect(g.exploring, `explore never finished: walk=${String(Boolean(g.walk))} `
+      + `at ${String(g.player.x)},${String(g.player.y)} `
+      + `showPlasmid=${String(g.showPlasmid)} dead=${String(g.dead)}`).toBe(false);
+    expect(g.intro, "exploring left the lab").not.toBeNull();
+    expect(g.intro, "exploring left the lab").not.toBeNull();
+  });
+
+  it("descending from the lab does nothing, because there is nowhere below", async () => {
+    const g = await inLab();
+    const floor = g.dungeon.floor;
+    g.press("down");
+    g.frame(80);
+    expect(g.dungeon.floor, "the lab had a floor below it").toBe(floor);
+    expect(g.intro, "descend escaped the lab").not.toBeNull();
+  });
+
+  it("the plasmid and the map open on a depth-0 floor", async () => {
+    // Both are depth-indexed in places. A stratum numbered 0 is the cheap way
+    // to keep the lab out of every such table, and the cost is that anything
+    // reading STRATA[depth - 1] gets -1.
+    const g = await inLab();
+    for (const open of ["plasmid", "map", "notes"] as const) {
+      expect(() => { g.press(open); g.frame(200); }, `${open} on the lab floor`)
+        .not.toThrow();
+      g.press(open);
+    }
+  });
+
+  it("a save taken in the lab does not resurrect a half-made strain", async () => {
+    // The lab is pre-run: `started` is false and there is no class yet.
+    // Writing that to a slot would make the slot look occupied and resume into
+    // a strain that was never inoculated.
+    const g = await inLab();
+    g.save();
+    const { loadSlot } = await import("../src/saves.js");
+    expect(loadSlot(0), "the lab wrote a save").toBeNull();
   });
 });
