@@ -1727,6 +1727,7 @@ describe("state that should persist, does", () => {
     introClass: "the choice being carried out of the lab",
     introStations: "where the stations are on the lab floor",
     atStation: "which station is underfoot",
+    introDesks: "where the desks are on the lab floor",
     introChosen: "whether the culture bench has been used",
     classRows: "hit boxes, per frame",
     pickingClassFor: "a choice in progress, before anything is created",

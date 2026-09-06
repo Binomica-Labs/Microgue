@@ -7,6 +7,7 @@
 export { r_drawFx } from "./fx_render.js";
 import { eliteHalo } from "./fx_render.js";
 import { r_drawPicker, r_drawSplash } from "./picker_render.js";
+import { r_labFurniture } from "./lab_furniture.js";
 import { r_ringReadout } from "./ring_readout.js";
 export { r_drawHud } from "./hud_render.js";
 import { r_drawOffer } from "./hud_render.js";
@@ -96,13 +97,19 @@ export function r_draw(_g: Game): void {
     // Measured on the same region, mean tangent swing went 77 degrees to 8.
     //
     // Whole-floor and cached: it changes only when a barrier dissolves.
+    const inLab = _g.intro !== null;
     const grid = _g.level.grid;
     const solidAt = (gx: number, gy: number): boolean =>
       gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h || grid.isWall(gx, gy);
     const wallPath = wallSilhouette(
       solidAt, grid.w, grid.h, _g.level.floor,
       _g.dungeon.seed ^ (_g.level.floor * 9176),
-      hc ? 0 : WALL_SPREAD[s.hatch] * 0.14, hc ? 0 : 0.20, hc,
+      // The lab is a ROOM. The organic bulge and the per-vertex jitter exist
+      // to stop caves looking cut from a stencil, and applied to right angles
+      // they rounded a 26x22 room into a lozenge -- which is why it read as a
+      // blob rather than a lab.
+      hc || inLab ? 0 : WALL_SPREAD[s.hatch] * 0.14,
+      hc || inLab ? 0 : 0.20, hc,
       () => {
         try { return new Path2D(); } catch { return null; }
       }) ?? new Path2D();
@@ -264,13 +271,13 @@ export function r_draw(_g: Game): void {
     const lx = pl?.x ?? 0, ly = pl?.y ?? 0;
     // The body is tinted by what the plasmid is EXPRESSING, so a
     // photoferrotroph and a methanogen no longer look alike.
+    if (inLab) r_labFurniture(_g, px);
+
     const ph = phenotypeOf(_g.genome, _g.dungeon.depth);
     // In the LAB you are a person, not a cell. Drawing the microbe there --
     // squashing, flagellum beating, tinted by an expression profile that does
-    // not exist yet -- was the single most wrong thing on that screen: it
-    // showed the thing you are about to send while you are still the one
-    // sending it.
-    const inLab = _g.intro !== null;
+    // not exist yet -- showed the thing you are about to send while you are
+    // still the one sending it.
     const me = hc ? null
       : inLab ? sprite("researcher", px * 0.92, RESEARCHER_PALETTE)
       : playerSprite(px * 0.92, ph);

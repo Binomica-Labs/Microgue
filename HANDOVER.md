@@ -25,6 +25,37 @@ returns you to the room; the INCUBATOR is the way out, and it refuses until
 there is something to send -- walking in early would inoculate a default nobody
 picked.
 
+## The room had nothing in it
+
+The stations were FLOOR TILES with no drawing. The room rendered as a white
+space with grey walls and benches you were told about in the log and could not
+see. `lab_furniture.ts` draws them: bench slabs with a lip so a run reads as one
+surface, kit on top in a colour per station, a label above each run, and the
+column as a stratified cylinder. Desks get slabs and no kit -- giving scenery
+marks would make it look interactive.
+
+## The researcher was a black blob
+
+The pixel legend is `1=dark 2=body 3=accent 4=hi`. I drew the coat as 1 and the
+head as 3, so the coat came out grey and the head near-black. Coat is 2, hair
+is 3, face is 4, outline is 1.
+
+I had written that legend into the file's own header comment and then not read
+it.
+
+## A fix that fixed nothing, removed
+
+I diagnosed the room's rounded look as the corner smoothing: it rounds each
+vertex by half its adjacent edges, so a twenty-four tile wall would round by
+twelve. Added a cap, measured, and it changed NOTHING -- because contour
+vertices are always about a tile apart, so the rounding was never proportional
+to the length of a wall, only to the length of a segment.
+
+Removed rather than kept. A change that cannot be shown to do anything is not a
+change worth carrying, and the reasoning behind it was wrong even though it
+sounded right. The note stays in `wall_path.ts` so the next person does not try
+it again.
+
 ## Floor 0 means depth 0
 
 Three broken versions of the lab shipped in a row, each fixed one at a time

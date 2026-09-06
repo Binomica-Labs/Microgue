@@ -159,16 +159,16 @@ class Game {
    * the log are all learned here rather than on D1 with things that bite.
    */
   intro: Level | null = null;
-  /** Held between choosing a class and the drip finishing. */
+  /** Which slot the lab is for, and what was chosen at the culture bench.
+   *  `introChosen` gates the incubator: walking in before choosing would
+   *  inoculate a default nobody picked. Desks are scenery, and scenery is
+   *  what makes a room read as a room rather than an empty box. */
   introSlot = -1;
   introClass: ClassId = DEFAULT_CLASS;
-  /** Each station's tiles, so stepping on one opens what it does. */
-  introStations: Record<StationId, { x: number; y: number }[]> = noStations();
-  /** Which station is underfoot, so arriving fires once. */
-  atStation: StationId | null = null;
-  /** Whether the culture bench has actually been used. The incubator refuses
-   *  until it has: walking in early would inoculate a default nobody picked. */
   introChosen = false;
+  introStations: Record<StationId, { x: number; y: number }[]> = noStations();
+  introDesks: { x: number; y: number }[] = [];
+  atStation: StationId | null = null;
   classRows: ClassRow[] = [];
   /** A cassette that would not fit on a full stack, awaiting a choice. */
   offer: { part: Part; at: { x: number; y: number } } | null = null;

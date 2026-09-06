@@ -24,6 +24,12 @@ export interface PathTarget {
   closePath(): void;
 }
 
+/** The midpoint of a->b. The smoothing draws a quadratic from one edge point
+ *  to the next with the vertex as control, so each corner rounds by half its
+ *  adjacent edges -- and contour vertices are always about a tile apart, so
+ *  that is always about half a tile. A cap was tried here and removed: it
+ *  changed nothing, because the rounding was never proportional to the length
+ *  of a WALL, only to the length of a SEGMENT. */
 const mid = (a: { x: number; y: number }, b: { x: number; y: number }):
 { x: number; y: number } => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
