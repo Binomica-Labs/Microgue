@@ -201,6 +201,14 @@ export const MORPHOLOGY: Readonly<Record<string, readonly Shape[]>> = {
   ],
 
   // D8 -- methanogenic floor
+  vampirovibrio: [
+    // A small predatory rod with a single polar flagellum, coiled to strike.
+    el(0.50, 0.46, 0.30, 0.22, "dark"),
+    el(0.50, 0.46, 0.26, 0.18, "body"),
+    el(0.50, 0.46, 0.10, 0.08, "hi"),
+    { k: "poly", role: "accent",
+      pts: [[0.5,0.66],[0.54,0.78],[0.46,0.88],[0.5,0.66]] },
+  ],
   methylomonas: [
     // A rod stacked with internal membranes. Type I methanotrophs pack their
     // cytoplasm with parallel membrane sheets carrying the monooxygenase --

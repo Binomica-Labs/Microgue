@@ -26,6 +26,10 @@ export interface TurnWorld {
   readonly rng: Rng;
   /** Incoming damage multiplier from the player's armour complexes. */
   readonly armour: number;
+  /** How threatening the player is, 0..1: their expressed power against what a
+   *  cell at this depth expects. Reactive behaviours read it -- a predator
+   *  presses a weak strain and circles a strong one. */
+  readonly threat: number;
   /** Travelling particles and lingering gradients, mutated in place. */
   readonly packets: Packet[];
   readonly clouds: Cloud[];
@@ -165,7 +169,8 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     for (let s = 0; s < steps; s++) {
     const step = decideStep(
       m.behaviour, { x: m.x, y: m.y },
-      { px: w.player.x, py: w.player.y, dist, alliesNear: allies },
+      { px: w.player.x, py: w.player.y, dist, alliesNear: allies,
+        hpFrac: m.maxhp > 0 ? m.hp / m.maxhp : 1, threat: w.threat },
       w.grid, w.rng,
       (x, y) => (x === w.player.x && y === w.player.y)
         || w.mobs.some((o) => o.alive && o !== m

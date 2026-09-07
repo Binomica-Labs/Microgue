@@ -2147,7 +2147,8 @@ describe("motility behaviours", () => {
   };
   const noOne = () => false;
   const sensed = (px: number, py: number, at: { x: number; y: number }, allies = 0) =>
-    ({ px, py, dist: chebyshev(at.x, at.y, px, py), alliesNear: allies });
+    ({ px, py, dist: chebyshev(at.x, at.y, px, py), alliesNear: allies,
+       hpFrac: 1, threat: 0.5 });
 
   it("anchored organisms never move", () => {
     for (const b of ["sessile", "wire"] as const) {
@@ -2255,7 +2256,10 @@ describe("motility behaviours", () => {
     expect(by("thiothrix").behaviour, "holdfast").toBe("sessile");
     expect(by("beggiatoa").behaviour, "gliding mat").toBe("glide");
     expect(by("nitzschia").behaviour, "diatoms glide via the raphe").toBe("glide");
-    expect(by("pseudomonas").behaviour, "polar flagellum").toBe("chase");
+    // Pseudomonas swims at you on its polar flagellum -- but as a predator that
+    // presses the weak and backs off the strong (hunt), not a plain chaser.
+    expect(["chase", "hunt"], "polar flagellum, motile pursuer")
+      .toContain(by("pseudomonas").behaviour);
     expect(by("geobacter").behaviour, "conductive pili").toBe("wire");
     expect(by("beggiatoa").size, "genuinely enormous").toBe("filament");
     expect(by("synechococcus").size, "picoplankton").toBe("pico");
@@ -2370,6 +2374,7 @@ describe("save slots", () => {
 
 describe("the microbe turn", () => {
   const world = (mobs: Mob[], px = 5, py = 5) => ({
+    threat: 0.5,
     grid: new mg.Grid(15, 15, mg.FLOOR),
     mobs,
     player: { x: px, y: py, hp: 30, status: [] as Status[] },
@@ -2754,7 +2759,7 @@ describe("multi-tile bodies", () => {
     const at = { x: 5, y: 5 };
     for (let i = 0; i < 40; i++) {
       const s = decideStep("chase", at,
-        { px: 9, py: 5, dist: 4, alliesNear: 0 }, g, makeRng(i), () => false, "line3");
+        { px: 9, py: 5, dist: 4, alliesNear: 0, hpFrac: 1, threat: 0.5 }, g, makeRng(i), () => false, "line3");
       if (!s) continue;
       // whatever it does, its whole body must land on floor
       const h = Math.atan2(s.y - at.y, s.x - at.x);
@@ -2797,7 +2802,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(3), armour: 1, packets: [], clouds: [],
+      rng: makeRng(3), armour: 1, threat: 0.5, packets: [], clouds: [],
     };
     for (let i = 0; i < 4; i++) microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);
@@ -2810,7 +2815,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(20, 20, mg.FLOOR), mobs,
       player: { x: 12, y: 12, hp: 999, status: [] as Status[] },
-      rng: makeRng(5), armour: 1, packets: [], clouds: [],
+      rng: makeRng(5), armour: 1, threat: 0.5, packets: [], clouds: [],
     };
     for (let step = 0; step < 25; step++) {
       microbeTurn(w);
@@ -2950,6 +2955,7 @@ describe("ranged weapons", () => {
     player: { x: px, y: py, hp: 60, status: [] as Status[] },
     rng: makeRng(11),
     armour: 1,
+    threat: 0.5,
     packets: [] as Packet[],
     clouds: [] as Cloud[],
   });
@@ -3781,7 +3787,7 @@ describe("crawl-like behaviours", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(1), armour: 1, packets: [] as Packet[], clouds: [] as Cloud[],
+      rng: makeRng(1), armour: 1, threat: 0.5, packets: [] as Packet[], clouds: [] as Cloud[],
     };
     microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);        // standing still is not safe
@@ -6636,7 +6642,7 @@ describe("a pack does not move as one body", () => {
       const before = lvl.mobs.map((m) => [m.x, m.y] as [number, number]);
       microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
                     player: player,
-                    rng: makeRng(7000 + t), armour: 0, packets: [], clouds: [] });
+                    rng: makeRng(7000 + t), armour: 0, threat: 0.5, packets: [], clouds: [] });
       const moves = lvl.mobs.map((m, i) =>
         `${String(m.x - (before[i]?.[0] ?? 0))},${String(m.y - (before[i]?.[1] ?? 0))}`);
       if (new Set(moves).size === 1) lockstep++;
@@ -6680,7 +6686,7 @@ describe("a pack does not move as one body", () => {
       for (let t = 0; t < 40; t++) {
         microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
                       player: player,
-                      rng: makeRng(s * 97 + t), armour: 0, packets: [], clouds: [] });
+                      rng: makeRng(s * 97 + t), armour: 0, threat: 0.5, packets: [], clouds: [] });
         const m = lvl.mobs[0];
         if (m && Math.abs(m.x - player.x) + Math.abs(m.y - player.y) <= 1) {
           reached++;
@@ -7774,5 +7780,125 @@ describe("the delete tab wins over the row it sits on", () => {
       cx >= r.box.x && cx <= r.box.x + r.box.w
       && cy >= r.box.y && cy <= r.box.y + r.box.h);
     expect(first?.del, "the row beneath del was matched first").toBe(true);
+  });
+});
+
+describe("reactive behaviours respond to the situation", () => {
+  const g = new mg.Grid(20, 20, mg.FLOOR);
+  const at = { x: 10, y: 10 };
+  const sense = (px: number, py: number, hpFrac: number, threat: number) =>
+    ({ px, py, dist: chebyshev(at.x, at.y, px, py), alliesNear: 0,
+       hpFrac, threat });
+  const rate = (b: Parameters<typeof decideStep>[0],
+                s: ReturnType<typeof sense>,
+                ok: (p: { x: number; y: number } | null) => boolean): number => {
+    let n = 0;
+    for (let i = 0; i < 100; i++) {
+      if (ok(decideStep(b, at, s, g, makeRng(i * 7 + 1), () => false))) n++;
+    }
+    return n;
+  };
+
+  it("a hunter flees when it is near lysis", () => {
+    // The point of `hunt` over `chase`: a wounded predator breaks off. A cell
+    // that always presses is just a chaser with a longer sense range.
+    const fled = rate("hunt", sense(13, 10, 0.15, 0.5), (p) => p !== null && p.x < at.x);
+    expect(fled, `only fled ${String(fled)}/100 at 15% hp`).toBeGreaterThan(50);
+  });
+
+  it("a hunter presses a weak target and circles a strong one", () => {
+    const pressed = rate("hunt", sense(13, 10, 0.9, 0.3),
+                         (p) => p !== null && p.x > at.x);
+    expect(pressed, "did not press a weak player").toBeGreaterThan(50);
+    // Against a strong player it should NOT charge straight in every time.
+    const charged = rate("hunt", sense(13, 10, 0.9, 0.9),
+                         (p) => p !== null && p.x > at.x && p.y === at.y);
+    expect(charged, "charged a strong player like a plain chaser")
+      .toBeLessThan(pressed);
+  });
+
+  it("an ambusher waits until you are close, then commits", () => {
+    expect(rate("ambush", sense(15, 10, 1, 0.5), (p) => p === null),
+           "did not lie in wait at range").toBe(100);
+    expect(rate("ambush", sense(11, 10, 1, 0.5), (p) => p !== null),
+           "did not rush when adjacent").toBe(100);
+  });
+
+  it("a leech closes relentlessly, without tumbling", () => {
+    const closed = rate("leech", sense(15, 10, 1, 0.5), (p) => p !== null && p.x > at.x);
+    expect(closed, `only closed ${String(closed)}/100`).toBeGreaterThan(85);
+  });
+
+  it("a flanker does not always come straight at you", () => {
+    // At range it circles; a chaser would move toward on nearly every step.
+    const straight = rate("flank", sense(15, 10, 1, 0.5),
+                          (p) => p !== null && p.x > at.x && p.y === at.y);
+    expect(straight, "flanked exactly like a chaser").toBeLessThan(70);
+  });
+
+  it("every behaviour still returns a legal step or null", () => {
+    // The whole set, hammered, must never step into a wall or off the grid.
+    const wall = new mg.Grid(12, 12, mg.WALL);
+    for (let x = 3; x <= 8; x++) for (let y = 3; y <= 8; y++) wall.set(x, y, mg.FLOOR);
+    const behaviours = ["chase", "hunt", "ambush", "flank", "leech", "glide",
+                        "drift", "swarm"] as const;
+    for (const b of behaviours) {
+      for (let i = 0; i < 200; i++) {
+        const from = { x: 4 + (i % 4), y: 4 + ((i >> 2) % 4) };
+        const s = { px: 6, py: 6, dist: chebyshev(from.x, from.y, 6, 6),
+                    alliesNear: 1, hpFrac: (i % 10) / 10, threat: (i % 7) / 7 };
+        const step = decideStep(b, from, s, wall, makeRng(i), () => false);
+        if (step) {
+          expect(wall.isFloor(step.x, step.y),
+                 `${b} stepped into rock at ${String(step.x)},${String(step.y)}`)
+            .toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe("no behaviour produces an illegal move under adversarial input", () => {
+  it("2000 steps with NaN, Infinity and out-of-range sense values stay legal", () => {
+    // The reactive behaviours read the player position through Math.sign, and
+    // a NaN there yields a step with NaN coordinates -- a mob teleported to an
+    // undefined tile. The soak found 40 such steps before the sense values
+    // were coerced at the entry. A NaN player position is a bug wherever it
+    // comes from, so the guard is one place, not five branches.
+    const walls = new mg.Grid(24, 24, mg.FLOOR);
+    for (let i = 0; i < 60; i++) {
+      walls.set(2 + (i * 7) % 20, 2 + (i * 13) % 20, mg.WALL);
+    }
+    const behaviours = ["chase", "hunt", "ambush", "flank", "leech", "glide",
+                        "drift", "swarm", "sessile", "wire"] as const;
+    let illegal = 0, nonFinite = 0, teleport = 0, occupied = 0;
+    for (let seed = 0; seed < 2000; seed++) {
+      const rng = makeRng(seed);
+      const b = behaviours[seed % behaviours.length];
+      if (!b) continue;
+      const at = { x: 2 + rng.int(20), y: 2 + rng.int(20) };
+      if (!walls.isFloor(at.x, at.y)) continue;
+      const wild = seed % 5 === 0;
+      const s = {
+        px: wild ? ([NaN, -5, 999, at.x][seed % 4] ?? at.x) : rng.int(24),
+        py: wild ? ([Infinity, 0, at.y][seed % 3] ?? at.y) : rng.int(24),
+        dist: rng.int(15),
+        alliesNear: rng.int(6),
+        hpFrac: wild ? ([NaN, -1, 2, 0.5][seed % 4] ?? 0.5) : rng.next(),
+        threat: wild ? ([Infinity, -1, 5][seed % 3] ?? 0.5) : rng.next(),
+      };
+      const occ = (x: number, y: number) =>
+        seed % 3 === 0 && (x + y) % 4 === 0;
+      const step = decideStep(b, at, s, walls, rng, occ);
+      if (!step) continue;
+      if (!Number.isFinite(step.x) || !Number.isFinite(step.y)) nonFinite++;
+      else if (!walls.isFloor(step.x, step.y)) illegal++;
+      else if (occ(step.x, step.y)) occupied++;
+      else if (chebyshev(step.x, step.y, at.x, at.y) > 1) teleport++;
+    }
+    expect(nonFinite, `${String(nonFinite)} non-finite steps`).toBe(0);
+    expect(illegal, `${String(illegal)} steps into rock`).toBe(0);
+    expect(occupied, `${String(occupied)} steps onto an occupied tile`).toBe(0);
+    expect(teleport, `${String(teleport)} steps of more than one tile`).toBe(0);
   });
 });

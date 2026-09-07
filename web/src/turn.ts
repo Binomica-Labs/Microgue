@@ -304,6 +304,12 @@ export function t_mobTurn(_g: Game): void {
       player: _g.player,
       rng: makeRng(_g.turnSeed++),
       armour: _g.genome.armour(_g.dungeon.depth),
+      // How threatening the strain is at this depth: its power against a
+      // reference that rises with depth, clamped to 0..1. Reactive predators
+      // press a weak cell and circle a strong one. The reference (2 + depth) is
+      // the rough power a floor expects you to bring; below it you are prey.
+      threat: Math.min(_g.genome.power(_g.dungeon.depth)
+        / (2 + _g.dungeon.depth), 1),
       packets: _g.packets,
       clouds: _g.clouds,
     });

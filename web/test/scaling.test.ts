@@ -866,3 +866,41 @@ describe("the lab is drawn as a room", () => {
   // pattern. The behaviour is one branch in render.ts and is better read than
   // asserted badly.
 });
+
+describe("the world has no visible edge", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("the surround matches the unexplored fog, so the map edge does not show", async () => {
+    // The player can stand near the grid edge, and when it comes on screen a
+    // surround in the FLOOR colour drew a hard straight line where the tiled
+    // world stopped -- while the minimap showed the true blobby outline. The
+    // surround is the same near-black as unexplored fog now, so "off the edge"
+    // reads as "cave you have not reached".
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.startRun(0);
+    t.rects.length = 0;
+    g.frame(100);
+
+    // The surround: the first full-screen rect.
+    const surround = t.rects.find((r) => r.w >= 393 && r.h >= 852);
+    expect(surround, "no surround drawn").toBeDefined();
+    // The dark-fog fill colour, read straight from render.ts's constant.
+    // Both must be the same string, or a seam shows at the map edge.
+    expect(surround?.fill, `surround is ${String(surround?.fill)}`)
+      .toBe("#010303");
+  });
+
+  it("the lab keeps its own distinct surround", async () => {
+    // The lab is a room and genuinely has an outside; it must NOT match the
+    // column's fog, or the change here would flatten it.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.enterLab(0);
+    t.rects.length = 0;
+    g.frame(60);
+    const surround = t.rects.find((r) => r.w >= 393 && r.h >= 852);
+    expect(surround?.fill, "the lab surround matched the column fog")
+      .toBe("#050706");
+  });
+});

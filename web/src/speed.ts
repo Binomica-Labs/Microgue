@@ -26,6 +26,14 @@ export const BASE_SPEED: Readonly<Record<Behaviour, number>> = {
   wire: 0.5,
   // A swarm coordinates and moves as one, quickly.
   swarm: 1.3,
+  // A predator: as fast as a chaser, and it uses the speed to circle.
+  hunt: 1.15,
+  // Still, then explosive. The rush is fast enough to catch a fleeing cell.
+  ambush: 1.45,
+  // Flankers keep pace to hold their arc.
+  flank: 1.1,
+  // A leech is quick enough to stay latched once it reaches you.
+  leech: 1.2,
 };
 
 /** Bigger cells are slower. Drag scales with length; thrust does not. */

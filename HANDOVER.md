@@ -1,5 +1,75 @@
 # v1.16.0 — a real main menu, and the lab tabled
 
+# v1.17.0 — enemy AI that reacts
+
+Every behaviour was stateless: it either advanced toward you or waited. Four new
+ones respond to the SITUATION -- the mob's own health and how threatening you
+are -- which needed two fields on `Sensed` (`hpFrac`, `threat`) and a `threat`
+value on the turn world (the strain's power against `2 + depth`, clamped).
+
+* **hunt** -- a predator. Presses a wounded or weak target, FLEES when itself
+  near lysis, and circles rather than charges a strong one. So a well-built
+  strain is stalked, not swarmed. Pseudomonas (D2) and Methylomonas (D7).
+* **ambush** -- still until you are within two tiles, then a fast committed
+  rush with no tumble, so the lunge is straight and hard to sidestep. A new
+  organism, Vampirovibrio (D3), a real predatory bacterium.
+* **flank** -- approaches on a circling vector until beside you, then commits;
+  two flankers tend to opposite arcs, so a pack encircles rather than piling on
+  one tile. Shewanella (D4).
+* **leech** -- closes and CLINGS: once adjacent it matches your movement to
+  stay in contact rather than re-deciding, so shaking it needs a wall or a turn
+  it cannot follow. Desulfovibrio (D7).
+
+`spec` verifies each does what it claims by rate over 100 runs: a hunter flees
+>50% at 15% hp and presses >50% a weak player; an ambusher waits 100% at range
+and rushes 100% adjacent; a leech closes >85%; a flanker comes straight <70%.
+And the whole set, hammered in a walled grid, never steps into rock.
+
+The difficulty curve still holds and every stratum's spread is in range --
+checked, because a new organism at the wrong stats is how D7 got dragged down
+two versions ago.
+
+The four `chase` organisms that changed had a biology test asserting
+`behaviour === "chase"`. `hunt` still swims at you on a polar flagellum, so the
+assertion became about a MECHANISM rather than a fact; it now accepts either.
+
+## v1.17.1 — the AI soak found a NaN step
+
+A 2000-step soak of all ten behaviours with adversarial sense values -- NaN,
+Infinity, out-of-range hp and threat -- found 40 NON-FINITE steps. A NaN in the
+player position poisons `Math.sign` into NaN and a step comes back with NaN
+coordinates: a mob teleported to an undefined tile.
+
+The load-bearing fix is one line: `free()` rejects a non-finite coordinate.
+Every path to an actual move goes through it, and measured, that alone brings
+the soak to zero non-finite, illegal, occupied or teleporting moves.
+
+A px/py coercion at the top of `decideStep` was tried first and REMOVED -- the
+soak showed it did nothing the `free()` guard did not already do. Third time
+this project has kept a change only after proving it does something (after the
+corner-cap and one of the fog tests); a plausible guard that changes no
+measured outcome is not worth carrying.
+
+`spec` runs the full adversarial soak now, and it bites: removing both guards
+is four failures.
+
+## v1.16.2 — the world's edge showed as a straight line
+
+The minimap draws the true blobby cave outline; the world had a hard horizontal
+line across the top. The cause: the player can stand near the grid's edge -- the
+cave has a margin but only ~20 tiles -- and when row 0 came on screen, the
+SURROUND was painted in the floor colour while the fog was near-black. Two
+different darks meeting at the grid edge drew a clean line where the tiled world
+stopped.
+
+The surround is `#010303` now -- the same near-black as unexplored fog -- so
+"off the edge of the map" reads as "cave you have not reached", which is what
+the minimap implies is there. The lab keeps its own `#050706` surround: it is a
+room and genuinely has an outside.
+
+`spec` pins both colours: a seam returns the moment the two darks differ, and it
+caught the floor-colour surround with four failures when restored.
+
 ## v1.16.1 — the menu, hardened
 
 Two tests that should have gone in with the menu:

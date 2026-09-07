@@ -14,6 +14,10 @@ export type Behaviour =
   | "chase"    // flagellated, chemotactic: heads straight for you
   | "glide"    // gliding motility along surfaces: only moves adjacent to wall
   | "drift"    // non-motile: Brownian wander, closes only by luck
+  | "hunt"     // chases, but FLEES when badly hurt and circles a strong target
+  | "ambush"   // still until you are close, then a fast committed rush
+  | "flank"    // approaches from the side, not head-on -- pack encirclement
+  | "leech"    // closes and CLINGS: once adjacent it will not let go
   | "sessile"  // anchored: never moves, strikes what comes adjacent
   | "wire"     // sessile but reaches: nanowire strike at range
   | "swarm";   // faster when its own kind is near -- quorum behaviour
@@ -44,6 +48,12 @@ export interface Sensed {
   readonly px: number; readonly py: number;   // player tile
   readonly dist: number;
   readonly alliesNear: number;
+  /** The mob's own health, 0..1. Reactive behaviours read it: a cell near
+   *  lysis flees, an ambusher waits until it is whole. */
+  readonly hpFrac: number;
+  /** How threatening the player is right now, 0..1 -- their power relative to
+   *  the depth. A predator presses a weak cell and edges off a strong one. */
+  readonly threat: number;
 }
 
 /** Chebyshev distance -- the grid is 8-connected. */
@@ -59,8 +69,12 @@ export const PAUSE = 0.12;
 export function senseRange(b: Behaviour): number {
   switch (b) {
     case "chase": return 9;
+    case "hunt": return 10;      // a predator notices from farther off
+    case "flank": return 9;
+    case "leech": return 8;
     case "swarm": return 8;
     case "glide": return 6;
+    case "ambush": return 5;     // waits until you are close, but senses early
     case "wire": return 4;
     case "drift": return 3;
     case "sessile": return 1;
@@ -79,7 +93,17 @@ export function decideStep(
   occupied: (x: number, y: number) => boolean,
   fp: Footprint = "single",
 ): Point | null {
+  // A non-finite sense value poisons every Math.sign below into NaN. Every
+  // path to an actual move goes through `free()`, and rejecting a NaN
+  // coordinate THERE is enough -- measured: with this one guard and no other,
+  // 2000 adversarial steps produce zero non-finite, illegal or teleporting
+  // moves. A coercion of px/py at the top was tried and removed for doing
+  // nothing the free() guard did not already do.
+  const px = s.px;
+  const py = s.py;
+
   const free = (x: number, y: number): boolean => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
     // A multi-tile body needs its WHOLE footprint clear, which is why a
     // filament cannot turn in a tight corridor.
     for (const t of tilesOf(fp, x, y, headingTo(at, { x, y }))) {
@@ -102,8 +126,8 @@ export function decideStep(
    * never in a straight line, and two cells side by side take different paths.
    */
   const toward = (): Point | null => {
-    const dx = Math.sign(s.px - at.x);
-    const dy = Math.sign(s.py - at.y);
+    const dx = Math.sign(px - at.x);
+    const dy = Math.sign(py - at.y);
 
     // A tumble re-orients to ANY free neighbour, weighted toward the player.
     //
@@ -140,6 +164,37 @@ export function decideStep(
       }
     }
     return null;
+  };
+
+  // Directly away from the player, for a cell that has decided to run. Uses the
+  // same tumble machinery as `toward`, mirrored: flight is a biased walk too.
+  const away = (): Point | null => {
+    const dx = Math.sign(at.x - px) || (rng.next() < 0.5 ? 1 : -1);
+    const dy = Math.sign(at.y - py) || (rng.next() < 0.5 ? 1 : -1);
+    const opts: { p: Point; w: number }[] = [];
+    for (let cy = -1; cy <= 1; cy++) {
+      for (let cx = -1; cx <= 1; cx++) {
+        if (cx === 0 && cy === 0) continue;
+        if (!free(at.x + cx, at.y + cy)) continue;
+        const agree = (cx === dx ? 1 : cx === 0 ? 0 : -1)
+          + (cy === dy ? 1 : cy === 0 ? 0 : -1);
+        opts.push({ p: { x: at.x + cx, y: at.y + cy }, w: 1 + agree * 1.6 });
+      }
+    }
+    return pickWeighted(opts, rng);
+  };
+
+  // A step that keeps roughly constant distance while sliding AROUND the player
+  // -- circling, for a predator that will not commit, and the approach vector
+  // for a flanker. `side` picks which way round.
+  const circle = (side: 1 | -1): Point | null => {
+    const rx = at.x - px, ry = at.y - py;          // radial, mob from player
+    // perpendicular, rotated by `side`
+    const tx = -ry * side, ty = rx * side;
+    const dx = Math.sign(tx), dy = Math.sign(ty);
+    if (dx === 0 && dy === 0) return toward();
+    if (free(at.x + dx, at.y + dy)) return { x: at.x + dx, y: at.y + dy };
+    return toward();
   };
 
   switch (b) {
@@ -182,7 +237,72 @@ export function decideStep(
       if (dx === 0 && dy === 0) return null;
       return free(at.x + dx, at.y + dy) ? { x: at.x + dx, y: at.y + dy } : null;
     }
+
+    case "hunt": {
+      // A predator. Presses a wounded or weak target, but breaks off when it
+      // is itself badly hurt, and circles rather than charges a strong one --
+      // so a well-built strain is stalked, not swarmed.
+      if (s.dist > senseRange(b)) return null;
+      if (s.hpFrac < 0.3) return away();            // near lysis: run
+      if (s.dist <= 1) return toward();             // in reach: strike anyway
+      if (s.threat > 0.6 && s.hpFrac < 0.7) {
+        // wary: circle, closing only slowly
+        return rng.next() < 0.35 ? toward() : circle(rng.next() < 0.5 ? 1 : -1);
+      }
+      return rng.next() < PAUSE ? null : toward();
+    }
+
+    case "ambush": {
+      // Still until you are close, then a fast committed rush -- it does not
+      // tumble once triggered, so the lunge is straight and hard to sidestep.
+      if (s.dist > 2) return null;                  // lie in wait
+      const dx = Math.sign(px - at.x), dy = Math.sign(py - at.y);
+      for (const [cx, cy] of [[dx, dy], [dx, 0], [0, dy]] as const) {
+        if ((cx !== 0 || cy !== 0) && free(at.x + cx, at.y + cy)) {
+          return { x: at.x + cx, y: at.y + cy };
+        }
+      }
+      return null;
+    }
+
+    case "flank": {
+      // Comes in from the side. Approaches on a circling vector until it is
+      // beside you, then closes -- a pack of these encircles rather than
+      // piling onto one tile.
+      if (s.dist > senseRange(b)) return null;
+      if (s.dist <= 2) return toward();             // close enough: commit
+      // which side: stable per cell, from its own position, so two flankers
+      // tend to opposite arcs
+      const side: 1 | -1 = ((at.x + at.y) & 1) === 0 ? 1 : -1;
+      return rng.next() < 0.4 ? toward() : circle(side);
+    }
+
+    case "leech": {
+      // Closes, and once adjacent CLINGS -- it matches your movement to stay in
+      // contact rather than re-deciding, so shaking it needs a wall or a turn
+      // it cannot follow.
+      if (s.dist > senseRange(b)) return null;
+      if (s.dist <= 1) {
+        // already latched: step to stay adjacent to where the player is
+        const dx = Math.sign(px - at.x), dy = Math.sign(py - at.y);
+        if (dx === 0 && dy === 0) return null;
+        return free(at.x + dx, at.y + dy) ? { x: at.x + dx, y: at.y + dy } : null;
+      }
+      return toward();                              // no tumble: relentless
+    }
   }
+}
+
+/** Pick from weighted options, or null if there are none. */
+function pickWeighted(opts: { p: Point; w: number }[], rng: Rng): Point | null {
+  const total = opts.reduce((a, o) => a + Math.max(o.w, 0.05), 0);
+  if (total <= 0) return null;
+  let r = rng.next() * total;
+  for (const o of opts) {
+    r -= Math.max(o.w, 0.05);
+    if (r <= 0) return o.p;
+  }
+  return null;
 }
 
 export function touchesWall(grid: Grid, x: number, y: number): boolean {

@@ -63,7 +63,7 @@ describe("sacred invariants", () => {
           microbeTurn({
             grid: level.grid, mobs: level.mobs,
             player: { ...player, status: [] as Status[] },
-            rng: makeRng(t + f), armour: 1, packets, clouds,
+            rng: makeRng(t + f), armour: 1, threat: 0.5, packets, clouds,
           });
           const v = check({
             plasmid: p, level, player, drops: [], packets, clouds,

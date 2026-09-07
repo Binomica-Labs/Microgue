@@ -73,12 +73,19 @@ export function r_draw(_g: Game): void {
     const hc = _g.settings.highContrast;
 
     const inLab = _g.intro !== null;
-    // Everything outside the map. In the column it is the floor colour,
-    // because the cave has no edge you can see -- the disc mask keeps the
-    // boundary off screen. The lab is a ROOM: it has an outside, and filling
-    // it with the lab's near-white made the room bleed into the whole screen
-    // with no sense of a wall at all.
-    ctx.fillStyle = hc ? "#000" : inLab ? "#050706" : s.floor;
+    // Everything outside the map.
+    //
+    // In the column this must match the FOG's dark, not the floor colour. The
+    // player can stand near the grid's edge -- the cave has a margin but not a
+    // big one -- and when the edge comes on screen, a surround in the floor
+    // colour drew a hard straight line where the tiled world stopped, while the
+    // minimap showed the true blobby outline. Painting the surround the same
+    // near-black as unexplored fog makes "off the edge of the map" read as
+    // "cave you have not reached", which is what the minimap implies is there.
+    //
+    // The lab is a ROOM and keeps its own dark surround: it genuinely has an
+    // outside.
+    ctx.fillStyle = hc ? "#000" : inLab ? "#050706" : "#010303";
     ctx.fillRect(0, 0, W, H);
 
     const px = TILE * _g.zoom;
