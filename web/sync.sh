@@ -110,8 +110,20 @@ extra="$(comm -23 \
 if [ -n "$extra" ]; then
   echo "==> WARNING: the repo has files this archive does not:"
   printf '%s\n' "$extra" | sed 's/^/      /'
-  echo "==> they are being LEFT IN PLACE. if the archive was built without them,"
-  echo "==> the result is two versions mixed together. check it compiles."
+  if [ "${PRUNE:-0}" = "1" ]; then
+    # Opt-in only. Deleting files the archive omits is right when they were
+    # deleted at the source -- the common case, a module removed in a version
+    # you are now syncing -- but wrong if the archive was simply built without
+    # them by mistake. PRUNE=1 says "I have looked at the list and I mean it".
+    printf '%s\n' "$extra" | while IFS= read -r f; do
+      [ -n "$f" ] && git -C "$REPO" rm -q "web/$f" 2>/dev/null || rm -f "$REPO/web/$f"
+    done
+    echo "==> PRUNE set; removed them. they will leave in this commit."
+  else
+    echo "==> LEFT IN PLACE. if they were deleted at the source, the two trees"
+    echo "==> are now mixed -- re-run with PRUNE=1 to remove them, or delete by"
+    echo "==> hand. if the archive was built without them by mistake, leave them."
+  fi
 fi
 
 # Mirror the whole extract, not a hand-listed subset. The previous version

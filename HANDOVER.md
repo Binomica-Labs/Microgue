@@ -33,6 +33,25 @@ The four `chase` organisms that changed had a biology test asserting
 `behaviour === "chase"`. `hunt` still swims at you on a polar flagellum, so the
 assertion became about a MECHANISM rather than a fact; it now accepts either.
 
+## v1.17.2 — sync.sh can prune orphans now
+
+The orphan warning was firing correctly: `genome.ts` and `replicon.ts` were
+deleted from the source in v1.14.0, but sync.sh only ADDS files from the
+tarball -- it never removes -- so they lingered in the repo, and "nothing to
+push" meant the working copy was a mix of the two.
+
+The safe default is unchanged: list the orphans, leave them, because deleting
+files the archive omits is wrong if the archive was simply built without them by
+mistake. But there is now `PRUNE=1 ~/sync.sh "msg"`, which removes them and
+stages the deletion so it lands in the commit -- for the common case where a
+file really was deleted at the source and the repo just has not caught up.
+
+The manual fix for the two files already in the repo is `git rm
+web/src/genome.ts web/src/replicon.ts`; PRUNE would do it on the next sync.
+
+Verified both paths against a scratch repo: default warns and leaves, PRUNE
+removes and stages.
+
 ## v1.17.1 — the AI soak found a NaN step
 
 A 2000-step soak of all ten behaviours with adversarial sense values -- NaN,
