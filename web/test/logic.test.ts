@@ -7747,3 +7747,32 @@ describe("a corrupt part id cannot crash transcription", () => {
     }
   });
 });
+
+describe("the delete tab wins over the row it sits on", () => {
+  it("a tap on del hits del, not the resume row beneath it", async () => {
+    // The del tab is drawn inside its slot's row, so both hit-boxes cover the
+    // tap point. `find` returns the FIRST match, and del is pushed first --
+    // registered after the row would make tapping delete resume the strain
+    // instead. This pins the order.
+    const { drawMenu } = await import("../src/menu_render.js");
+    const slots = [
+      { slot: 0, name: "A", depth: 5, genes: 12, updated: 0 },
+      null, null, null,
+    ];
+    const nul = new Proxy({}, { get: () => () => undefined }) as never;
+    const tog = { autoAttack: false, minimap: true, diagonal: false,
+                  highContrast: false, reduceMotion: false };
+    const b = drawMenu(nul, 393, 852, { top: 47, right: 0, bottom: 34, left: 0 },
+                       1.86, "continue", slots, null, tog);
+    const del = b.rows.find((r) => r.del);
+    expect(del, "no del tab").toBeDefined();
+    if (!del) return;
+    // The centre of the del tab is inside the row too. Whichever `find`
+    // returns for that point must be the del.
+    const cx = del.box.x + del.box.w / 2, cy = del.box.y + del.box.h / 2;
+    const first = b.rows.find((r) =>
+      cx >= r.box.x && cx <= r.box.x + r.box.w
+      && cy >= r.box.y && cy <= r.box.y + r.box.h);
+    expect(first?.del, "the row beneath del was matched first").toBe(true);
+  });
+});

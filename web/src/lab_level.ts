@@ -55,6 +55,21 @@ const PLAN = [
   "##########################",
 ];
 
+/**
+ * The lab stage is TABLED, not deleted. It walked, it had stations, it read as
+ * a room -- but it sat between the player and the game, and the class choice it
+ * gated is a one-line decision that does not need a floor around it. Everything
+ * (lab_level, lab_enter, lab_station, lab_furniture, lab_render) still compiles
+ * and is still tested; this flag is the only thing standing between it and the
+ * player.
+ *
+ * Flip it to bring the room back.
+ */
+/** Whether the lab stage runs. Read through `labEnabled()` so the flag is
+ *  not folded to a constant at every call site. */
+const LAB_STAGE = false;
+export function labEnabled(): boolean { return LAB_STAGE; }
+
 export type StationId = "culture" | "sequencer" | "notes" | "incubator";
 
 const STATION_OF: Readonly<Record<string, StationId | undefined>> = {

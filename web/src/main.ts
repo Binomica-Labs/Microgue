@@ -5,6 +5,8 @@ import { DEFAULT_CLASS, type ClassId } from "./classes.js";
 import type { ClassRow } from "./class_ui.js";
 import { g_enterLab } from "./lab_enter.js";
 import { g_enter, g_startRun } from "./lifecycle.js";
+import { newMenu, type MenuState } from "./menu.js";
+import type { MenuBoxes } from "./menu_render.js";
 import { noStations, type StationId } from "./lab_level.js";
 import { g_openPlasmid } from "./plasmid_open.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
@@ -95,6 +97,10 @@ class Game {
   bin: BinGeom = { x: 0, y: 0, cell: 0, gap: 0, cols: 6 };
   showMap = false;
   showSplash = true;
+  /** The front-of-game menu state. Drives which of main/newGame/continue/
+   *  settings shows and whether a confirm modal is up; see menu.ts. */
+  menu: MenuState = newMenu();
+  menuBoxes: MenuBoxes | null = null;
   slotBoxes: { x: number; y: number; w: number; h: number }[] = [];
   view: View | null = null;
   boxes: ModuleBox[] = moduleBoxes();

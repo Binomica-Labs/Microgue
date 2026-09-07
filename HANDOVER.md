@@ -1,3 +1,66 @@
+# v1.16.0 — a real main menu, and the lab tabled
+
+## v1.16.1 — the menu, hardened
+
+Two tests that should have gone in with the menu:
+
+* **A 500-tap soak of the menu.** Seed all four slots, then tap randomly --
+  real targets plus wild taps -- and after every tap assert the invariant that
+  matters: a save that WAS present is gone only if that tap was a confirm yes
+  over a live modal. Also that the mode is never wedged outside the four. This
+  is the test class that has found the most real bugs in this project, and the
+  menu is exactly where a stuck state or an ungated destructive action hides.
+  Verified it bites: an ungated delete produces three failures.
+
+* **The del-tab hit order.** The del tab is drawn INSIDE its slot's row, so
+  both hit-boxes cover the tap. `find` returns the first match and del is
+  pushed first -- registered after the row, tapping delete would resume the
+  strain instead. Pinned, and verified by swapping the order: three failures.
+
+The menu layout was checked across a 320px phone up to a tablet: no row runs
+off the bottom, no two overlap. Nothing to fix there, but worth having looked
+before shipping a new screen.
+
+## The lab is tabled, not deleted
+
+`labEnabled()` returns false. Everything -- lab_level, lab_enter, lab_station,
+lab_furniture, lab_render -- still compiles and is still tested through
+`enterLab`. An empty slot now goes straight to the class choice, which is the
+one decision the room existed to gate. Flip `LAB_STAGE` to bring it back.
+
+The lab walked, had stations and read as a room, but it sat between the player
+and the game for a choice that does not need a floor around it.
+
+## New Game / Continue / Settings
+
+`menu.ts` is the state machine (four modes, and a confirm modal that can sit
+over any of them); `menu_render.ts` draws the current mode; `menu_input.ts`
+routes a tap by what it landed on. The machine is data, kept out of the
+renderer, so the confirm gates are tested without a canvas.
+
+* **main** -- New Game / Continue / Settings. Continue is HIDDEN until a save
+  exists; an empty save has nothing to continue.
+* **New Game** -- pick a slot. An empty one opens the choice; a USED one raises
+  an overwrite confirm first.
+* **Continue** -- resume a slot (no ask; the class was chosen long ago), or hit
+  its del tab, which raises a delete confirm.
+* **Settings** -- the five boolean toggles.
+
+## The confirm modals, which are the point
+
+Overwrite and delete are points of no return. Each happens only when the player
+taps the row AND taps yes on a modal whose default is NO -- and NO is not just a
+button, it is any tap outside the modal. `spec` covers: the confirm is raised
+rather than acting, cancel keeps the save, an outside tap cancels, and only yes
+destroys.
+
+## Settings persistence: a known gap
+
+There is no global settings store -- settings live inside a save. A toggle
+flipped at the menu with no active run holds for the session and is written when
+a strain is inoculated. Making settings survive with no save at all would need a
+separate store; noted, not built.
+
 # v1.15.0 — the overdue split
 
 Three modules had sat one to eleven lines under the 900-line ceiling for

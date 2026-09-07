@@ -6,7 +6,8 @@
 
 export { r_drawFx } from "./fx_render.js";
 import { eliteHalo } from "./fx_render.js";
-import { r_drawPicker, r_drawSplash } from "./picker_render.js";
+import { r_drawPicker } from "./picker_render.js";
+import { r_drawMenu } from "./menu_frame.js";
 import { r_labFurniture } from "./lab_furniture.js";
 import { r_drawModals } from "./modal_render.js";
 import { r_ringReadout } from "./ring_readout.js";
@@ -63,7 +64,8 @@ export function r_draw(_g: Game): void {
     // level being played.
     if (_g.pickingClassFor !== null) { r_drawPicker(_g, W, H); return; }
     if (_g.showSplash || !_g.started) {
-      r_drawSplash(_g, W, H);
+      r_drawMenu(_g, W, H);
+      _g.drawToasts(W, H);
       return;
     }
 

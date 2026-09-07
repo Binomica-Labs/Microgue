@@ -1721,6 +1721,8 @@ describe("state that should persist, does", () => {
     closeBox: "hit box, per frame", cardBoxes: "hit boxes, per frame",
     offerBoxes: "hit boxes, per frame", miniBox: "layout, per frame",
     pendingOrder: "an unanswered prompt", confirmBoxes: "hit boxes, per frame",
+    menu: "front-of-game menu state, before a run",
+    menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
@@ -2160,26 +2162,21 @@ describe("a class is chosen once, before inoculation", () => {
   it("an empty slot asks; an occupied one resumes without asking", async () => {
     const g = await game();
     g.frame(16);
-    const slot = g.slotBoxes[0];
-    expect(slot, "no slots drawn").toBeDefined();
-    if (!slot) return;
+    // Main menu -> New Game -> an empty slot -> the class choice.
+    const tap = (pred: (r: { mode?: string; slot?: number; del?: boolean }) => boolean) => {
+      const hit = g.menuBoxes?.rows.find(pred);
+      expect(hit, "menu row not found").toBeDefined();
+      if (!hit) throw new Error("no row");
+      g.pointerDown(hit.box.x + 10, hit.box.y + 10);
+      g.pointerUp(hit.box.x + 10, hit.box.y + 10);
+      g.frame(20);
+    };
+    tap((r) => r.mode === "newGame");
+    tap((r) => r.slot === 0);
+    expect(g.pickingClassFor, "New Game on an empty slot did not open the choice")
+      .toBe(0);
+    expect(g.intro, "the tabled lab opened anyway").toBeNull();
 
-    g.pointerDown(slot.x + 10, slot.y + 10);
-    g.pointerUp(slot.x + 10, slot.y + 10);
-    // An empty slot now opens the LAB: a real floor you walk across, so
-    // tap-to-move and the camera are learned before anything can bite.
-    expect(g.intro, "an empty slot did not open the lab").not.toBeNull();
-    expect(g.intro, "it left the lab").not.toBeNull();
-    // Walk onto the bench, which is what opens the choice.
-    const b = g.introStations.culture[0];
-    expect(b, "the lab has no culture bench").toBeDefined();
-    if (!b) return;
-    g.player.x = b.x; g.player.y = b.y + 1;
-    g.step(b.x, b.y);
-    g.pickingClassFor ??= 0;
-
-    // Choose one. In the lab that returns you to the room -- the incubator is
-    // what sends the culture down.
     g.frame(40);
     const row = g.classRows[2];
     expect(row, "the picker drew no classes").toBeDefined();
@@ -2188,29 +2185,28 @@ describe("a class is chosen once, before inoculation", () => {
     const tx = row.box.x + row.box.w - 20, ty = row.box.y + row.box.h / 2;
     g.pointerDown(tx, ty);
     g.pointerUp(tx, ty);
-    // Choosing at the bench does not start the run any more -- the incubator
-    // does. It records the choice and returns you to the room.
+    // With the lab tabled, choosing a class starts the run directly.
     expect(g.pickingClassFor).toBeNull();
-    expect(g.introChosen, "the bench did not record a choice").toBe(true);
-    const chosen = g.introClass;
-    const inc = g.introStations.incubator[0];
-    if (!inc) return;
-    g.player.x = inc.x; g.player.y = inc.y + 1;
-    g.step(inc.x, inc.y);
-    expect(g.started, "the incubator did not start the run").toBe(true);
-    expect(g.strainClass, "the run lost the choice").toBe(chosen);
+    expect(g.started, "choosing a class did not start the run").toBe(true);
+    expect(g.strainClass, "the run lost the choice").toBe(row.id);
 
-    // Now the slot is occupied: tapping it must RESUME, not re-ask. The class
-    // is fixed for the life of the strain and offering a choice that cannot be
-    // honoured is worse than offering none.
+    // The slot is occupied now. Continue -> that slot RESUMES, without asking:
+    // the class was chosen when it was inoculated.
     const h = await game();
     h.frame(16);
-    const s2 = h.slotBoxes[0];
-    if (!s2) return;
-    h.pointerDown(s2.x + 10, s2.y + 10);
-    h.pointerUp(s2.x + 10, s2.y + 10);
-    expect(h.pickingClassFor, "an occupied slot asked again").toBeNull();
-    expect(h.started).toBe(true);
+    const cont = h.menuBoxes?.rows.find((r) => r.mode === "continue");
+    expect(cont, "Continue was not offered though a save exists").toBeDefined();
+    if (!cont) return;
+    h.pointerDown(cont.box.x + 10, cont.box.y + 10);
+    h.pointerUp(cont.box.x + 10, cont.box.y + 10);
+    h.frame(20);
+    const slotRow = h.menuBoxes?.rows.find((r) => r.slot === 0 && !r.del);
+    expect(slotRow, "the used slot was not listed on Continue").toBeDefined();
+    if (!slotRow) return;
+    h.pointerDown(slotRow.box.x + 10, slotRow.box.y + 10);
+    h.pointerUp(slotRow.box.x + 10, slotRow.box.y + 10);
+    expect(h.pickingClassFor, "resuming asked for a class again").toBeNull();
+    expect(h.started, "Continue did not resume the strain").toBe(true);
   });
 
   it("the class it started with is the class it has after a reload", async () => {
@@ -3056,5 +3052,204 @@ describe("the lab does not inherit the last strain's death", () => {
     for (let i = 0; i < 10; i++) g.press("wait");
     expect(g.player.atp, "the ATP pool never moved after leaving the lab")
       .not.toBe(atp);
+  });
+});
+
+describe("the main menu gates destructive actions", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const game = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  const tapRow = (g: Awaited<ReturnType<typeof game>>,
+                  pred: (r: { mode?: string; slot?: number; del?: boolean }) => boolean): boolean => {
+    const hit = g.menuBoxes?.rows.find(pred);
+    if (!hit) return false;
+    g.pointerDown(hit.box.x + 6, hit.box.y + 6);
+    g.pointerUp(hit.box.x + 6, hit.box.y + 6);
+    g.frame(20);
+    return true;
+  };
+
+  const withSave = async () => {
+    const g = await game();
+    g.startRun(0, "phototroph");        // writes slot 0
+    const h = await game();             // fresh Game reading the same store
+    h.frame(16);
+    return h;
+  };
+
+  it("Continue is hidden until a save exists", async () => {
+    const g = await game();
+    g.frame(16);
+    expect(g.menuBoxes?.rows.some((r) => r.mode === "continue"),
+           "Continue was offered with no save").toBe(false);
+    const h = await withSave();
+    expect(h.menuBoxes?.rows.some((r) => r.mode === "continue"),
+           "Continue was hidden despite a save").toBe(true);
+  });
+
+  it("overwriting a used slot is gated, and cancel keeps it", async () => {
+    const { loadSlot } = await import("../src/saves.js");
+    const g = await withSave();
+    tapRow(g, (r) => r.mode === "newGame");
+    // The used slot on New Game raises a confirm rather than overwriting.
+    tapRow(g, (r) => r.slot === 0);
+    expect(g.menu.confirm?.kind, "no overwrite confirm was raised")
+      .toBe("overwrite");
+    expect(g.pickingClassFor, "it overwrote without asking").toBeNull();
+    expect(loadSlot(0), "the slot was already cleared").not.toBeNull();
+
+    // Cancel: the save survives.
+    const no = g.menuBoxes?.confirm?.no;
+    expect(no).toBeDefined();
+    if (!no) return;
+    g.pointerDown(no.x + 4, no.y + 4);
+    g.pointerUp(no.x + 4, no.y + 4);
+    expect(g.menu.confirm, "cancel left the modal up").toBeNull();
+    expect(loadSlot(0), "cancel destroyed the save").not.toBeNull();
+  });
+
+  it("confirming an overwrite clears the slot and opens the choice", async () => {
+    const { loadSlot } = await import("../src/saves.js");
+    const g = await withSave();
+    tapRow(g, (r) => r.mode === "newGame");
+    tapRow(g, (r) => r.slot === 0);
+    const yes = g.menuBoxes?.confirm?.yes;
+    if (!yes) return;
+    g.pointerDown(yes.x + 4, yes.y + 4);
+    g.pointerUp(yes.x + 4, yes.y + 4);
+    expect(loadSlot(0), "the slot was not cleared").toBeNull();
+    expect(g.pickingClassFor, "the class choice did not open").toBe(0);
+  });
+
+  it("deleting a save is gated, and cancel keeps it", async () => {
+    const { loadSlot } = await import("../src/saves.js");
+    const g = await withSave();
+    tapRow(g, (r) => r.mode === "continue");
+    // The del tab raises a confirm rather than deleting.
+    tapRow(g, (r) => r.slot === 0 && r.del === true);
+    expect(g.menu.confirm?.kind, "no delete confirm was raised").toBe("delete");
+    expect(loadSlot(0), "it deleted without asking").not.toBeNull();
+
+    const no = g.menuBoxes?.confirm?.no;
+    if (!no) return;
+    g.pointerDown(no.x + 4, no.y + 4);
+    g.pointerUp(no.x + 4, no.y + 4);
+    expect(loadSlot(0), "cancel deleted the save anyway").not.toBeNull();
+  });
+
+  it("confirming a delete removes the save and stays on Continue", async () => {
+    const { loadSlot } = await import("../src/saves.js");
+    const g = await withSave();
+    tapRow(g, (r) => r.mode === "continue");
+    tapRow(g, (r) => r.slot === 0 && r.del === true);
+    const yes = g.menuBoxes?.confirm?.yes;
+    if (!yes) return;
+    g.pointerDown(yes.x + 4, yes.y + 4);
+    g.pointerUp(yes.x + 4, yes.y + 4);
+    expect(loadSlot(0), "the save was not deleted").toBeNull();
+    expect(g.menu.mode, "delete left the Continue screen").toBe("continue");
+    expect(g.started, "delete started a run").toBe(false);
+  });
+
+  it("a tap anywhere but yes cancels the modal", async () => {
+    // No is the default: the modal is dismissed by a tap outside it, not only
+    // by the cancel button. A point of no return should be hard to reach.
+    const { loadSlot } = await import("../src/saves.js");
+    const g = await withSave();
+    tapRow(g, (r) => r.mode === "continue");
+    tapRow(g, (r) => r.slot === 0 && r.del === true);
+    expect(g.menu.confirm).not.toBeNull();
+    g.pointerDown(2, 2);                 // a corner, outside the modal
+    g.pointerUp(2, 2);
+    expect(g.menu.confirm, "an outside tap did not cancel").toBeNull();
+    expect(loadSlot(0), "an outside tap deleted the save").not.toBeNull();
+  });
+});
+
+describe("soak: the menu under random taps", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("500 random taps on the menu never destroy a save without a yes", async () => {
+    // A menu is where a stuck state or an ungated destructive action hides.
+    // The invariant that must hold under any sequence of taps: no save is
+    // overwritten or deleted unless the tap that did it was a confirm YES.
+    const { Game } = await import("../src/main.js");
+    const { loadSlot } = await import("../src/saves.js");
+    const { makeRng } = await import("../src/rng.js");
+
+    // Seed all four slots so there is always something to destroy.
+    for (let s = 0; s < 4; s++) {
+      const seed = new Game({
+        width: 400, height: 800, style: {} as CSSStyleDeclaration,
+        getContext: () => stubContext({ calls: 0 }),
+        addEventListener: () => undefined,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+      } as unknown as HTMLCanvasElement);
+      seed.startRun(s, "phototroph");
+    }
+    for (let s = 0; s < 4; s++) {
+      expect(loadSlot(s), `slot ${String(s)} did not seed`).not.toBeNull();
+    }
+
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.frame(16);
+    const rng = makeRng(31337);
+
+    let present = [true, true, true, true];
+    for (let i = 0; i < 500; i++) {
+      if (g.started) break;             // a run began; the menu is done
+      const rows = g.menuBoxes?.rows ?? [];
+      const conf = g.menuBoxes?.confirm;
+      const back = g.menuBoxes?.back;
+
+      // What is on screen this frame, plus the occasional wild tap.
+      const targets: { x: number; y: number; yes?: boolean }[] = [];
+      for (const r of rows) targets.push({ x: r.box.x + 6, y: r.box.y + 6 });
+      if (conf) {
+        targets.push({ x: conf.yes.x + 4, y: conf.yes.y + 4, yes: true });
+        targets.push({ x: conf.no.x + 4, y: conf.no.y + 4 });
+      }
+      if (back) targets.push({ x: back.x + 6, y: back.y + 6 });
+      targets.push({ x: rng.int(400), y: rng.int(800) });
+
+      const wasConfirm = g.menu.confirm;
+      const t = targets[rng.int(targets.length)];
+      if (!t) continue;
+      g.pointerDown(t.x, t.y);
+      g.pointerUp(t.x, t.y);
+      g.frame(40 + i);
+
+      // The core check: a slot that WAS present is now gone only if the tap we
+      // just made was a confirm yes over a live modal.
+      const now = [0, 1, 2, 3].map((s) => loadSlot(s) !== null);
+      for (let s = 0; s < 4; s++) {
+        if (present[s] && !now[s]) {
+          expect(Boolean(t.yes && wasConfirm),
+                 `slot ${String(s)} vanished on step ${String(i)} `
+                 + `without a confirm yes (tap yes=${String(Boolean(t.yes))}, `
+                 + `modal was ${wasConfirm ? wasConfirm.kind : "none"})`)
+            .toBe(true);
+        }
+      }
+      present = now;
+
+      // And the menu is never wedged: mode is always one of the four.
+      expect(["main", "newGame", "continue", "settings"].includes(g.menu.mode),
+             `mode went to "${g.menu.mode}" on step ${String(i)}`).toBe(true);
+    }
   });
 });

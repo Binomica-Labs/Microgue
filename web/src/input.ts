@@ -12,7 +12,7 @@ import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box } from "./chrome.js";
-import { loadSlot } from "./saves.js";
+import { i_menuTap } from "./menu_input.js";
 import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
@@ -131,21 +131,7 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       return;
     }
     if (_g.showSplash || !_g.started) {
-      const i = _g.slotBoxes.findIndex(
-        (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
-      if (i >= 0) {
-        // Occupied slots RESUME. The class was decided when that culture was
-        // inoculated and asking again would be offering a choice that cannot
-        // be honoured.
-        if (loadSlot(i)) {
-          _g.startRun(i);
-        } else {
-          // A new culture starts in the lab. You are the person who prepared
-          // it before you are the thing that goes in -- and crossing the room
-          // is where the controls are learned.
-          _g.enterLab(i);
-        }
-      }
+      i_menuTap(_g, x, y);
       _g.gesture = "none";
       return;
     }
