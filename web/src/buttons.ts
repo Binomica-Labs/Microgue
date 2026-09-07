@@ -22,6 +22,7 @@ export function makeButtons(): Button[] {
     b("strike", "\u2694", "strike the nearest thing"),
     b("explore", "\u2732", "auto-explore"),
     b("wait", "\u23F8", "wait a turn"),
+    b("biofilm", "\u2593", "lay biofilm"),
     b("research", "\u2697", "directed evolution"),
     b("notes", "\u270E", "field notebook"),
     b("down", "\u25BC", "descend"),

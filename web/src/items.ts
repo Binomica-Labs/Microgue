@@ -12,6 +12,7 @@
 // cell -- which opens as a container rather than being hoovered up blind.
 
 import { GENES, type GeneId } from "./biology.js";
+import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
 import { alleleName, alleleRarity, type Allele } from "./allele.js";
 import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, partsOfRarity, rollRarity,
          type ModifierId, type PromoterId, type Rarity, type TerminatorId }
@@ -56,6 +57,9 @@ export type Item =
   // tandem terminator changes what your plasmid can BE, not just what it does.
   | { kind: "promoter"; id: PromoterId; rarity: Rarity }
   | { kind: "terminator"; id: TerminatorId; rarity: Rarity }
+  // A symbiont is a CHOICE, not a stat -- strong effect, real cost, one at a
+  // time. See symbiont.ts.
+  | { kind: "symbiont"; id: SymbiontId }
   | { kind: "modifier"; id: ModifierId; rarity: Rarity };
 
 /** Rarity of an item, for colouring and for messages. `common` for anything
@@ -63,7 +67,10 @@ export type Item =
 export function rarityOf(it: Item): Rarity {
   // A cassette's rarity is its ROLL, not its base. Same gene, different find.
   if (it.kind === "cassette") return alleleRarity(it.gene, it.allele);
-  return it.kind === "substrate" ? "common" : it.rarity;
+  if (it.kind === "substrate") return "common";
+  // A symbiont is always a landmark find.
+  if (it.kind === "symbiont") return "legendary";
+  return it.rarity;
 }
 
 /**
@@ -106,12 +113,16 @@ export function itemName(it: Item): string {
     case "promoter":    return PROMOTERS[it.id].name;
     case "terminator":  return TERMINATORS[it.id].name;
     case "modifier":    return MODIFIERS[it.id].name;
+    case "symbiont":    return SYMBIONTS[it.id].name;
   }
 }
 
 export function itemColour(it: Item): string {
   if (it.kind === "cassette") return RARITY[alleleRarity(it.gene, it.allele)].colour;
   if (it.kind === "substrate") return SUBSTRATES[it.id].colour;
+  // A symbiont is always a landmark drop; give it the legendary colour so it
+  // reads as one on the floor.
+  if (it.kind === "symbiont") return RARITY.legendary.colour;
   return RARITY[it.rarity].colour;      // rarity is the signal that matters
 }
 
@@ -122,6 +133,7 @@ export function itemNote(it: Item): string {
     case "promoter":   return PROMOTERS[it.id].note;
     case "terminator": return TERMINATORS[it.id].note;
     case "modifier":   return MODIFIERS[it.id].note;
+    case "symbiont":   return SYMBIONTS[it.id].note;
   }
 }
 

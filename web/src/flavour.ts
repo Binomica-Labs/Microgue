@@ -5,6 +5,7 @@
 // what happened and what the thing was. Every line here is written against
 // what the organism actually is.
 
+import { SYMBIONTS } from "./symbiont.js";
 import { GENES, type GeneId } from "./biology.js";
 import { SUBSTRATES, type Item, type SubstrateId } from "./items.js";
 import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS } from "./parts.js";
@@ -74,6 +75,9 @@ export function hgtLine(gene: GeneId, from: string): string {
 export function pickupLine(it: Item, atp: number, blocked: GeneId | null): string {
   if (it.kind === "cassette") {
     return `You pick up a ${GENES[it.gene].name} cassette. It goes into the bin.`;
+  }
+  if (it.kind === "symbiont") {
+    return `A ${SYMBIONTS[it.id].name} drifts in a vacuole here.`;
   }
   if (it.kind === "promoter" || it.kind === "terminator" || it.kind === "modifier") {
     const tier = RARITY[it.rarity];

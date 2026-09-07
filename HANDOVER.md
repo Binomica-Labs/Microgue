@@ -1,3 +1,78 @@
+# v1.19.0 — biofilm and competence (the four are complete)
+
+The other two depth systems. All four (conditions, symbionts, biofilm,
+competence) now shipped and hardened together.
+
+## Biofilm (biofilm.ts)
+
+The one mechanic that pushes BACK against descent. Express `epsA` and the
+biofilm button lays extracellular matrix on your tile (cap 12, cleared on
+descent). A biofilm tile MIRES a pursuer -- a mob stepping onto one forfeits
+the rest of its move -- and slowly regenerates substrate. A cornered strain can
+build a defensible pocket instead of only running, and the v1.17 flankers and
+leeches have something to fight through. State is a Set of packed keys on Game,
+transient.
+
+## Competence (comA)
+
+The workable form of HGT. On a substrate tile with `comA` expressed, a small
+per-turn chance to take up a gene from a NEIGHBOURING stratum -- one you could
+not synthesise where you are. Rewards lingering in a rich pocket.
+
+**A kill-based HGT was built and removed first.** The idea was "a kill drops one
+of the mob's genes that is off-stratum" -- but a mob's genes are ALL native to
+its own depth, so "off-stratum from this mob" is always empty and it could
+never fire. Measured: 0/22 organisms. Competence draws from adjacent depths,
+which genuinely differ (13-30 candidate genes per depth), and does not duplicate
+what relict pockets already do (dead sealed DNA vs living open-water transfer).
+The dead design is noted so it is not retried.
+
+`spec` covers both, plus an INTEGRATED soak: 600 random actions per condition
+with a symbiont held, biofilm laid and comA expressed, asserting no NaN, the
+biofilm cap, and no invariant violation through every combination. The
+difficulty curve still holds with the three new genes (epsA, comA, and v1.18's
+work).
+
+# v1.18.0 — run conditions and symbionts
+
+Two of four planned depth systems. HGT and biofilm are NOT started -- held for
+v1.19 deliberately, so this smaller surface can be felt and hardened first.
+
+## Run conditions (conditions.ts)
+
+Every descent rolls one persistent environmental fact -- bloom, cold snap,
+sulfide upwelling, anoxic event, ferruginous, oligotrophic, or none (weighted
+to ~half). It is on `run.condition`, persisted, rolled from the seed at
+inoculation, and announced. Three systems read it live: substrate stocking
+scales by `substrate`, hazard damage by `hazard`, mob pace by `mobSpeed`. It is
+what makes a second phototroph run a different run -- easy in a bloom, brutal in
+an anoxic event.
+
+Data only: every field is a multiplier or shift with a neutral default, so a
+system reads one number. `none` is a real entry (all neutral), so the baseline
+is just the boring roll.
+
+## Symbionts (symbiont.ts)
+
+Loot that is a CHOICE, not a stat: strong effect, real cost, ONE held at a
+time. Hydrogenosome (2x ATP, vetoes the aerobic chain), capsule (half damage,
+-3 sight), magnetosome, cyanelle, grazer. The plasmid holds one via a
+cache-invalidating setter; `expression` returns 0 for a vetoed gene, and
+power/ATP/armour/sight all read the held symbiont. Taking a second expels the
+first. Rare drop -- ~12% per qualifying floor, scaled by the condition's loot
+richness. Persisted.
+
+`spec` covers both: every condition deviates from neutral, every symbiont too
+and its vetoes are real genes; the veto shuts down exactly the right gene and
+nothing else; the ATP/armour/power multipliers are real; the cache invalidates
+on change; both round-trip through a save and an old save defaults cleanly.
+
+## Still open
+
+- HGT (living organisms dropping off-stratum genes; a competence mechanic)
+- biofilm / territory (claim a tile, hold ground against the reactive AI)
+Then the full soak-and-harden across all four.
+
 # v1.16.0 — a real main menu, and the lab tabled
 
 # v1.17.0 — enemy AI that reacts

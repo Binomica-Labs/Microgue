@@ -70,6 +70,17 @@ export function t_onTile(_g: Game, x: number, y: number): void {
   }
 
 export function t_take(_g: Game, it: Item): boolean {
+    // A symbiont is picked up whole and REPLACES any held one -- a cell houses
+    // one endosymbiont, and taking a second expels the first.
+    if (it.kind === "symbiont") {
+      const old = _g.genome.symbiont;
+      _g.genome.symbiont = it.id;    // the setter invalidates the caches
+      _g.note(old !== null
+        ? `${SYMBIONTS[it.id].name} takes hold; the ${SYMBIONTS[old].name} is expelled.`
+        : `${SYMBIONTS[it.id].name} takes hold. ${SYMBIONTS[it.id].note}`);
+      _g.trace.push(_g.clock.turn, "build", `symbiont ${it.id}`);
+      return true;
+    }
     if (it.kind === "cassette") {
       const part: Part = { kind: "gene", id: it.gene, level: 1, mods: [],
                            allele: it.allele };
@@ -232,6 +243,9 @@ export function t_exploreStep(_g: Game): void {
 }
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 
+import { isBiofilm } from "./biofilm.js";
+import { SYMBIONTS } from "./symbiont.js";
+import { CONDITIONS } from "./conditions.js";
 import * as bio from "./biology.js";
 import * as say from "./flavour.js";
 import { BARRIERS, barrierAt } from "./barrier.js";
@@ -310,6 +324,8 @@ export function t_mobTurn(_g: Game): void {
       // the rough power a floor expects you to bring; below it you are prey.
       threat: Math.min(_g.genome.power(_g.dungeon.depth)
         / (2 + _g.dungeon.depth), 1),
+      mobSpeed: CONDITIONS[_g.run.condition].mobSpeed,
+      mired: (x, y) => isBiofilm(_g.biofilm, _g.dungeon.floor, x, y),
       packets: _g.packets,
       clouds: _g.clouds,
     });

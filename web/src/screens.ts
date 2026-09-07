@@ -455,6 +455,7 @@ export function drawContainer(
       ctx.fillText(
         it.kind === "cassette" ? "cassette"
           : it.kind === "substrate" ? SUBSTRATES[it.id].formula
+          : it.kind === "symbiont" ? "symbiont"
           : `${RARITY[it.rarity].name} ${it.kind}`,
                    bx + cell / 2, by + cell / 2 + cell * 0.16);
     });

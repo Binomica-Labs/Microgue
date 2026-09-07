@@ -8,6 +8,7 @@ import { g_enter, g_startRun } from "./lifecycle.js";
 import { newMenu, type MenuState } from "./menu.js";
 import type { MenuBoxes } from "./menu_render.js";
 import { noStations, type StationId } from "./lab_level.js";
+import { newBiofilm, type Biofilm } from "./biofilm.js";
 import { g_openPlasmid } from "./plasmid_open.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
@@ -125,6 +126,8 @@ class Game {
   /** What the cell is facing because it just struck, rather than because
    *  it is travelling. Cleared on the next step. */
   facingAt: { x: number; y: number } | null = null;
+  /** Territory claimed this floor -- see biofilm.ts. */
+  biofilm: Biofilm = newBiofilm();
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;

@@ -30,6 +30,11 @@ export interface TurnWorld {
    *  cell at this depth expects. Reactive behaviours read it -- a predator
    *  presses a weak strain and circles a strong one. */
   readonly threat: number;
+  /** Mob action-speed multiplier from the run condition, x1 neutral. */
+  readonly mobSpeed: number;
+  /** Whether a tile is biofilm: a mob stepping onto one is mired and forfeits
+   *  the rest of its move. */
+  readonly mired: (x: number, y: number) => boolean;
   /** Travelling particles and lingering gradients, mutated in place. */
   readonly packets: Packet[];
   readonly clouds: Cloud[];
@@ -161,7 +166,10 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // gliding filament rather than lurching two tiles at once, because the
     // fractional remainder carries across turns.
     const budget = { banked: m.banked ?? 0 };
-    const steps = speedTick(budget, speedOf(m.behaviour, m.size), haste(m.status));
+    // The condition scales every mob's pace: a cold snap slows the column, a
+    // bloom quickens it.
+    const steps = speedTick(budget,
+      speedOf(m.behaviour, m.size) * w.mobSpeed, haste(m.status));
     m.banked = budget.banked;
 
     const allies = w.mobs.filter(
@@ -181,6 +189,10 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     m.heading = Math.atan2(step.y - m.y, step.x - m.x);
     m.x = step.x; m.y = step.y;
     events.push({ kind: "move", mob: m });
+    // Biofilm mires: a mob that steps onto a claimed tile forfeits the rest of
+    // its move this turn -- the matrix traps what swims into it. This is what
+    // makes a biofilm pocket defensible against the reactive pursuers.
+    if (w.mired(m.x, m.y)) break;
     }
   }
 

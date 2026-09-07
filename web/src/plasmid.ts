@@ -13,6 +13,7 @@
 // Everything else -- substrate gating, oxygen lability, codon optimisation --
 // carries over from the previous flat model.
 
+import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
 import { b_install, b_stash, b_takeOne, b_uninstall } from "./bin.js";
 import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
          type Complex, type GeneId, type Hazard } from "./biology.js";
@@ -632,7 +633,23 @@ export class Plasmid {
     return Math.max(e * (1 - this.burden()), 0);
   }
 
+  private _symbiont: SymbiontId | null = null;
+  /** The held symbiont, or null. One at a time; taking a second expels the
+   *  first. Setting it invalidates the caches, since it changes expression,
+   *  power, ATP and armour all at once. See symbiont.ts. */
+  get symbiont(): SymbiontId | null { return this._symbiont; }
+  set symbiont(id: SymbiontId | null) {
+    if (id === this._symbiont) return;
+    this._symbiont = id;
+    this.invalidate();
+  }
+
   expression(id: GeneId, depth: number): number {
+    // A symbiont can VETO a gene: the operon is there, but the symbiont shuts
+    // down the route it replaces -- a hydrogenosome kills the aerobic chain.
+    // This is the cost that makes a symbiont a choice, not a stat.
+    if (this.symbiont !== null
+        && SYMBIONTS[this.symbiont].vetoes.includes(id)) return 0;
     // `supply` is public and set from an ATP division. Clamping it here means
     // one bad frame cannot make every downstream number NaN for the rest of
     // the run -- expression, power, vitality and combat all read through this.
@@ -705,12 +722,16 @@ export class Plasmid {
   /** ATP produced per action. Scaled by the stratum's energy yield, so the
    *  same kit generates far less on the methanogenic floor than at the surface. */
   atpGain(depth: number): number {
+    // The memo is keyed on depth and ring only, so the symbiont multiplier is
+    // applied OUTSIDE it -- caching it would return a stale value the moment
+    // the symbiont changed.
     const key = `g${depth}`;
-    const hit = this.memoAtp.get(key);
-    if (hit !== undefined) return hit;
-    const v = this.computeAtpGain(depth);
-    this.memoAtp.set(key, v);
-    return v;
+    let base = this.memoAtp.get(key);
+    if (base === undefined) {
+      base = this.computeAtpGain(depth);
+      this.memoAtp.set(key, base);
+    }
+    return this.symbiont !== null ? base * SYMBIONTS[this.symbiont].atp : base;
   }
 
   private computeAtpGain(depth: number): number {
@@ -810,13 +831,14 @@ export class Plasmid {
     return this.hazards(depth).reduce((a, h) => a + h.dmg, 0);
   }
 
-  /** Incoming damage multiplier after any armour complex. */
+  /** Incoming damage multiplier after any armour complex and the symbiont. */
   armour(depth: number): number {
     let frac = 0;
     for (const c of this.complexes(depth)) {
       if (c.effect.kind === "armour") frac = Math.max(frac, c.effect.frac);
     }
-    return 1 - frac;
+    const sym = this.symbiont !== null ? SYMBIONTS[this.symbiont].armour : 1;
+    return (1 - frac) * sym;
   }
 
   regen(depth: number): number {
@@ -863,6 +885,7 @@ export class Plasmid {
     for (const c of this.complexes(depth)) {
       if (c.effect.kind === "power") a *= c.effect.mult;
     }
+    if (this.symbiont !== null) a *= SYMBIONTS[this.symbiont].power;
     return a;
   }
 }

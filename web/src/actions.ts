@@ -7,6 +7,7 @@
 // and `t_explore`. What is left in turn.ts is the bookkeeping around an action:
 // stairs, pickup, world-building, repath.
 
+import { CONDITIONS } from "./conditions.js";
 import type { Game } from "./main.js";
 import * as bio from "./biology.js";
 import * as say from "./flavour.js";
@@ -144,12 +145,55 @@ export function t_upkeep(_g: Game): void {
         }
       }
     }
-    const tox = _g.genome.toxicity(d);
+    const base = _g.genome.toxicity(d);
+    // The condition scales hazard damage: an anoxic or sulfidic column makes a
+    // mis-built operon bite harder.
+    const tox = Math.round(base * CONDITIONS[_g.run.condition].hazard);
     if (tox > 0) {
       const h = _g.genome.hazards(d)[0];
       hurt(_g, tox, h ? `${h.name}, a toxic intermediate of its own pathway` : "a toxic intermediate");
-      if (h && Math.random() < 0.2) _g.note(`${h.name} — ${tox} damage.`);
+      if (h && Math.random() < 0.2) _g.note(`${h.name} — ${String(tox)} damage.`);
     }
+    // Biofilm concentrates nutrients: each claimed tile has a small chance per
+    // turn to grow a substrate drop on itself. A defended pocket slowly feeds
+    // you -- the reward for holding ground instead of only descending.
+    if (_g.biofilm.floor === _g.dungeon.floor && _g.biofilm.tiles.size > 0) {
+      for (const key of _g.biofilm.tiles) {
+        if (Math.random() < 0.04) {
+          const bx = key % 4096, by = Math.floor(key / 4096);
+          const subs = substratesAt(d);
+          const sid = subs[Math.floor(Math.random() * subs.length)];
+          if (sid && !_g.drops.some((dr) => dr.x === bx && dr.y === by)) {
+            addDrop(_g.drops, bx, by, [{ kind: "substrate", id: sid }]);
+          }
+        }
+      }
+    }
+
+    // Competence: on a tile with substrate, a cell expressing comA can take up
+    // ambient DNA -- a gene drifting from a NEIGHBOURING stratum, one you could
+    // not synthesise here yet. Rare, and only where there is lysate to scavenge
+    // from, so it rewards lingering in a rich pocket rather than rushing down.
+    // Unlike a relict (dead DNA, sealed) this is living transfer in open water.
+    if (_g.genome.expression("comA", d) > 0 && !_g.dead) {
+      const onSubstrate = _g.drops.some(
+        (dr) => dr.x === _g.player.x && dr.y === _g.player.y
+          && dr.items.some((it) => it.kind === "substrate"));
+      if (onSubstrate && Math.random() < 0.03) {
+        const near = d + (Math.random() < 0.5 ? -1 : 1);
+        const nd = Math.min(Math.max(near, 1), 8);
+        const pool = bio.microbesAt(nd).flatMap((p) => [...p.genes])
+          .filter((g) => !_g.genome.has(g) && !_g.genome.inBin(g)
+            && !bio.microbesAt(d).some((p) => p.genes.includes(g)));
+        const g = pool[Math.floor(Math.random() * pool.length)];
+        if (g !== undefined) {
+          const r = _g.genome.stash({ kind: "gene", id: g, level: 1, mods: [],
+                                      allele: rollAllele(makeRng(_g.turnSeed++), d) });
+          if (r.ok) _g.note(`Competence: took up ${bio.GENES[g].name} from the water.`);
+        }
+      }
+    }
+
     // Repair: spend ATP to close damage. This is the ordinary way to recover
     // -- only two of nine complexes grant free regeneration, so without it a
     upkeepRepair(_g, d, gain, cost);
@@ -471,6 +515,7 @@ export function t_attack(_g: Game, m: Mob): void {
                       allele: rollAllele(rng, _g.dungeon.depth) });
         }
       }
+
 
       const subs = substratesAt(_g.dungeon.depth);
       const n = 1 + rng.int(2) + (m.elite ? 1 : 0);

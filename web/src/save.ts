@@ -9,6 +9,8 @@ import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
 import { BASE_SLOTS, MAX_SLOTS, TRAITS, atpCeiling, type TraitId }
   from "./chromosome.js";
 import { DEFAULT_CLASS, isClassId, type ClassId } from "./classes.js";
+import { isConditionId, type ConditionId } from "./conditions.js";
+import { isSymbiontId, type SymbiontId } from "./symbiont.js";
 import { MAX_FLOOR } from "./dungeon.js";
 import { MAX_STRAIN } from "./strain.js";
 import { RARITY, type Rarity } from "./parts.js";
@@ -87,6 +89,7 @@ export interface SaveData {
   readonly strainClass: ClassId;
   readonly integrated: number;
   readonly traits: readonly TraitId[];
+  readonly symbiont: SymbiontId | null;
   /** Clock turn each visited floor was last stocked, so the pump does not
    *  reset on reload and a stripped floor stays stripped. */
   readonly stocked: readonly [number, number][];
@@ -94,7 +97,7 @@ export interface SaveData {
   /** Lineage state: the notebook, the score, the death count. Omitting this
    *  silently discarded every sighting the moment the tab closed. */
   readonly run: { deepest: number; deaths: number; killed: number;
-                  bestiary: string[]; library: GeneId[] };
+                  condition: ConditionId; bestiary: string[]; library: GeneId[] };
   readonly settings: Settings;
 }
 
@@ -185,6 +188,7 @@ function parsePart(v: unknown): Part | null {
 
 function parseRun(v: unknown): SaveData["run"] {
   const empty = { deepest: 1, deaths: 0, killed: 0,
+                  condition: "none" as ConditionId,
                   bestiary: [] as string[], library: [] as GeneId[] };
   if (!isRecord(v)) return empty;
   const ids = new Set(MICROBES.map((m) => m.id));
@@ -205,6 +209,8 @@ function parseRun(v: unknown): SaveData["run"] {
     // Absent in an older save simply means a lineage that predates the
     // counter, not one that never fought.
     killed: Math.max(num(v["killed"], 0), 0),
+    // Absent in a save from before conditions existed: a stable column.
+    condition: isConditionId(v["condition"]) ? v["condition"] : "none",
     bestiary, library,
   };
 }
@@ -308,6 +314,8 @@ export function parseSave(raw: unknown): SaveData | null {
           (x): x is TraitId => typeof x === "string"
             && Object.prototype.hasOwnProperty.call(TRAITS, x)))]
       : [],
+    // Absent, or an id from a future version: no symbiont.
+    symbiont: isSymbiontId(raw["symbiont"]) ? raw["symbiont"] : null,
     stocked: Array.isArray(raw["stocked"])
       ? (raw["stocked"] as unknown[]).flatMap((e): [number, number][] =>
           Array.isArray(e) && e.length === 2

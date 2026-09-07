@@ -6,6 +6,7 @@
 // strain. Everything a run must forget from the last one, and everything a
 // floor must set up on arrival, lives here.
 
+import { clearBiofilm } from "./biofilm.js";
 import type { Game } from "./main.js";
 import type { Level } from "./dungeon.js";
 import type { Point } from "./mapgen.js";
@@ -21,12 +22,17 @@ import { readLab } from "./lab_save.js";
 import { Plasmid } from "./plasmid.js";
 import { capacityAt, describeStock, restockAmount } from "./production.js";
 import { makeRng } from "./rng.js";
+import { CONDITIONS, rollCondition } from "./conditions.js";
+import { SYMBIONT_IDS } from "./symbiont.js";
 import { ROOM_STYLE } from "./rooms.js";
 import { newRun } from "./run.js";
 import { ZOOM_MAX, ZOOM_MIN } from "./save.js";
 import { NAME_POOL, listSlots, loadSlot } from "./saves.js";
 
 export function g_enter(_g: Game, level: Level, arrive: Point): void {
+  // Biofilm does not follow you: it is territory on a specific floor, and
+  // arriving somewhere new clears it.
+  clearBiofilm(_g.biofilm);
 
   _g.level = level;
   // Half the strain formula (strain.ts); only t_win ever wrote it. On
@@ -48,8 +54,11 @@ export function g_enter(_g: Game, level: Level, arrive: Point): void {
   if (level.visited) {
     const present = _g.drops.reduce(
       (a, d) => a + d.items.filter((i) => i.kind === "substrate").length, 0);
-    const gained = restockAmount(level.depth, present, _g.clock.turn - level.stockedAt,
-                                 _g.clock, level.stockedAt);
+    const raw = restockAmount(level.depth, present, _g.clock.turn - level.stockedAt,
+                              _g.clock, level.stockedAt);
+    // The condition scales how much settles: a bloom feeds you, an
+    // oligotrophic column starves you.
+    const gained = Math.round(raw * CONDITIONS[_g.run.condition].substrate);
     if (gained > 0) _g.scatter(level, gained);
     level.stockedAt = _g.clock.turn;
     _g.note(describeStock(level.depth, present + gained));
@@ -102,6 +111,21 @@ export function g_enter(_g: Game, level: Level, arrive: Point): void {
           }
         }
         addDrop(_g.drops, t.x, t.y, items);
+      }
+    }
+
+    // A symbiont: the rarest drop, and a CHOICE rather than a stat. At most one
+    // per floor, only in a room worth crossing for, and richer columns roll it
+    // more often. The pool is fixed, so which one you find is the luck.
+    if (level.rooms.some((r) => ROOM_STYLE[r.kind].loot >= 3)) {
+      const rich = CONDITIONS[_g.run.condition].lootRichness;
+      if (lootRng.next() < 0.12 * rich) {
+        const room = level.rooms.find((r) => ROOM_STYLE[r.kind].loot >= 3);
+        const t = room?.tiles[lootRng.int(room.tiles.length)];
+        if (t) {
+          const sid = SYMBIONT_IDS[lootRng.int(SYMBIONT_IDS.length)];
+          if (sid) addDrop(_g.drops, t.x, t.y, [{ kind: "symbiont", id: sid }]);
+        }
       }
     }
 
@@ -165,9 +189,16 @@ export function g_startRun(_g: Game, slot: number, cls: ClassId = DEFAULT_CLASS)
     _g.applySave(existing);
     _g.note(`Resumed ${_g.runName}.`);
   } else {
-    _g.dungeon = new Dungeon(96, 96, (Date.now() & 0xffff) + slot);
+    const seed = (Date.now() & 0xffff) + slot;
+    _g.dungeon = new Dungeon(96, 96, seed);
     _g.genome = new Plasmid();
     _g.run = newRun();          // a new culture has seen nothing
+    // The column this time. Rolled from the seed so a given descent is
+    // reproducible, and announced so the player knows what they are walking
+    // into -- see conditions.ts.
+    _g.run.condition = rollCondition(makeRng(seed ^ 0x5eed).next());
+    const cond = CONDITIONS[_g.run.condition];
+    if (cond.id !== "none") _g.note(`${cond.name}. ${cond.note}`);
 
     // Everything the lab has ordered is on the new strain from turn one.
     // This is what the previous strain died for.

@@ -1724,6 +1724,7 @@ describe("state that should persist, does", () => {
     menu: "front-of-game menu state, before a run",
     menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
+    biofilm: "territory on the current floor; cleared on descent",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",
@@ -3250,6 +3251,108 @@ describe("soak: the menu under random taps", () => {
       // And the menu is never wedged: mode is always one of the four.
       expect(["main", "newGame", "continue", "settings"].includes(g.menu.mode),
              `mode went to "${g.menu.mode}" on step ${String(i)}`).toBe(true);
+    }
+  });
+});
+
+describe("conditions and symbionts survive a reload", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("the run condition and held symbiont round-trip through a save", async () => {
+    const { parseSave } = await import("../src/save.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "phototroph");
+    g.run.condition = "anoxic";
+    g.genome.symbiont = "hydrogenosome";
+    g.save();
+
+    const b = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    b.startRun(0);
+    expect(b.run.condition, "the condition did not survive reload").toBe("anoxic");
+    expect(b.genome.symbiont, "the symbiont did not survive reload")
+      .toBe("hydrogenosome");
+    void parseSave;
+  });
+
+  it("a save from before either feature loads with sane defaults", async () => {
+    const { parseSave, SCHEMA } = await import("../src/save.js");
+    const s = parseSave({
+      version: SCHEMA, depth: 1, floor: 1, seed: 1, px: 5, py: 5,
+      hp: 20, atp: 50, ring: [], bin: [], settings: {}, heldMods: [],
+      turn: 0, stocked: [], integrated: 0, traits: [], strainClass: "phototroph",
+      run: { deepest: 3, deaths: 1, killed: 2, bestiary: [], library: [] },
+    });
+    expect(s?.run.condition, "old save did not default to a stable column")
+      .toBe("none");
+    expect(s?.symbiont, "old save invented a symbiont").toBeNull();
+  });
+});
+
+describe("soak: all four v1.18-1.19 systems under random play", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("600 random actions with conditions, symbionts, biofilm and comA hold", async () => {
+    // Four systems shipped together is a lot of surface. This is the
+    // integrated check: run under every condition, hold a symbiont, lay
+    // biofilm, express competence -- and assert the invariants that must hold
+    // through all of it.
+    const { Game } = await import("../src/main.js");
+    const { firstViolation } = await import("../src/invariants.js");
+    const { makeRng } = await import("../src/rng.js");
+    const { CONDITION_IDS } = await import("../src/conditions.js");
+    const { SYMBIONT_IDS } = await import("../src/symbiont.js");
+
+    for (const cond of CONDITION_IDS) {
+      const g = new Game({
+        width: 400, height: 800, style: {} as CSSStyleDeclaration,
+        getContext: () => stubContext({ calls: 0 }),
+        addEventListener: () => undefined,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+      } as unknown as HTMLCanvasElement);
+      g.startRun(0, "phototroph");
+      g.run.condition = cond;
+      // give it the two new genes and a symbiont so every system is live
+      for (const id of ["epsA", "comA"] as const) {
+        g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      g.genome.assemble(["epsA", "comA"]);
+      const rng = makeRng(cond.length * 131 + 7);
+
+      for (let i = 0; i < 100; i++) {
+        if (g.dead) break;
+        switch (rng.int(6)) {
+          case 0: g.press("biofilm"); break;
+          case 1: g.press("wait"); break;
+          case 2: g.step(g.player.x + rng.int(3) - 1, g.player.y + rng.int(3) - 1); break;
+          case 3: if (i % 20 === 0) g.genome.symbiont = SYMBIONT_IDS[rng.int(SYMBIONT_IDS.length)] ?? null; break;
+          case 4: g.frame(100 + i * 30); break;
+          default: g.press("wait"); break;
+        }
+        // invariants hold under every combination
+        expect(Number.isFinite(g.player.hp), `${cond} step ${String(i)}: hp NaN`).toBe(true);
+        expect(Number.isFinite(g.player.atp), `${cond} step ${String(i)}: atp NaN`).toBe(true);
+        expect(Number.isFinite(g.genome.power(g.dungeon.depth)),
+               `${cond} step ${String(i)}: power NaN`).toBe(true);
+        expect(g.biofilm.tiles.size, `${cond}: biofilm past cap`).toBeLessThanOrEqual(12);
+        const v = firstViolation({
+          plasmid: g.genome, level: g.level, player: g.player, drops: g.drops,
+          packets: g.packets, clouds: g.clouds, barriers: g.level.barriers,
+          run: g.run, floor: g.dungeon.floor, dead: g.dead,
+        } as never);
+        expect(v ? `${v.name}: ${v.detail}` : null, `${cond} step ${String(i)}`)
+          .toBeNull();
+      }
     }
   });
 });

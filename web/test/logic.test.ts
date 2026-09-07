@@ -2374,7 +2374,7 @@ describe("save slots", () => {
 
 describe("the microbe turn", () => {
   const world = (mobs: Mob[], px = 5, py = 5) => ({
-    threat: 0.5,
+    threat: 0.5, mobSpeed: 1, mired: () => false,
     grid: new mg.Grid(15, 15, mg.FLOOR),
     mobs,
     player: { x: px, y: py, hp: 30, status: [] as Status[] },
@@ -2802,7 +2802,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(3), armour: 1, threat: 0.5, packets: [], clouds: [],
+      rng: makeRng(3), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [],
     };
     for (let i = 0; i < 4; i++) microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);
@@ -2815,7 +2815,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(20, 20, mg.FLOOR), mobs,
       player: { x: 12, y: 12, hp: 999, status: [] as Status[] },
-      rng: makeRng(5), armour: 1, threat: 0.5, packets: [], clouds: [],
+      rng: makeRng(5), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [],
     };
     for (let step = 0; step < 25; step++) {
       microbeTurn(w);
@@ -2955,7 +2955,7 @@ describe("ranged weapons", () => {
     player: { x: px, y: py, hp: 60, status: [] as Status[] },
     rng: makeRng(11),
     armour: 1,
-    threat: 0.5,
+    threat: 0.5, mobSpeed: 1, mired: () => false,
     packets: [] as Packet[],
     clouds: [] as Cloud[],
   });
@@ -3787,7 +3787,7 @@ describe("crawl-like behaviours", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(1), armour: 1, threat: 0.5, packets: [] as Packet[], clouds: [] as Cloud[],
+      rng: makeRng(1), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [] as Packet[], clouds: [] as Cloud[],
     };
     microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);        // standing still is not safe
@@ -4643,7 +4643,8 @@ describe("rare parts drop and research spends", () => {
       let t = 0;
       for (let i = 0; i < 3000; i++) {
         const it = rollPart(i / 3000, (i * 7919 % 1000) / 1000, depth);
-        if (it && it.kind !== "cassette" && it.kind !== "substrate") {
+        if (it && (it.kind === "promoter" || it.kind === "terminator"
+                   || it.kind === "modifier")) {
           t += score[it.rarity] ?? 0;
         }
       }
@@ -6642,7 +6643,7 @@ describe("a pack does not move as one body", () => {
       const before = lvl.mobs.map((m) => [m.x, m.y] as [number, number]);
       microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
                     player: player,
-                    rng: makeRng(7000 + t), armour: 0, threat: 0.5, packets: [], clouds: [] });
+                    rng: makeRng(7000 + t), armour: 0, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [] });
       const moves = lvl.mobs.map((m, i) =>
         `${String(m.x - (before[i]?.[0] ?? 0))},${String(m.y - (before[i]?.[1] ?? 0))}`);
       if (new Set(moves).size === 1) lockstep++;
@@ -6686,7 +6687,7 @@ describe("a pack does not move as one body", () => {
       for (let t = 0; t < 40; t++) {
         microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
                       player: player,
-                      rng: makeRng(s * 97 + t), armour: 0, threat: 0.5, packets: [], clouds: [] });
+                      rng: makeRng(s * 97 + t), armour: 0, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [] });
         const m = lvl.mobs[0];
         if (m && Math.abs(m.x - player.x) + Math.abs(m.y - player.y) <= 1) {
           reached++;
@@ -7900,5 +7901,219 @@ describe("no behaviour produces an illegal move under adversarial input", () => 
     expect(illegal, `${String(illegal)} steps into rock`).toBe(0);
     expect(occupied, `${String(occupied)} steps onto an occupied tile`).toBe(0);
     expect(teleport, `${String(teleport)} steps of more than one tile`).toBe(0);
+  });
+});
+
+describe("run conditions reweight the descent", () => {
+  it("none is heavily weighted; the rest all reachable", async () => {
+    // An unusual column should be unusual, or the baseline stops being one.
+    const { rollCondition, CONDITION_IDS } = await import("../src/conditions.js");
+    const seen = new Map<string, number>();
+    for (let i = 0; i < 2000; i++) {
+      const id = rollCondition(i / 2000);
+      seen.set(id, (seen.get(id) ?? 0) + 1);
+    }
+    expect((seen.get("none") ?? 0) / 2000, "none is not ~half")
+      .toBeGreaterThan(0.4);
+    // every id shows up
+    for (const id of CONDITION_IDS) {
+      expect(seen.get(id) ?? 0, `${id} never rolled`).toBeGreaterThan(0);
+    }
+  });
+
+  it("each condition is a real deviation, none is silently neutral", async () => {
+    const { CONDITIONS, CONDITION_IDS } = await import("../src/conditions.js");
+    for (const id of CONDITION_IDS) {
+      const c = CONDITIONS[id];
+      const neutral = c.substrate === 1 && c.hazard === 1 && c.mobSpeed === 1
+        && c.nightThinning === 1 && c.chemoclineShift === 0
+        && c.lootRichness === 1;
+      if (id === "none") {
+        expect(neutral, "none should be neutral").toBe(true);
+      } else {
+        expect(neutral, `${id} deviates from neutral in nothing`).toBe(false);
+        expect(c.note.length, `${id} has no description`).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  it("rollCondition survives garbage", async () => {
+    const { rollCondition, isConditionId } = await import("../src/conditions.js");
+    for (const v of [NaN, Infinity, -1, 5, 0, 0.999]) {
+      expect(isConditionId(rollCondition(v)), `roll(${String(v)}) not a real id`)
+        .toBe(true);
+    }
+  });
+});
+
+describe("symbionts are a trade, not a stat", () => {
+  it("a hydrogenosome doubles ATP but shuts down the aerobic chain", async () => {
+    const { SYMBIONTS } = await import("../src/symbiont.js");
+    const p = new Plasmid();
+    p.integrated = 8;
+    // an aerobic gene it vetoes, plus one it does not
+    for (const id of ["ccoN", "cbbL"] as const) {
+      p.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.assemble(["ccoN", "cbbL"]);
+    const atpBefore = p.atpGain(1);
+    const oxBefore = p.expression("ccoN", 1);
+    expect(oxBefore, "the fixture does not express ccoN").toBeGreaterThan(0);
+
+    p.symbiont = "hydrogenosome";
+    expect(p.expression("ccoN", 1), "the veto did not shut down the aerobic gene")
+      .toBe(0);
+    expect(p.expression("cbbL", 1), "the veto hit an unrelated gene")
+      .toBeGreaterThan(0);
+    expect(p.atpGain(1) / Math.max(atpBefore, 0.01),
+           "ATP did not roughly double")
+      .toBeGreaterThan(1.5);
+    void SYMBIONTS;
+  });
+
+  it("a capsule halves damage and dulls sight; effects are real", async () => {
+    const { SYMBIONTS } = await import("../src/symbiont.js");
+    const p = new Plasmid();
+    p.integrated = 6;
+    const armourBefore = p.armour(1);
+    p.symbiont = "capsule";
+    expect(p.armour(1), "the capsule did not reduce incoming damage")
+      .toBeLessThan(armourBefore);
+    expect(SYMBIONTS.capsule.sight, "the capsule does not dull sight")
+      .toBeLessThan(0);
+  });
+
+  it("taking a second symbiont replaces the first", () => {
+    // A cell houses one endosymbiont. The plasmid holds one; setting a new one
+    // is the whole mechanic.
+    const p = new Plasmid();
+    p.symbiont = "magnetosome";
+    expect(p.symbiont).toBe("magnetosome");
+    p.symbiont = "grazer";
+    expect(p.symbiont, "the first symbiont was not expelled").toBe("grazer");
+  });
+
+  it("every symbiont deviates from neutral, and its vetoes are real genes", async () => {
+    const { SYMBIONTS, SYMBIONT_IDS } = await import("../src/symbiont.js");
+    for (const id of SYMBIONT_IDS) {
+      const s = SYMBIONTS[id];
+      const neutral = s.power === 1 && s.armour === 1 && s.atp === 1
+        && s.sight === 0 && s.vetoes.length === 0;
+      expect(neutral, `${id} is a pure no-op`).toBe(false);
+      for (const g of s.vetoes) {
+        expect(Object.prototype.hasOwnProperty.call(bio.GENES, g),
+               `${id} vetoes "${g}", which is not a gene`).toBe(true);
+      }
+      expect(s.note.length, `${id} has no description`).toBeGreaterThan(20);
+    }
+  });
+
+  it("setting a symbiont invalidates the caches", () => {
+    // power and atpGain are memoised; the symbiont setter must clear them or a
+    // stale value survives the change.
+    const p = new Plasmid();
+    p.integrated = 6;
+    p.stash({ kind: "gene", id: "cbbL", level: 1, mods: [], allele: WILD_TYPE });
+    p.assemble(["cbbL"]);
+    const before = p.power(1);
+    p.symbiont = "cyanelle";              // power x1.4
+    expect(p.power(1), "power did not change after taking a symbiont")
+      .not.toBe(before);
+  });
+});
+
+describe("biofilm holds ground", () => {
+  it("lays only with a matrix gene, only within the cap", async () => {
+    const { newBiofilm, layBiofilm, isBiofilm, BIOFILM_CAP } =
+      await import("../src/biofilm.js");
+    const bf = newBiofilm();
+    // no matrix gene: refused
+    expect(layBiofilm(bf, 1, 5, 5, false), "laid without a matrix gene")
+      .not.toBeNull();
+    expect(isBiofilm(bf, 1, 5, 5)).toBe(false);
+    // with it: laid
+    expect(layBiofilm(bf, 1, 5, 5, true), "refused with a matrix gene").toBeNull();
+    expect(isBiofilm(bf, 1, 5, 5)).toBe(true);
+    // same tile twice: refused
+    expect(layBiofilm(bf, 1, 5, 5, true)).not.toBeNull();
+    // fill to the cap
+    let laid = 1;
+    for (let i = 0; i < 50 && laid < BIOFILM_CAP; i++) {
+      if (layBiofilm(bf, 1, 10 + i, 10, true) === null) laid++;
+    }
+    expect(laid).toBe(BIOFILM_CAP);
+    expect(layBiofilm(bf, 1, 90, 90, true), "laid past the cap").not.toBeNull();
+  });
+
+  it("belongs to a floor and clears when it changes", async () => {
+    const { newBiofilm, layBiofilm, isBiofilm } = await import("../src/biofilm.js");
+    const bf = newBiofilm();
+    layBiofilm(bf, 3, 5, 5, true);
+    expect(isBiofilm(bf, 3, 5, 5)).toBe(true);
+    // a different floor: the same tile is not biofilm, and laying there resets.
+    expect(isBiofilm(bf, 4, 5, 5)).toBe(false);
+    layBiofilm(bf, 4, 6, 6, true);
+    expect(isBiofilm(bf, 4, 5, 5), "old floor's biofilm bled through").toBe(false);
+    expect(isBiofilm(bf, 4, 6, 6)).toBe(true);
+  });
+
+  it("mires a pursuer: a mob that steps onto biofilm forfeits its move", async () => {
+    // The defensible-pocket mechanic. A fast mob crossing a biofilm tile stops
+    // there rather than passing through.
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, 5);
+    const lvl = d.level(1);
+    let row = -1;
+    for (let y = 5; y < 80 && row < 0; y++) {
+      let ok = true;
+      for (let x = 30; x <= 40; x++) if (!lvl.grid.isFloor(x, y)) { ok = false; break; }
+      if (ok) row = y;
+    }
+    if (row < 0) return;
+    const proto = lvl.mobs[0];
+    if (!proto) return;
+    lvl.mobs.length = 0;
+    lvl.mobs.push({ ...proto, behaviour: "leech", alive: true, hp: 9,
+                    banked: 0, x: 32, y: row, ax: 32, ay: row });
+    const player = { x: 40, y: row, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
+                     status: [] };
+    // biofilm on the tile just right of the mob
+    const mired = (x: number, y: number) => x === 33 && y === row;
+    microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
+                  player: player,
+                  rng: makeRng(1), armour: 0, threat: 0.5, mobSpeed: 1,
+                  mired, packets: [], clouds: [] });
+    // a leech at speed 1.2 would normally reach 33 and keep going; mired, it
+    // stops at 33.
+    expect(lvl.mobs[0]?.x, "the mob was not mired on the biofilm tile")
+      .toBeLessThanOrEqual(33);
+  });
+});
+
+describe("competence transfers living DNA", () => {
+  it("yields a neighbour-stratum gene at every depth", async () => {
+    // The workable form of HGT: a gene from an adjacent stratum, one you could
+    // not synthesise where you are. A kill-based version was tried and removed
+    // -- a mob's genes are all native to its own depth, so "steal a distant
+    // gene from it" can never fire. Competence draws from NEIGHBOURING depths,
+    // which do differ.
+    for (let d = 1; d <= 8; d++) {
+      const here = new Set(bio.microbesAt(d).flatMap((m) => [...m.genes]));
+      const near = new Set(
+        [d - 1, d + 1].filter((x) => x >= 1 && x <= 8)
+          .flatMap((x) => bio.microbesAt(x).flatMap((m) => [...m.genes])));
+      const gain = [...near].filter((g) => !here.has(g));
+      expect(gain.length, `D${String(d)}: competence yields nothing`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("comA and epsA are carried and sourced", async () => {
+    const carried = new Set(bio.MICROBES.flatMap((m) => [...m.genes]));
+    for (const g of ["comA", "epsA"] as bio.GeneId[]) {
+      expect(carried.has(g), `${g} is carried by no organism`).toBe(true);
+      expect(bio.GENES[g].discovery.length, `${g} has no discovery note`)
+        .toBeGreaterThan(30);
+    }
   });
 });

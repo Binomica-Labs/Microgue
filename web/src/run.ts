@@ -8,6 +8,7 @@
 // chromosome.ts is the one way loci themselves survive a death.
 
 import type { Part } from "./transcription.js";
+import type { ConditionId } from "./conditions.js";
 import { GENES, MICROBES, stratum, type GeneId } from "./biology.js";
 import { SOURCES, type Record_ } from "./ncbi.js";
 import { MODIFIERS, PROMOTERS, TERMINATORS } from "./parts.js";
@@ -22,10 +23,14 @@ export interface RunState {
   /** Organisms killed this lineage. Feeds the smallest, saturating term of
    *  strain adaptation; see strain.ts. */
   killed: number;
+  /** The environmental condition for this descent -- see conditions.ts. Rolled
+   *  once at inoculation and fixed for the run. */
+  condition: ConditionId;
 }
 
 export function newRun(): RunState {
-  return { deepest: 1, deaths: 0, bestiary: [], library: [], killed: 0 };
+  return { deepest: 1, deaths: 0, bestiary: [], library: [], killed: 0,
+           condition: "none" };
 }
 
 export function recordSighting(run: RunState, microbeId: string): boolean {

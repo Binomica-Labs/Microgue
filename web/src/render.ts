@@ -498,6 +498,20 @@ export function r_draw(_g: Game): void {
       ctx.fillStyle = "rgba(2,4,4,0.82)";
       ctx.fill(dim);
     }
+    // Biofilm: a translucent matrix patch on each claimed tile, drawn after the
+    // fog so a remembered-but-unseen patch is dimmed with the rest.
+    if (_g.biofilm.floor === _g.level.floor && _g.biofilm.tiles.size > 0) {
+      ctx.fillStyle = "rgba(150,210,140,0.28)";
+      for (const key of _g.biofilm.tiles) {
+        const bx = key % 4096, by = Math.floor(key / 4096);
+        if (bx < x0 || bx > x1 || by < y0 || by > y1) continue;
+        if (!isSeen(_g.level.sight, bx, by)) continue;
+        ctx.beginPath();
+        ctx.roundRect(bx * px + px * 0.1, by * px + px * 0.1,
+                      px * 0.8, px * 0.8, px * 0.3);
+        ctx.fill();
+      }
+    }
     _g.drawFx(px);
     ctx.restore();
 

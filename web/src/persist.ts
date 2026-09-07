@@ -52,10 +52,11 @@ export function p_save(_g: Game): void {
       strainClass: _g.strainClass,
       integrated: _g.genome.integrated,
       traits: [..._g.genome.traits],
+      symbiont: _g.genome.symbiont,
       stocked: _g.dungeon.visitedLevels()
         .map((l): [number, number] => [l.floor, l.stockedAt]),
       won: _g.won,
-      run: { deepest: _g.run.deepest, deaths: _g.run.deaths, killed: _g.run.killed,
+      run: { deepest: _g.run.deepest, deaths: _g.run.deaths, killed: _g.run.killed, condition: _g.run.condition,
              bestiary: [..._g.run.bestiary], library: [..._g.run.library] },
       settings: _g.settings,
     };
@@ -87,6 +88,7 @@ export function p_applySave(_g: Game, s: SaveData): void {
     _g.strainClass = s.strainClass;
     _g.genome.integrated = s.integrated;
     _g.genome.setTraits(s.traits);
+    _g.genome.symbiont = s.symbiont;
     // Same floor as `upkeep`: the lab's purchased start is a minimum, not a
     // starting value, or reloading a save undid what credit had bought.
     _g.genome.strain = Math.max(
@@ -106,7 +108,7 @@ export function p_applySave(_g: Game, s: SaveData): void {
     for (const [floor, at] of s.stocked) _g.dungeon.level(floor).stockedAt = at;
     _g.won = s.won;
     _g.run = {
-      deepest: s.run.deepest, deaths: s.run.deaths, killed: s.run.killed,
+      deepest: s.run.deepest, deaths: s.run.deaths, killed: s.run.killed, condition: s.run.condition,
       bestiary: [...s.run.bestiary], library: [...s.run.library],
     };
   }

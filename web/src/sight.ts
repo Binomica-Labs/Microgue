@@ -10,6 +10,7 @@
 // neither, and halting for one made auto-explore useless on the first
 // stratum, where five of the six organisms are exactly that.
 
+import { SYMBIONTS } from "./symbiont.js";
 import { computeFov, isVisible, sightRadius } from "./fov.js";
 import { lightAt } from "./cycle.js";
 import { distanceTo } from "./pursuit.js";
@@ -26,8 +27,14 @@ export function t_look(_g: Game): void {
     // that is lit, and a lab drawn dark looks like the column with a white
     // palette -- the one thing it exists not to look like.
     if (_g.intro) { s.visible.fill(1); s.seen.fill(1); }
-    else computeFov(s, _g.level.grid, _g.player.x, _g.player.y,
-               sightRadius(lit) + glow);
+    else {
+      // A symbiont can sharpen or dull the senses: a magnetosome sees far, a
+      // capsule muffles the cell.
+      const sym = _g.genome.symbiont !== null
+        ? SYMBIONTS[_g.genome.symbiont].sight : 0;
+      computeFov(s, _g.level.grid, _g.player.x, _g.player.y,
+                 Math.max(sightRadius(lit) + glow + sym, 2));
+    }
 
     // Keyed on the INSTANCE. Keying on species-plus-position re-fired every
     // time a microbe took a step, which is once per turn, for ever.

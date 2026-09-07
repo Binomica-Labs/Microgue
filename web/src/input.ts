@@ -3,6 +3,7 @@
 // Everything here is reached through safety.on(), so a throw in a handler is
 // reported rather than escaping into a console nobody can read on a phone.
 
+import { layBiofilm } from "./biofilm.js";
 import { isVisible } from "./fov.js";
 import { distanceTo } from "./pursuit.js";
 import type { Mob } from "./dungeon.js";
@@ -548,6 +549,21 @@ export function i_press(_g: Game, id: string): void {
         _g.mobTurn();
         _g.look();
         break;
+      case "biofilm": {
+        // Lay territory on the tile you stand on, if a matrix gene is
+        // expressed. It costs a turn -- the mobs act -- so it is a commitment,
+        // not free.
+        const err = layBiofilm(_g.biofilm, _g.dungeon.floor,
+          _g.player.x, _g.player.y,
+          _g.genome.expression("epsA", _g.dungeon.depth) > 0);
+        if (err !== null) { _g.note(err); break; }
+        _g.note("You lay down biofilm. It will hold here.");
+        _g.trace.push(_g.clock.turn, "build",
+          `biofilm at ${String(_g.player.x)},${String(_g.player.y)}`);
+        _g.mobTurn();
+        _g.look();
+        break;
+      }
       case "research":
         _g.showResearch = !_g.showResearch;
         _g.researchPick = null;
