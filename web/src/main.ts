@@ -1,9 +1,10 @@
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 
-import { CLASSES, DEFAULT_CLASS, type ClassId } from "./classes.js";
+import { DEFAULT_CLASS, type ClassId } from "./classes.js";
 import type { ClassRow } from "./class_ui.js";
 import { g_enterLab } from "./lab_enter.js";
+import { g_enter, g_startRun } from "./lifecycle.js";
 import { noStations, type StationId } from "./lab_level.js";
 import { g_openPlasmid } from "./plasmid_open.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
@@ -27,7 +28,6 @@ import { type Gesture } from "./gesture.js";
 import { moduleBoxes,
          toWorld, type ModuleBox, type View }
   from "./kegg_ui.js";
-import * as mg from "./mapgen.js";
 import type { Point } from "./mapgen.js";
 import { Effects } from "./fx.js";
 import { 
@@ -41,14 +41,11 @@ import { installConsole } from "./debug.js";
 import { x_export } from "./export.js";
 import { type ModifierId } from "./parts.js";
 import type { Part } from "./plasmid.js";
-import { addDrop, 
-         rollPart, substratesAt, type Drop, type Item } from "./items.js";
+import { addDrop, substratesAt, type Drop, type Item } from "./items.js";
 import { newClock, type Clock } from "./cycle.js";
-import { ROOM_STYLE, type Room } from "./rooms.js";
+import { type Room } from "./rooms.js";
 import { type WorldView } from "./invariants.js";
 import { installGlobalHandlers, on } from "./safety.js";
-import { capacityAt, describeStock, restockAmount } from "./production.js";
-import { WILD_TYPE,rollAllele } from "./allele.js";
 import type { TraitId } from "./chromosome.js";
 import type { MiniBox } from "./minimap.js";
 import { newLab, type Lab, type RunRecord } from "./lab.js";
@@ -57,7 +54,7 @@ import { buy, type Offer } from "./lab.js";
 import type { ShopRow } from "./screens.js";
 import { newRun, type RunState } from "./run.js";
 import type { Status } from "./status.js";
-import { NAME_POOL, listSlots, loadSlot, migrateLegacy } from "./saves.js";
+import { migrateLegacy } from "./saves.js";
 import { makeRng } from "./rng.js";
 import { Toasts } from "./toast.js";
 import { DEFAULT_SETTINGS, ZOOM_MAX, ZOOM_MIN, ZOOM_PREF_MAX, ZOOM_PREF_MIN, readSave, type SaveData, type Settings } from "./save.js";
@@ -275,98 +272,7 @@ class Game {
     while (this.log.length > 8) this.log.shift();
   }
 
-  enter(level: Level, arrive: Point): void {
-    this.level = level;
-    // Half the strain formula (strain.ts); only t_win ever wrote it. On
-    this.run.deepest = Math.max(this.run.deepest, level.floor);   // arrival.
-    let p: Point | null = arrive;
-    if (!level.grid.isFloor(p.x, p.y)) p = mg.findSpawn(level.grid, p.x, p.y);
-    p ??= mg.carveSpawn(level.grid);
-    this.player.x = p.x; this.player.y = p.y;
-    this.player.ax = p.x; this.player.ay = p.y;
-    this.cursor = { x: p.x, y: p.y };
-    this.path = null; this.walk = null;
-    this.zoom = Math.min(Math.max(this.tileZoom() * this.settings.zoom, ZOOM_MIN), ZOOM_MAX);
-    this.spotted.clear();
-    this.look();
-
-    // Returning to a floor: whatever has settled since you left. A floor you
-    // stripped is barren until the pump refills it, and the pump runs from the
-    // top and stops at night.
-    if (level.visited) {
-      const present = this.drops.reduce(
-        (a, d) => a + d.items.filter((i) => i.kind === "substrate").length, 0);
-      const gained = restockAmount(level.depth, present, this.clock.turn - level.stockedAt,
-                                   this.clock, level.stockedAt);
-      if (gained > 0) this.scatter(level, gained);
-      level.stockedAt = this.clock.turn;
-      this.note(describeStock(level.depth, present + gained));
-    }
-    const s = level.stratum;
-    if (!level.visited) {
-      level.visited = true;
-      this.note(s.blurb);
-      if (level.boss && level.bossName !== undefined) {
-        this.note(`Something has taken over this level: ${level.bossName}.`);
-        this.toasts.push(`Boss floor: ${level.bossName}`, "warn", this.now);
-      }
-      // Rooms get real caches; the rest of the floor gets scatter.
-      const lootRng = makeRng(this.dungeon.seed ^ (level.floor * 6607));
-      for (const room of level.rooms) {
-        const style = ROOM_STYLE[room.kind];
-        const pool = substratesAt(s.depth);
-        for (let i = 0; i < style.loot; i++) {
-          const t = room.tiles[lootRng.int(room.tiles.length)];
-          if (!t) continue;
-          const items: Item[] = [];
-          const id = pool[lootRng.int(pool.length)];
-          if (id) items.push({ kind: "substrate", id });
-          // A regulatory part: the rare drop. A conditional promoter or a
-          // tandem terminator changes what the plasmid can BE.
-          if (lootRng.next() < (style.loot >= 3 ? 0.55 : 0.16)) {
-            const part = rollPart(lootRng.next(), lootRng.next(), s.depth);
-            if (part) items.push(part);
-          }
-          // A port or an enrichment is worth crossing the level for.
-          if (style.loot >= 3 && lootRng.next() < 0.55) {
-            // A RELICT holds a shallower layer, so its genes are the ones that
-            // lived UP THERE -- the whole point of it. Everything else is
-            // stocked from the stratum it is actually in.
-            //
-            // This is the only source of off-stratum genes in the game, and so
-            // the only way to carry a surface metabolism down. Without it a
-            // build tracks its depth and every deep run converges.
-            const from = room.kind === "relict"
-              ? 1 + lootRng.int(Math.max(s.depth - 1, 1))
-              : s.depth;
-            if (room.kind === "relict") room.from = from;
-            const genes = bio.microbesAt(from).flatMap((p) => [...p.genes]);
-            const g = genes[lootRng.int(Math.max(genes.length, 1))];
-            if (g !== undefined && !this.genome.has(g) && !this.genome.inBin(g)) {
-              // Rolled at the depth it CAME from: a surface organism buried deep
-              // did not become a deep organism, and its alleles are what the
-              // shallow column produced.
-              items.push({ kind: "cassette", gene: g, allele: rollAllele(lootRng, from) });
-            }
-          }
-          addDrop(this.drops, t.x, t.y, items);
-        }
-      }
-
-      // Initial stock. Thereafter the floor refills from ABOVE, over time --
-      // see production.ts and the restock on every later arrival below.
-      this.scatter(level, capacityAt(s.depth));
-      level.stockedAt = this.clock.turn;
-    }
-    // Descending should feel like passing through something.
-    this.fx.clear();
-    this.packets.length = 0;
-    this.clouds.length = 0;
-    this.drops.length = 0;
-    this.openDrop = null;
-    this.fx.add({ kind: "wipe", t0: this.now, dur: 460, colour: s.wall, down: true });
-    this.save();
-  }
+  enter(level: Level, arrive: Point): void { g_enter(this, level, arrive); }
 
   descend(): void { t_descend(this); }
 
@@ -757,94 +663,7 @@ class Game {
 
   enterLab(slot: number): void { g_enterLab(this, slot); }
 
-  startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void {
-    // A new strain inherits NOTHING about what the last one was doing.
-    //
-    // These are all field initialisers, which run once when the Game is
-    // constructed -- not once per run. They are also transient, so a reload
-    // does not clear them either. Die while auto-exploring, inoculate the
-    // next culture, and it walked off on its own before the player had
-    // touched anything.
-    //
-    // Reset here rather than at death: death is not the only way a run ends,
-    // and this is the one place a run BEGINS.
-    this.intro = null;                 // the lab is behind you
-    this.introStations = noStations();
-    this.exploring = false;
-    this.walk = null;
-    this.target = null;
-    this.strikeAfterTravel = null;
-    this.path = null;
-    this.offer = null;
-    this.openDrop = null;
-    // Screens too. Inoculating from the lab left the lab OPEN over the new
-    // run, and the map screen showed the old floor until it was reopened.
-    this.showMap = false;
-    this.showLab = false;
-    this.showNotes = false;
-    this.showPlasmid = false;
-    const ex = this.buttons.find((b) => b.id === "explore");
-    if (ex) ex.active = false;
-
-    this.slot = slot;
-    // The lab outlives every strain, so it is read here rather than from the
-    // slot file: dying, or deleting a save, must not cost the meta-progression.
-    this.lab = readLab();
-    this.dead = false;
-    this.deathRecord = null;
-    this.lastAttacker = null;
-    const existing = loadSlot(slot);
-    const info = listSlots()[slot];
-    this.runName = info?.name ?? NAME_POOL[slot % NAME_POOL.length] ?? "unnamed";
-
-    if (existing) {
-      this.applySave(existing);
-      this.note(`Resumed ${this.runName}.`);
-    } else {
-      this.dungeon = new Dungeon(96, 96, (Date.now() & 0xffff) + slot);
-      this.genome = new Plasmid();
-      this.run = newRun();          // a new culture has seen nothing
-
-      // Everything the lab has ordered is on the new strain from turn one.
-      // This is what the previous strain died for.
-      // The CLASS first: it decides the chromosome the lab's constructs then
-      // land on. Applying it after the stock would let a class with fewer
-      // sites push already-ordered genes off the ring.
-      this.strainClass = cls;
-      const def = CLASSES[cls];
-      this.genome.integrated = Math.max(this.lab.startSites + def.sites, 0);
-      this.genome.strain = this.lab.startStrain;
-      if (def.trait) this.genome.acquire(def.trait);
-
-      // Its opening operon, laid down as a WORKING unit -- promoter, genes,
-      // terminator -- not dropped in the bin for the player to assemble. The
-      // class is what you inoculated, so it should already be running.
-      for (const g of def.genes) {
-        this.genome.stash({ kind: "gene", id: g, level: 1, mods: [],
-                            allele: WILD_TYPE });
-      }
-      const built = this.genome.assemble([...def.genes]);
-      if (!built.ok) this.trace.push(0, "note", `class operon: ${built.err}`);
-
-      for (const g of this.lab.stock) {
-        this.genome.stash({ kind: "gene", id: g, level: 1, mods: [],
-                            allele: WILD_TYPE });
-      }
-
-      this.player.hp = this.player.maxhp;
-      this.player.atp = this.player.atpMax;
-      this.player.status.length = 0;
-      this.enter(this.dungeon.current(), this.dungeon.current().up);
-      this.note(`${def.name} ${this.runName} inoculated. ${def.blurb}`
-        + (this.lab.stock.length > 0
-          ? ` ${String(this.lab.stock.length)} synthesised construct`
-            + `${this.lab.stock.length === 1 ? "" : "s"} in the bin.`
-          : ""));
-    }
-    this.started = true;
-    this.showSplash = false;
-    this.save();
-  }
+  startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void { g_startRun(this, slot, cls); }
 
   /** The field notebook. "Recording the bugs you find along the way." */
 

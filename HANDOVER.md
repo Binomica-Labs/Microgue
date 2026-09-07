@@ -1,3 +1,40 @@
+# v1.15.0 — the overdue split
+
+Three modules had sat one to eleven lines under the 900-line ceiling for
+several versions. The next feature touching any of them would have failed the
+guard before it started. Split them with real cushions:
+
+* **main.ts 898 -> 717.** `enter` and `startRun` -- the two largest methods,
+  180 lines together and both about TRANSITIONS into a level or a run -- moved
+  to `lifecycle.ts`.
+* **turn.ts 896 -> 393.** `t_upkeep`, `t_step_`, `t_step`, `t_attack` and
+  `t_explore` moved to `actions.ts`. The seam is what the cell DOES and what a
+  turn does TO it, versus the bookkeeping around an action (stairs, pickup,
+  world-building) that stayed.
+* **render.ts 889 -> 871.** The research and notebook modals moved to
+  `modal_render.ts`. A smaller cut -- render's weight is `r_draw`'s 544-line
+  world pipeline, which is one coherent pass and resists a clean split -- but
+  enough to clear the guard.
+
+Every split produced a crop of now-unused imports in the source module, which
+is the sign the extraction took real code and not just a shim. Pruned them all.
+
+## Not split, on purpose
+
+**plasmid.ts is 868 and staying there.** Its largest method, `operons` (88
+lines), is already a memoisation cache that delegates the actual work to
+`computeOperons` and `buildOperon` in `operon.ts`. The cache logic is coupled
+to the class internals and forcing it out would make the code worse to save 32
+lines. The right move when a split would hurt is not to split. If a feature
+needs room in plasmid.ts, `transact` or `burden` come out first.
+
+A note on method: the `t_upkeep` extraction regex was greedy and pulled five
+functions instead of one. That turned out to be a BETTER split than the one
+intended -- the five are all turn-processing -- so I kept it and renamed the
+file from `upkeep.ts` to `actions.ts` to match what it holds. Worth checking
+what an extraction actually grabbed before assuming it grabbed what you asked
+for.
+
 # v1.14.0 — deep audit
 
 Went through the whole codebase rather than the latest screenshot. Findings:

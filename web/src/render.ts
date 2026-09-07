@@ -8,6 +8,7 @@ export { r_drawFx } from "./fx_render.js";
 import { eliteHalo } from "./fx_render.js";
 import { r_drawPicker, r_drawSplash } from "./picker_render.js";
 import { r_labFurniture } from "./lab_furniture.js";
+import { r_drawModals } from "./modal_render.js";
 import { r_ringReadout } from "./ring_readout.js";
 export { r_drawHud } from "./hud_render.js";
 import { r_drawOffer } from "./hud_render.js";
@@ -33,8 +34,7 @@ import { wallSilhouette } from "./wall_path.js";
 import { r_barriers } from "./barrier_render.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
-import { drawContainer, drawLab, drawNotes, drawResearch, ellipsise }
-  from "./screens.js";
+import { drawContainer, drawLab, ellipsise } from "./screens.js";
 import { drawConfirm } from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
 import { Effects, easeOutQuad }
@@ -562,25 +562,7 @@ export function r_draw(_g: Game): void {
       r_drawToasts(_g, W, H);
       return;
     }
-    if (_g.showResearch) {
-      const u = Math.max(Math.min(W, H) / 420, 1);
-      _g.closeBox = drawResearch(ctx, W, H, stage(W, _g.insets(), u), u,
-        _g.genome.slots.flatMap((p) =>
-          p?.kind === "gene" && p.id !== "ori"
-            ? [{ id: p.id, level: p.level, mods: p.mods }] : []),
-        _g.mods, _g.player.atp, _g.researchPick, _g.researchRows,
-        _g.genome.strain, _g.genome.usableSlots,
-        _g.genome.capacityKb(), _g.genome.traits);
-      _g.drawToasts(W, H);
-      return;
-    }
-    if (_g.showNotes) {
-      _g.closeBox = drawNotes(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
-        Math.max(Math.min(W, H) / 420, 1), _g.run,
-        (t, w) => _g.wrap(t, w));
-      _g.drawToasts(W, H);
-      return;
-    }
+    if (r_drawModals(_g, W, H)) return;
     if (_g.showMap) {
       _g.drawMapScreen(W, H);
     } else if (_g.showPlasmid) {
