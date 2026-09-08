@@ -3349,7 +3349,7 @@ describe("soak: all four v1.18-1.19 systems under random play", () => {
           plasmid: g.genome, level: g.level, player: g.player, drops: g.drops,
           packets: g.packets, clouds: g.clouds, barriers: g.level.barriers,
           run: g.run, floor: g.dungeon.floor, dead: g.dead,
-        } as never);
+        });
         expect(v ? `${v.name}: ${v.detail}` : null, `${cond} step ${String(i)}`)
           .toBeNull();
       }

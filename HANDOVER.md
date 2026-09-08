@@ -3,6 +3,28 @@
 The other two depth systems. All four (conditions, symbionts, biofilm,
 competence) now shipped and hardened together.
 
+## v1.19.1 — CI lint failure, fixed
+
+CI's `npm run build` failed on three ESLint errors that my local
+`verify:clean` did not catch: two async test functions with no `await`
+(logic.test.ts 8094, 8111) and an unnecessary `as never` cast
+(soak.test.ts 3348). All three were in tests added across v1.17-v1.19.
+
+Why local passed and CI failed: `eslint --fix` had silently repaired them in
+my working tree during earlier runs, but I packaged before the fixes were
+committed to the files -- so the tarball shipped source that lints clean only
+after a --fix pass. CI runs plain `eslint`, with no fix, and caught it.
+
+The lesson: `verify:clean` runs `build`, which runs `verify`, which runs plain
+`lint` -- so this SHOULD have been caught locally. It was not because an
+earlier `eslint --fix` in the same session left the working tree clean while
+the committed state was not, and I trusted a green local run over a fresh one.
+Run `npm run lint` (no --fix) as the last thing before packaging.
+
+Fixes: dropped `async` from the two tests (they use no await -- the imports are
+at file top), and removed the redundant cast (firstViolation takes a WorldView
+and the object already matches).
+
 ## Biofilm (biofilm.ts)
 
 The one mechanic that pushes BACK against descent. Express `epsA` and the

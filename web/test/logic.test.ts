@@ -8091,7 +8091,7 @@ describe("biofilm holds ground", () => {
 });
 
 describe("competence transfers living DNA", () => {
-  it("yields a neighbour-stratum gene at every depth", async () => {
+  it("yields a neighbour-stratum gene at every depth", () => {
     // The workable form of HGT: a gene from an adjacent stratum, one you could
     // not synthesise where you are. A kill-based version was tried and removed
     // -- a mob's genes are all native to its own depth, so "steal a distant
@@ -8108,7 +8108,7 @@ describe("competence transfers living DNA", () => {
     }
   });
 
-  it("comA and epsA are carried and sourced", async () => {
+  it("comA and epsA are carried and sourced", () => {
     const carried = new Set(bio.MICROBES.flatMap((m) => [...m.genes]));
     for (const g of ["comA", "epsA"] as bio.GeneId[]) {
       expect(carried.has(g), `${g} is carried by no organism`).toBe(true);
