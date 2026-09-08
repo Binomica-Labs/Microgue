@@ -3,6 +3,24 @@
 The other two depth systems. All four (conditions, symbionts, biofilm,
 competence) now shipped and hardened together.
 
+## v1.19.2 — the horizontal seam was the wall lip, not the surround
+
+The green full-width line survived v1.16.2 because that fix was the wrong
+target. The surround was already correct (#010303). The seam was the LIT WALL
+LIP: `stroke(wallPath)` strokes the whole wall silhouette, and the silhouette
+includes the outer RECTANGLE that `traceContour(..., outer: true)` adds along
+the grid edge. Measured: a 98-tile horizontal run in the stroked path.
+
+The fill NEEDS that rectangle (rock with cave-holes); the stroke must not have
+it. `wallEdge` is a sibling of `wallSilhouette` that traces the cave loops
+ALONE (`outer: false`), and the lip strokes that. The stroked path's longest
+horizontal run went 98 tiles to 0. `spec` pins it: the edge path has no run
+over 20 tiles, so the map boundary can never be in it again.
+
+render.ts crossed the 900 ceiling from the added edge draw, so the whole wall
+pass -- silhouette, gradient, lip, texture -- moved to wall_render.ts. render.ts
+802, real headroom.
+
 ## v1.19.1 — CI lint failure, fixed
 
 CI's `npm run build` failed on three ESLint errors that my local

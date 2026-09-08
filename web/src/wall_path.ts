@@ -206,9 +206,37 @@ export function wallSilhouette(
   return path;
 }
 
+interface EdgeCached { path: Path2D; floor: number; seed: number }
+let edgeCache: EdgeCached | null = null;
+
+/**
+ * The cave loops ALONE, for stroking the wall/floor boundary.
+ *
+ * Same geometry as `wallSilhouette` but WITHOUT the outer rectangle. The
+ * rectangle runs along the grid edge, and stroking it drew a bright full-width
+ * line at the top of the map -- a green horizontal seam that had nothing to do
+ * with any wall. The fill needs the rectangle (rock with cave-holes); the lit
+ * lip must not have it.
+ */
+export function wallEdge(
+  solid: Solid, w: number, h: number,
+  floor: number, seed: number, spread: number, grow: number,
+  make: () => Path2D | null,
+): Path2D | null {
+  if (edgeCache?.floor === floor && edgeCache.seed === seed) {
+    return edgeCache.path;
+  }
+  const path = make();
+  if (!path) return null;
+  traceContour(path, solid, 0, 0, w - 1, h - 1, seed, spread, grow, false);
+  edgeCache = { path, floor, seed };
+  return path;
+}
+
 /** Forget the cached silhouette. For tests, and for a floor regenerated in
  *  place. */
 export function forgetSilhouette(): void {
   cache = null;
+  edgeCache = null;
 }
 

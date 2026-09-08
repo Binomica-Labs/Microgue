@@ -8117,3 +8117,36 @@ describe("competence transfers living DNA", () => {
     }
   });
 });
+
+describe("the lit wall lip does not draw the map edge", () => {
+  it("the stroked edge path has no full-width horizontal run", async () => {
+    // The wall FILL needs an outer rectangle (rock with cave-holes), but that
+    // rectangle runs along the grid edge -- and stroking it drew a bright
+    // full-width line at the top of the map, a green horizontal seam with
+    // nothing to do with any wall. The lit lip strokes the cave loops ALONE.
+    const { wallEdge, forgetSilhouette } = await import("../src/wall_path.js");
+    const d = new Dungeon(96, 96, 5);
+    const g = d.level(1).grid;
+    const solid = (x: number, y: number): boolean =>
+      x < 0 || y < 0 || x >= g.w || y >= g.h || g.isWall(x, y);
+    let maxRun = 0;
+    let px = 0, py = 0;
+    const path = {
+      moveTo: (x: number, y: number) => { px = x; py = y; },
+      lineTo: (x: number, y: number) => {
+        if (Math.abs(y - py) < 0.01) maxRun = Math.max(maxRun, Math.abs(x - px));
+        px = x; py = y;
+      },
+      quadraticCurveTo: (_cx: number, _cy: number, x: number, y: number) => {
+        px = x; py = y;
+      },
+      closePath: () => undefined,
+    };
+    forgetSilhouette();
+    wallEdge(solid, g.w, g.h, 1, 99, 0.1, 0.2, () => path as unknown as Path2D);
+    // A grid is 96 wide; the map edge would be a ~96-tile run. Anything short
+    // is an ordinary wall.
+    expect(maxRun, `a ${maxRun.toFixed(0)}-tile horizontal run -- the map edge `
+      + "is in the stroked path").toBeLessThan(20);
+  });
+});

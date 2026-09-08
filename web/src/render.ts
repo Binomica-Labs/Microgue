@@ -10,6 +10,7 @@ import { r_drawPicker } from "./picker_render.js";
 import { r_drawMenu } from "./menu_frame.js";
 import { r_labFurniture } from "./lab_furniture.js";
 import { r_drawModals } from "./modal_render.js";
+import { r_drawWalls } from "./wall_render.js";
 import { r_ringReadout } from "./ring_readout.js";
 export { r_drawHud } from "./hud_render.js";
 import { r_drawOffer } from "./hud_render.js";
@@ -24,14 +25,12 @@ import { drawClose, stage } from "./chrome.js";
 import { isSeen, isVisible } from "./fov.js";
 import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
-import { drawBody, paletteForPigment, playerSprite, sprite, wallPattern }
+import { drawBody, paletteForPigment, playerSprite, sprite }
   from "./paint.js";
-import { RESEARCHER_PALETTE, wallPatternSize } from "./paint.js";
+import { RESEARCHER_PALETTE } from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
 import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
-import { WALL_SPREAD } from "./walls.js";
-import { wallSilhouette } from "./wall_path.js";
 import { r_barriers } from "./barrier_render.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
@@ -112,95 +111,8 @@ export function r_draw(_g: Game): void {
     // Measured on the same region, mean tangent swing went 77 degrees to 8.
     //
     // Whole-floor and cached: it changes only when a barrier dissolves.
-    const grid = _g.level.grid;
-    const solidAt = (gx: number, gy: number): boolean =>
-      gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h || grid.isWall(gx, gy);
-    const wallPath = wallSilhouette(
-      solidAt, grid.w, grid.h, _g.level.floor,
-      _g.dungeon.seed ^ (_g.level.floor * 9176),
-      // The lab is a ROOM. The organic bulge and the per-vertex jitter exist
-      // to stop caves looking cut from a stencil, and applied to right angles
-      // they rounded a 26x22 room into a lozenge -- which is why it read as a
-      // blob rather than a lab.
-      hc || inLab ? 0 : WALL_SPREAD[s.hatch] * 0.14,
-      hc || inLab ? 0 : 0.20, hc,
-      () => {
-        try { return new Path2D(); } catch { return null; }
-      }) ?? new Path2D();
     const sight = _g.level.sight;
-
-    ctx.fillStyle = hc ? "#ffffff" : s.wall;
-    ctx.save();
-    ctx.scale(px, px);
-    ctx.fill(wallPath);
-    ctx.restore();
-
-    // Depth, so the wall is a MASS rather than a shape.
-    //
-    // One flat fill reads as a cut-out however good the outline is: nothing
-    // says which side is solid. A rim lit from above and a darker interior is
-    // the cheapest thing that does -- one clipped gradient, no per-tile work,
-    // and it survives any zoom because it is drawn in screen space.
-    if (!hc) {
-      ctx.save();
-      ctx.scale(px, px);
-      ctx.clip(wallPath);
-      ctx.scale(1 / px, 1 / px);
-
-      // Sediment settles in layers, so the shading runs horizontally: light
-      // catches the upper face of every bank.
-      const top = y0 * px, bot = (y1 + 1) * px;
-      const g2 = ctx.createLinearGradient(0, top, 0, bot);
-      g2.addColorStop(0, "rgba(255,255,255,0.10)");
-      g2.addColorStop(0.35, "rgba(255,255,255,0.02)");
-      g2.addColorStop(1, "rgba(0,0,0,0.22)");
-      ctx.fillStyle = g2;
-      ctx.fillRect((x0 - 1) * px, top, (x1 - x0 + 3) * px, bot - top);
-      ctx.restore();
-
-      // And a lip along the boundary itself: the edge where wall meets floor
-      // is where a real bank catches the most light.
-      ctx.save();
-      ctx.scale(px, px);
-      ctx.strokeStyle = "rgba(255,255,255,0.13)";
-      ctx.lineWidth = Math.max(2 / px, 0.02);
-      ctx.stroke(wallPath);
-      ctx.restore();
-    }
-
-    // ONE fill for the whole wall area. Drawing the motif per tile cost about
-    // five thousand canvas operations a frame -- an arc and a fill per mark,
-    // per wall tile -- which is the entire budget on a phone. It is rasterised
-    // once per stratum and tile size now; see wallPattern.
-    if (!hc) {
-      // No motif on a lab wall. The eight stratum textures are sediment --
-      // grains, laminae, framboids -- and painting them on plaster is what
-      // made the room look like a cave someone had whitewashed.
-      const pat = inLab ? null
-        : wallPattern(ctx, s.depth, px, s.floor, s.wall, s.accent);
-      if (pat) {
-        // The pattern is rasterised at a ROUNDED tile size, because rebuilding
-        // it on every frame of a pinch would cost more than it saves. The
-        // walls are drawn at the true fractional size. Filling one with the
-        // other lets the texture slide against the tile grid -- 8px of drift
-        // over twenty tiles at minimum zoom, which is the texture visibly
-        // coming unstuck from the wall it belongs to.
-        //
-        // Scaling by px/q maps the pattern's q-pixel cells onto real tiles, so
-        // it stays locked to the grid at any zoom, and lands on a tile
-        // boundary every PATTERN_TILES.
-        const k = px / wallPatternSize(px);
-        ctx.save();
-        ctx.scale(px, px);
-        ctx.clip(wallPath);
-        ctx.scale(k / px, k / px);
-        ctx.fillStyle = pat;
-        ctx.fillRect((x0 - 1) * px / k, (y0 - 1) * px / k,
-                     (x1 - x0 + 3) * px / k, (y1 - y0 + 3) * px / k);
-        ctx.restore();
-      }
-    }
-
+    r_drawWalls(_g, ctx, s, px, x0, y0, x1, y1, hc, inLab);
     if (_g.path) {
       // Trim the stretch already walked, so the trail shows where you are
       // going rather than where you have been.
@@ -596,7 +508,6 @@ export function r_draw(_g: Game): void {
     }
   }
 
-
 export function r_drawScreenFx(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
     for (const f of _g.fx.all()) {
@@ -670,7 +581,6 @@ export function r_drawEmergency(_g: Game, msg: string): void {
     } catch { /* nothing left to try */ }
   }
 
-
 export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
@@ -708,7 +618,6 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
   };
   ctx.fillStyle = "#8fa89a";
   ctx.font = `${11 * u}px ui-monospace,monospace`;
-
 
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
@@ -830,7 +739,6 @@ export function r_drawMapScreen(_g: Game, W: number, H: number): void {
 
     _g.closeBox = drawClose(ctx, W, ins, u);
   }
-
 
 /**
  * The world at the moment of lysis.
