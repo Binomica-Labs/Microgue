@@ -3,6 +3,33 @@
 The other two depth systems. All four (conditions, symbionts, biofilm,
 competence) now shipped and hardened together.
 
+## v1.19.3 — the green line: the world was not clipped to the fog window
+
+THIRD attempt, and this one is proven by mechanism, not by eye. The two prior
+fixes (v1.16.2 surround, v1.19.2 wall lip) were both real bugs but NOT this
+line.
+
+The green line is D1's wall colour (#6ec78d). The wall silhouette fills the
+WHOLE grid -- rock with cave-holes -- but the fog loop only paints y0..y1, the
+on-screen tile window. Where the map edge is on screen, a band of rock ABOVE y0
+got the green wall fill and no fog over it, showing as a hard horizontal line
+where fog coverage began. The surround (correct since v1.16.2) was underneath
+but the wall fill painted over it there.
+
+Fix: clip the world block to the tile window `rect(x0*px, y0*px, ...)` before
+drawing walls, so nothing world-space paints outside what the fog covers -- the
+surround shows there instead. Screen space, survives any zoom. One `save`/`clip`
+and a matching `restore`.
+
+Why it took three tries: EVERY test in this repo records canvas CALLS, and the
+test stub gives offscreen canvases (the minimap terrain rasteriser, the wall
+pattern tile) the SAME traced context -- so their fills pollute the main trace
+with offscreen coordinates. A "#6ec78d full-canvas fill" in the trace was one of
+those offscreen tiles, not a real screen draw, which sent the first two
+investigations chasing the wrong thing. The lesson: when reasoning from the
+trace, offscreen canvas draws are IN it and must be filtered out. `spec` asserts
+the world clip exists and bounds the window; removing it is three failures.
+
 ## v1.19.2 — the horizontal seam was the wall lip, not the surround
 
 The green full-width line survived v1.16.2 because that fix was the wrong

@@ -904,3 +904,48 @@ describe("the world has no visible edge", () => {
       .toBe("#050706");
   });
 });
+
+describe("the world is clipped to the fogged window", () => {
+  it("nothing world-space draws outside the tile window the fog covers", async () => {
+    // The wall silhouette is the WHOLE grid (rock with cave-holes), but the fog
+    // loop only paints y0..y1 -- so where the map edge was on screen, a band of
+    // unfogged green wall showed above y0 as a hard horizontal line (the
+    // reported green seam). A clip to the fog window means the surround shows
+    // there instead. This asserts the clip is present and bounds the window.
+    let clipRect: { x: number; y: number; w: number; h: number } | null = null;
+    let px = 0, py = 0, pw = 0, ph = 0;
+    let sx = 1, sy = 1, tx = 0, ty = 0;
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (p === "canvas") return { width: 393, height: 852 };
+        if (["fillStyle","strokeStyle","font","textAlign","textBaseline","lineWidth","lineCap","lineJoin","globalAlpha","filter","imageSmoothingEnabled"].includes(p)) return "";
+        if (p === "createLinearGradient" || p === "createRadialGradient" || p === "createPattern")
+          return () => ({ addColorStop: () => undefined });
+        if (p === "getImageData") return () => ({ data: new Uint8ClampedArray(4) });
+        if (p === "measureText") return () => ({ width: 10 });
+        return (...a: unknown[]) => {
+          if (p === "scale") { sx *= a[0] as number; sy *= a[1] as number; }
+          if (p === "translate") { tx += (a[0] as number) * sx; ty += (a[1] as number) * sy; }
+          if (p === "rect") { px = a[0] as number; py = a[1] as number; pw = a[2] as number; ph = a[3] as number; }
+          if (p === "clip") {
+            // record the first world clip: a rect covering many tiles
+            if (pw * sx > 100 && !clipRect) {
+              clipRect = { x: px * sx + tx, y: py * sy + ty, w: pw * sx, h: ph * sy };
+            }
+          }
+          return undefined;
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    const { Game } = await import("../src/main.js");
+    const g = new Game({ width: 393, height: 852, style: {} as CSSStyleDeclaration,
+      getContext: () => ctx, addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left:0, top:0, width:393, height:852 }) } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    for (let i = 0; i < 5; i++) g.press("wait");
+    g.frame(200);
+    expect(clipRect, "the world is not clipped -- green wall can show above y0")
+      .not.toBeNull();
+  });
+});

@@ -98,6 +98,17 @@ export function r_draw(_g: Game): void {
     const y0 = Math.max(Math.floor((_g.player.ay - H / px / 2) - 1), 0);
     const y1 = Math.min(Math.ceil((_g.player.ay + H / px / 2) + 1), _g.level.grid.h - 1);
 
+    // Clip the world to the tile window the fog actually covers. The wall
+    // silhouette is the WHOLE grid (rock with cave-holes), but the fog loop
+    // only paints y0..y1 / x0..x1 -- so where the map edge is on screen, a band
+    // of unfogged green wall showed above y0 as a hard horizontal line. Clipping
+    // means the surround (already drawn) shows there instead. Screen space, so
+    // it survives any zoom.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0 * px, y0 * px, (x1 - x0 + 1) * px, (y1 - y0 + 1) * px);
+    ctx.clip();
+
     // Walls as one traced contour, not a grid of squares. Corners round where
     // they are exposed and fillet where three tiles meet, so the region reads
     // as organic rather than tiled. All tiles go into a single path and fill
@@ -425,6 +436,7 @@ export function r_draw(_g: Game): void {
       }
     }
     _g.drawFx(px);
+    ctx.restore();                       // world clip
     ctx.restore();
 
     _g.drawScreenFx(W, H);
