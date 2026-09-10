@@ -14,6 +14,7 @@ import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box } from "./chrome.js";
 import { i_menuTap } from "./menu_input.js";
+import { advance } from "./aftermath.js";
 import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
@@ -268,21 +269,46 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
     _g.shopFrom = null;
     _g.shopAnchor = _g.shopScroll;
     if (wasDrag) return;                    // a scroll is not an order
-    // A pending order is modal over the shop: nothing else on the screen
-    // responds until it is answered.
+    // A pending order is modal over the store: nothing else responds until
+    // it is answered.
     const cb = _g.confirmBoxes;
     if (_g.pendingOrder && cb) {
       if (inBoxOf(cb.yes, x, y)) _g.order(_g.pendingOrder);
       else if (inBoxOf(cb.no, x, y)) _g.pendingOrder = null;
       return;
     }
-    const hit = _g.shopRows.find((r) => inBoxOf(r.box, x, y));
-    if (hit) { _g.askOrder(hit.offer); return; }
-    if (_g.inClose(x, y)) {
+    const ab = _g.aftermathBoxes;
+    if (!ab) return;
+    const st = _g.aftermath.stage;
+
+    // Store rows order, only on the store screen.
+    if (st === "store") {
+      const hit = ab.rows.find((r) => inBoxOf(r.box, x, y));
+      if (hit) { _g.askOrder(hit.offer); return; }
+    }
+
+    // The one forward action on every screen.
+    if (inBoxOf(ab.action, x, y)) {
+      if (st === "ready") {
+        // Send it down: leave the flow and go back to the menu, where New
+        // Game inoculates the strain with everything ordered aboard.
+        _g.showLab = false;
+        _g.shopScroll = 0;
+        _g.shopAnchor = 0;
+        _g.dead = false; _g.showSplash = true; _g.started = false;
+      } else {
+        advance(_g.aftermath);
+        _g.shopScroll = 0;
+        _g.shopAnchor = 0;
+      }
+      return;
+    }
+
+    // Close, on the report: back to the menu without visiting the store. The
+    // credit is banked either way.
+    if (st === "report" && ab.close && inBoxOf(ab.close, x, y)) {
       _g.showLab = false;
-      _g.shopScroll = 0;
-      _g.shopAnchor = 0;
-      if (_g.dead) { _g.dead = false; _g.showSplash = true; _g.started = false; }
+      _g.dead = false; _g.showSplash = true; _g.started = false;
     }
     return;
   }

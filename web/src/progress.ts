@@ -69,6 +69,11 @@ export function t_die(_g: Game): void {
   _g.dead = true;
   _g.deathAt = _g.now;
   _g.deathRecord = rec;
+  // The flow starts at the report. It is three screens now -- what happened,
+  // the store, the next strain -- rather than one screen doing all three.
+  _g.aftermath.stage = "report";
+  _g.shopScroll = 0;
+  _g.shopAnchor = 0;
   deleteSlot(_g.slot);
 
   _g.toasts.push(`The strain is lost. +${String(credit)} synthesis credit.`,

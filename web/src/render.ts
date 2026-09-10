@@ -9,6 +9,7 @@ import { eliteHalo } from "./fx_render.js";
 import { r_drawPicker } from "./picker_render.js";
 import { r_drawMenu } from "./menu_frame.js";
 import { r_labFurniture } from "./lab_furniture.js";
+import { drawAftermath } from "./aftermath_render.js";
 import { r_drawModals } from "./modal_render.js";
 import { r_drawWalls } from "./wall_render.js";
 import { r_ringReadout } from "./ring_readout.js";
@@ -34,7 +35,7 @@ import { squashFor, travel, wake } from "./motion.js";
 import { r_barriers } from "./barrier_render.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
-import { drawContainer, drawLab, ellipsise } from "./screens.js";
+import { drawContainer, ellipsise } from "./screens.js";
 import { drawConfirm } from "./screens.js";
 import { phaseAt, shards, type Phase } from "./lysis.js";
 import { Effects, easeOutQuad }
@@ -492,14 +493,18 @@ export function r_draw(_g: Game): void {
         }
       }
       const u = Math.max(Math.min(W, H) / 420, 1);
-      // Reserve room for however many toasts are up, so the obituary is never
-      // hidden behind the very message announcing it.
-      const band = _g.toasts.count() * 30 + (_g.toasts.count() > 0 ? 10 : 0);
-      const lab = drawLab(ctx, W, H, stage(W, _g.insets(), u), u, _g.lab, _g.deathRecord,
-                          _g.known(), _g.shopRows, (s, max) => _g.wrap(s, max),
-                          band, _g.shopScroll);
-      _g.closeBox = lab.close;
-      _g.shopMaxScroll = lab.maxScroll;
+      // Three screens, one at a time: report, store, ready. Each names itself
+      // and has one action. See aftermath.ts.
+      const ab = drawAftermath(ctx, W, H, stage(W, _g.insets(), u), u,
+                               _g.aftermath.stage, _g.lab, _g.deathRecord,
+                               _g.known(), (s, max) => _g.wrap(s, max),
+                               _g.shopScroll);
+      _g.aftermathBoxes = ab;
+      // The close box only exists on the report screen; elsewhere the
+      // action button is the only way forward.
+      _g.closeBox = ab.close ?? { x: -1, y: -1, w: 0, h: 0 };
+      _g.shopRows = ab.rows;
+      _g.shopMaxScroll = ab.maxScroll;
       ctx.globalAlpha = 1;
       // Modal over the shop, drawn last so nothing overlaps it.
       _g.confirmBoxes = _g.pendingOrder

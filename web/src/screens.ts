@@ -13,8 +13,7 @@ import { GENES, type GeneId } from "./biology.js";
 import { TRAITS, TRAIT_IDS, expansionCost, type TraitId }
   from "./chromosome.js";
 import { describeLevel } from "./strain.js";
-import { describeLab, offers, type Lab, type Offer, type RunRecord }
-  from "./lab.js";
+import { describeLab, type Lab, type Offer } from "./lab.js";
 import { SUBSTRATES, itemColour, itemName, itemNote, type Drop }
   from "./items.js";
 import { BUILD, VERSION } from "./version.js";
@@ -506,149 +505,8 @@ export function ellipsise(ctx: CanvasRenderingContext2D, text: string, max: numb
   return `${text.slice(0, lo).trimEnd()}\u2026`;
 }
 
-/**
- * The morgue and the order form, on one screen.
- *
- * Shown when a strain dies. It has to do two jobs at once: give the run an
- * ending you can read, and immediately show what that run bought -- because
- * the moment after a death is exactly when "what do I get for that" is the
- * only question the player has.
- */
-export function drawLab(
-  ctx: CanvasRenderingContext2D, W: number, H: number,
-  ins: Insets, u: number,
-  lab: Lab, last: RunRecord | null, seen: readonly GeneId[],
-  rows: ShopRow[], wrap: Wrap, toastBand = 0,
-  // Named `scrollTop`, not `scroll`: a bare `scroll` shadows the global
-  // function of that name and resolves to it instead.
-  scrollTop = 0,
-): { close: Box; maxScroll: number } {
-  ctx.fillStyle = "rgba(4,7,6,0.98)";
-  ctx.fillRect(0, 0, W, H);
-  rows.length = 0;
-
-  // Toasts overlay from the top inset down, and the obituary is the one thing
-  // on this screen that must be readable. Start below them.
-  const below: Insets = { ...ins, top: ins.top + toastBand * u };
-  let y = drawHeader(ctx, below, u,
-    last === null ? "THE LAB" : last.won ? "THE COLUMN IS YOURS" : "STRAIN LOST",
-    describeLab(lab), W);
-
-  const left = ins.left + 14 * u;
-  const wide = W - ins.left - ins.right - 28 * u;
-
-  // The obituary.
-  if (last !== null) {
-    ctx.fillStyle = last.won ? "#7fe0a4" : "#e0a37a";
-    ctx.font = `${11 * u}px ui-monospace,monospace`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    for (const line of wrap(
-      `Strain ${String(last.n)} reached F${String(last.floor)}, the `
-      + `${last.stratum}, in ${String(last.turns)} turns. `
-      + `${String(last.catalogued)} organisms recorded. `
-      + (last.won ? "It got to the bottom." : `Killed by ${last.killedBy}.`),
-      wide)) {
-      ctx.fillText(line, left, y);
-      y += 15 * u;
-    }
-    ctx.fillStyle = "#cfe04a";
-    ctx.fillText(`+${String(last.credit)} synthesis credit`, left, y + 4 * u);
-    y += 22 * u;
-
-    // What actually happened at the end. "Killed by an affliction" is a report
-    // you cannot act on; the last few events are.
-    if (last.epitaph.length > 0) {
-      ctx.fillStyle = "#6f8f7c";
-      ctx.font = `${8.5 * u}px ui-monospace,monospace`;
-      for (const line of last.epitaph.slice(-4)) {
-        ctx.fillText(ellipsise(ctx, line, wide), left, y);
-        y += 11 * u;
-      }
-      y += 8 * u;
-    }
-  }
-
-  // The order form.
-  ctx.fillStyle = "#8fa89a";
-  ctx.font = `${10 * u}px ui-monospace,monospace`;
-  ctx.fillText("order constructs for the next strain:", left, y);
-  y += 16 * u;
-
-  const rowH = 34 * u;
-  const floor = H - ins.bottom - 52 * u;
-
-  // Scrolled, not truncated. With 69 genes the form runs to 72 rows and only
-  // about 15 fit -- so most of what a run earned credit for was unreachable.
-  const list = offers(lab, seen);
-  const listTop = y;
-  const visible = Math.max(Math.floor((floor - listTop) / rowH), 1);
-  const maxScroll = Math.max(list.length - visible, 0);
-  // Finiteness first: Math.round(NaN) is NaN and survives min/max, which
-  // would slice(NaN, NaN) and render an empty form.
-  const want = Number.isFinite(scrollTop) ? Math.round(scrollTop) : 0;
-  const from = Math.min(Math.max(want, 0), maxScroll);
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, listTop - 4 * u, W, floor - listTop + 4 * u);
-  ctx.clip();
-  y -= 0;
-  for (const offer of list.slice(from, from + visible + 1)) {
-    if (y + rowH > floor + rowH) break;
-    const box: Box = { x: left, y, w: wide, h: rowH - 5 * u };
-    const afford = !offer.owned && lab.credit >= offer.price;
-    rows.push({ box, offer });
-
-    ctx.fillStyle = offer.owned ? "rgba(90,200,140,0.16)" : "rgba(16,22,18,0.9)";
-    ctx.strokeStyle = offer.owned ? "#5ec98a"
-      : afford ? "rgba(207,224,74,0.65)" : "rgba(255,255,255,0.13)";
-    ctx.lineWidth = Math.max(1.2 * u, 1);
-    ctx.beginPath();
-    ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = offer.owned ? "#7fe0a4" : afford ? "#ffffff" : "#7f8f87";
-    ctx.font = `${11 * u}px ui-monospace,monospace`;
-    ctx.fillText(offer.name, box.x + 9 * u, box.y + 14 * u);
-    ctx.fillStyle = "#8fa89a";
-    ctx.font = `${8.5 * u}px ui-monospace,monospace`;
-    // Measured, not counted. A fixed character cut ended "from turn one" as
-    // "from tu" -- a truncation that looks like a bug rather than an ellipsis.
-    ctx.fillText(ellipsise(ctx, offer.note, box.w - 70 * u),
-                 box.x + 9 * u, box.y + 25 * u);
-
-    ctx.textAlign = "right";
-    ctx.fillStyle = offer.owned ? "#5ec98a" : afford ? "#cfe04a" : "#6f8f7c";
-    ctx.font = `${10 * u}px ui-monospace,monospace`;
-    ctx.fillText(offer.owned ? "ordered" : String(offer.price),
-                 box.x + box.w - 9 * u, box.y + 19 * u);
-    y += rowH;
-  }
-
-  ctx.restore();
-
-  // A scrollbar, so it is obvious there is more.
-  if (maxScroll > 0) {
-    const trackH = floor - listTop;
-    const knobH = Math.max(trackH * (visible / list.length), 18 * u);
-    const t = maxScroll === 0 ? 0 : from / maxScroll;
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    ctx.fillRect(W - ins.right - 6 * u, listTop, 3 * u, trackH);
-    ctx.fillStyle = "rgba(207,224,74,0.65)";
-    ctx.fillRect(W - ins.right - 6 * u, listTop + (trackH - knobH) * t, 3 * u, knobH);
-  }
-
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#6f8f7c";
-  ctx.font = `${9.5 * u}px ui-monospace,monospace`;
-  ctx.fillText(maxScroll > 0
-    ? `drag to see all ${String(list.length)} · close to send the next strain down`
-    : "close to send the next strain down", W / 2, H - ins.bottom - 18 * u);
-  return { close: drawClose(ctx, W, ins, u), maxScroll };
-}
+// drawLab lived here. It drew the obituary and the store on ONE screen, and
+// neither got room. Replaced by the three-screen flow in aftermath_render.ts.
 
 /**
  * Confirm an order.

@@ -615,6 +615,7 @@ describe("the order form is reachable", () => {
     g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
     g.lab.credit = 99999;
     g.showLab = true;
+    g.aftermath.stage = "store";
     g.frame(16);
     expect(g.shopMaxScroll, "the form does not scroll at all")
       .toBeGreaterThan(0);
@@ -633,6 +634,7 @@ describe("the order form is reachable", () => {
     const g = await game();
     g.startRun(0);
     g.showLab = true;
+    g.aftermath.stage = "store";
     g.frame(16);
     for (const s of [-50, 1e6, NaN]) {
       g.shopScroll = s;
@@ -648,6 +650,7 @@ describe("the order form is reachable", () => {
     g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
     g.lab.credit = 99999;
     g.showLab = true;
+    g.aftermath.stage = "store";
     g.frame(16);
     const before = g.lab.stock.length;
     const row = g.shopRows[0];
@@ -666,6 +669,7 @@ describe("the order form is reachable", () => {
     g.run.bestiary.push(...bio.MICROBES.map((m) => m.id));
     g.lab.credit = 99999;
     g.showLab = true;
+    g.aftermath.stage = "store";
     g.frame(16);
     const row = g.shopRows.find((r) => r.offer.id.kind === "gene");
     expect(row).toBeDefined();
@@ -1722,6 +1726,8 @@ describe("state that should persist, does", () => {
     offerBoxes: "hit boxes, per frame", miniBox: "layout, per frame",
     pendingOrder: "an unanswered prompt", confirmBoxes: "hit boxes, per frame",
     menu: "front-of-game menu state, before a run",
+    aftermath: "the report/store/ready flow after a strain is lost",
+    aftermathBoxes: "hit boxes, per frame",
     menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
     biofilm: "territory on the current floor; cleared on descent",
@@ -2494,6 +2500,7 @@ describe("nothing about the last run survives into the next", () => {
     g.path = [{ x: 1, y: 1 }];
     g.showMap = true;
     g.showLab = true;
+    g.aftermath.stage = "store";
     g.showNotes = true;
     g.startRun(1);
 
@@ -3352,6 +3359,99 @@ describe("soak: all four v1.18-1.19 systems under random play", () => {
         });
         expect(v ? `${v.name}: ${v.detail}` : null, `${cond} step ${String(i)}`)
           .toBeNull();
+      }
+    }
+  });
+});
+
+describe("the aftermath is three screens, not one", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const die = async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "phototroph");
+    g.lab.credit = 500;
+    g.player.hp = 0;
+    g.die();
+    // past the lysis animation
+    g.frame(g.deathAt + 5000);
+    return g;
+  };
+
+  const tapAction = (g: Awaited<ReturnType<typeof die>>): void => {
+    const a = g.aftermathBoxes?.action;
+    if (!a) throw new Error("no action button");
+    g.pointerDown(a.x + a.w / 2, a.y + a.h / 2);
+    g.pointerUp(a.x + a.w / 2, a.y + a.h / 2);
+    g.frame(g.now + 20);
+  };
+
+  it("death lands on the report, and each action moves one screen forward", async () => {
+    // One screen used to do all three jobs. Now: report -> store -> ready ->
+    // menu, each named, each with one action.
+    const g = await die();
+    expect(g.aftermath.stage, "death did not open the report").toBe("report");
+    expect(g.aftermathBoxes?.rows.length, "the report showed the store")
+      .toBe(0);
+
+    tapAction(g);
+    expect(g.aftermath.stage, "continue did not reach the store").toBe("store");
+    expect((g.aftermathBoxes?.rows.length ?? 0) > 0, "the store has no rows")
+      .toBe(true);
+
+    tapAction(g);
+    expect(g.aftermath.stage, "done did not reach ready").toBe("ready");
+
+    tapAction(g);
+    expect(g.showSplash, "send-it-down did not return to the menu").toBe(true);
+    expect(g.dead, "the run stayed dead after leaving the flow").toBe(false);
+  });
+
+  it("ordering works only on the store screen", async () => {
+    const g = await die();
+    // on the report: a tap where a row WOULD be does nothing
+    const before = g.lab.credit;
+    g.pointerDown(60, 350);
+    g.pointerUp(60, 350);
+    expect(g.pendingOrder, "the report accepted an order").toBeNull();
+    expect(g.lab.credit).toBe(before);
+
+    tapAction(g);                              // -> store
+    const row = g.aftermathBoxes?.rows.find((r) => !r.offer.owned && r.offer.price <= 500);
+    expect(row, "no affordable row on the store").toBeDefined();
+    if (!row) return;
+    g.pointerDown(row.box.x + 10, row.box.y + 10);
+    g.pointerUp(row.box.x + 10, row.box.y + 10);
+    expect(g.pendingOrder?.name, "tapping a store row did not ask to order")
+      .toBe(row.offer.name);
+  });
+
+  it("closing the report skips the store; credit is banked either way", async () => {
+    const g = await die();
+    const credit = g.lab.credit;
+    const c = g.aftermathBoxes?.close;
+    expect(c, "the report has no close").toBeDefined();
+    if (!c) return;
+    g.pointerDown(c.x + 4, c.y + 4);
+    g.pointerUp(c.x + 4, c.y + 4);
+    expect(g.showSplash, "close did not return to the menu").toBe(true);
+    expect(g.lab.credit, "closing early lost the credit").toBe(credit);
+  });
+
+  it("every stage names itself and says what its action does", async () => {
+    const { stageCopy } = await import("../src/aftermath.js");
+    for (const st of ["report", "store", "ready"] as const) {
+      for (const won of [false, true]) {
+        const c = stageCopy(st, won);
+        expect(c.title.length, `${st} has no title`).toBeGreaterThan(3);
+        expect(c.sub.length, `${st} has no explanation`).toBeGreaterThan(15);
+        expect(c.action.length, `${st} has no action label`).toBeGreaterThan(3);
       }
     }
   });

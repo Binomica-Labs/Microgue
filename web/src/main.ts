@@ -9,6 +9,8 @@ import { newMenu, type MenuState } from "./menu.js";
 import type { MenuBoxes } from "./menu_render.js";
 import { noStations, type StationId } from "./lab_level.js";
 import { newBiofilm, type Biofilm } from "./biofilm.js";
+import { newAftermath, type Aftermath } from "./aftermath.js";
+import type { AftermathBoxes } from "./aftermath_render.js";
 import { g_openPlasmid } from "./plasmid_open.js";
 import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
@@ -188,6 +190,9 @@ class Game {
   /** Clock time the strain lysed, for the death sequence. */
   deathAt = 0;
   showLab = false;
+  /** The after-a-strain flow: report -> store -> ready. See aftermath.ts. */
+  aftermath: Aftermath = newAftermath();
+  aftermathBoxes: AftermathBoxes | null = null;
   shopRows: ShopRow[] = [];
   /** An order awaiting confirmation. Credit takes runs to earn and a misfired
    *  tap on a scrolling list cannot be undone. */

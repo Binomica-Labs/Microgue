@@ -1,3 +1,32 @@
+# v1.20.0 — the aftermath is three screens
+
+One screen used to do two jobs: mourn the strain and sell you the next one. The
+obituary was crushed above a shop, the shop had no heading, and the only hint
+of what to do was one grey line at the bottom. Nothing said what you were
+looking at.
+
+It is a flow now, `aftermath.ts`, three screens each doing one thing:
+
+* **report** -- STRAIN LOST (or THE COLUMN IS YOURS). What happened, how far,
+  what killed it, the credit as a headline number, the final moments labelled
+  as a log. One button: "continue". A close returns to the menu without
+  visiting the store; credit is banked either way.
+* **store** -- SYNTHESIS STORE. "Spend credit on constructs. They are on the
+  next strain from turn one." The credit balance is fixed under the heading so
+  it never scrolls away; rows say "ordered" or "N cr". One button: "done
+  ordering".
+* **ready** -- NEXT STRAIN READY. Lists what is aboard. One button: "send it
+  down".
+
+Every screen names itself, explains itself in one line, and its one action
+says what it does. `stageCopy` holds all the text in one place. The old
+combined `drawLab` is deleted -- not left to linger the way genome.ts did.
+
+`spec` walks the whole flow (death -> report -> store -> ready -> menu),
+confirms ordering works ONLY on the store, that closing the report skips the
+store without losing credit, and that every stage has a title, an explanation
+and an action label.
+
 # v1.19.0 — biofilm and competence (the four are complete)
 
 The other two depth systems. All four (conditions, symbionts, biofilm,
