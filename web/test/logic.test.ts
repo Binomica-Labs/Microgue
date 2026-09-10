@@ -2148,7 +2148,7 @@ describe("motility behaviours", () => {
   const noOne = () => false;
   const sensed = (px: number, py: number, at: { x: number; y: number }, allies = 0) =>
     ({ px, py, dist: chebyshev(at.x, at.y, px, py), alliesNear: allies,
-       hpFrac: 1, threat: 0.5 });
+       hpFrac: 1, threat: 0.5, allyAt: [] });
 
   it("anchored organisms never move", () => {
     for (const b of ["sessile", "wire"] as const) {
@@ -2759,7 +2759,7 @@ describe("multi-tile bodies", () => {
     const at = { x: 5, y: 5 };
     for (let i = 0; i < 40; i++) {
       const s = decideStep("chase", at,
-        { px: 9, py: 5, dist: 4, alliesNear: 0, hpFrac: 1, threat: 0.5 }, g, makeRng(i), () => false, "line3");
+        { px: 9, py: 5, dist: 4, alliesNear: 0, hpFrac: 1, threat: 0.5, allyAt: [] }, g, makeRng(i), () => false, "line3");
       if (!s) continue;
       // whatever it does, its whole body must land on floor
       const h = Math.atan2(s.y - at.y, s.x - at.x);
@@ -7789,7 +7789,7 @@ describe("reactive behaviours respond to the situation", () => {
   const at = { x: 10, y: 10 };
   const sense = (px: number, py: number, hpFrac: number, threat: number) =>
     ({ px, py, dist: chebyshev(at.x, at.y, px, py), alliesNear: 0,
-       hpFrac, threat });
+       hpFrac, threat, allyAt: [] });
   const rate = (b: Parameters<typeof decideStep>[0],
                 s: ReturnType<typeof sense>,
                 ok: (p: { x: number; y: number } | null) => boolean): number => {
@@ -7847,7 +7847,7 @@ describe("reactive behaviours respond to the situation", () => {
       for (let i = 0; i < 200; i++) {
         const from = { x: 4 + (i % 4), y: 4 + ((i >> 2) % 4) };
         const s = { px: 6, py: 6, dist: chebyshev(from.x, from.y, 6, 6),
-                    alliesNear: 1, hpFrac: (i % 10) / 10, threat: (i % 7) / 7 };
+                    alliesNear: 1, hpFrac: (i % 10) / 10, threat: (i % 7) / 7, allyAt: [] };
         const step = decideStep(b, from, s, wall, makeRng(i), () => false);
         if (step) {
           expect(wall.isFloor(step.x, step.y),
@@ -7887,6 +7887,7 @@ describe("no behaviour produces an illegal move under adversarial input", () => 
         alliesNear: rng.int(6),
         hpFrac: wild ? ([NaN, -1, 2, 0.5][seed % 4] ?? 0.5) : rng.next(),
         threat: wild ? ([Infinity, -1, 5][seed % 3] ?? 0.5) : rng.next(),
+        allyAt: [],
       };
       const occ = (x: number, y: number) =>
         seed % 3 === 0 && (x + y) % 4 === 0;
@@ -8148,5 +8149,88 @@ describe("the lit wall lip does not draw the map edge", () => {
     // is an ordinary wall.
     expect(maxRun, `a ${maxRun.toFixed(0)}-tile horizontal run -- the map edge `
       + "is in the stroked path").toBeLessThan(20);
+  });
+});
+
+describe("a swarm encircles rather than stacking", () => {
+  it("members spread across the player's arcs instead of one flank", () => {
+    // The old swarm was a chaser with a headcount check: every member came
+    // from the same direction and you could back into a corner and fight one
+    // at a time. Coordinated, each member takes the arc its allies have not.
+    const g = new mg.Grid(30, 30, mg.FLOOR);
+    const p = { x: 15, y: 15 };
+    // three swarmers all starting EAST of the player, in a clump
+    let members = [{ x: 22, y: 14 }, { x: 22, y: 15 }, { x: 22, y: 16 }];
+    for (let step = 0; step < 12; step++) {
+      members = members.map((m, i) => {
+        const others = members.filter((_, j) => j !== i);
+        const s = { px: p.x, py: p.y,
+                    dist: chebyshev(m.x, m.y, p.x, p.y),
+                    alliesNear: others.length, hpFrac: 1, threat: 0.5,
+                    allyAt: others };
+        const occ = (x: number, y: number) =>
+          others.some((o) => o.x === x && o.y === y) || (x === p.x && y === p.y);
+        const next = decideStep("swarm", m, s, g, makeRng(step * 7 + i), occ);
+        return next ?? m;
+      });
+    }
+    // Measure the angular spread around the player: three on one flank would
+    // span ~0 radians; an encirclement spans well over pi/2.
+    const angs = members.map((m) => Math.atan2(m.y - p.y, m.x - p.x));
+    let spread = 0;
+    for (let i = 0; i < angs.length; i++) {
+      for (let j = i + 1; j < angs.length; j++) {
+        let d = Math.abs((angs[i] ?? 0) - (angs[j] ?? 0));
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        spread = Math.max(spread, d);
+      }
+    }
+    expect(spread, `swarm spread only ${spread.toFixed(2)} rad -- still one flank`)
+      .toBeGreaterThan(Math.PI / 2);
+    // and they all closed in
+    for (const m of members) {
+      expect(chebyshev(m.x, m.y, p.x, p.y), "a member did not close").toBeLessThanOrEqual(3);
+    }
+  });
+});
+
+describe("a gene sits on the ring once", () => {
+  it("installing a gene already on the ring is refused", () => {
+    // Found by the ability-bar soak: pick up a second celA cassette, install
+    // it into a different slot, and the ring held two copies. Every dosage
+    // figure -- expression, power, ATP -- counted it twice. b_install had no
+    // guard; the "installed twice" invariant existed but nothing enforced it
+    // at the door.
+    const p = new Plasmid();
+    p.integrated = 8;
+    p.stash({ kind: "gene", id: "celA", level: 1, mods: [], allele: WILD_TYPE });
+    p.stash({ kind: "gene", id: "celA", level: 1, mods: [], allele: WILD_TYPE });
+    // A fresh bin holds default parts; find celA by id, and avoid the origin.
+    const celA = () => p.bin.findIndex((b) => b.kind === "gene" && b.id === "celA");
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const s1 = ori === 2 ? 3 : 2, s2 = ori === 4 ? 5 : 4;
+    expect(p.install(celA(), s1).ok, "first install refused").toBe(true);
+    const r = p.install(celA(), s2);
+    expect(r.ok, "a second copy was installed onto the ring").toBe(false);
+    if (!r.ok) expect(r.err).toMatch(/already on the ring/);
+    // and the spare is still in the bin, not lost
+    expect(celA() >= 0, "the refused copy vanished").toBe(true);
+  });
+
+  it("but a gene may replace its own slot", () => {
+    // Moving a gene onto the slot it already occupies is not a duplicate.
+    const p = new Plasmid();
+    p.integrated = 8;
+    const celA = () => p.bin.findIndex((b) => b.kind === "gene" && b.id === "celA");
+    p.stash({ kind: "gene", id: "celA", level: 1, mods: [], allele: WILD_TYPE });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const s1 = ori === 2 ? 3 : 2;
+    p.install(celA(), s1);
+    p.stash({ kind: "gene", id: "celA", level: 1, mods: [], allele: WILD_TYPE });
+    // installing onto the slot where celA already is displaces that copy to
+    // the bin: still exactly one on the ring.
+    expect(p.install(celA(), s1).ok, "replacing its own slot was refused").toBe(true);
+    const onRing = p.slots.filter((s) => s?.kind === "gene" && s.id === "celA").length;
+    expect(onRing, "self-replacement left two on the ring").toBe(1);
   });
 });

@@ -15,6 +15,7 @@ import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box } from "./chrome.js";
 import { i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
+import { castAbility } from "./cast.js";
 import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
@@ -201,7 +202,30 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
         _g.spinFrom = Math.atan2(y - _g.ring.cy, x - _g.ring.cx);
         break;
       case "world": {
+        // The ability bar sits over the world. A slot tap casts or arms; it
+        // must win over the tile beneath it.
+        const slot = _g.abilitySlots.find((s) => inBoxOf(s.box, x, y));
+        if (slot) {
+          const a = slot.ability;
+          if (a.kind === "bolt" || a.id === "dash") {
+            // Directional: arm it, or disarm on a second tap.
+            _g.aiming = _g.aiming === a.id ? null : a.id;
+            if (_g.aiming) _g.note(`${a.name} armed. Tap a direction.`);
+          } else {
+            const err = castAbility(_g, a.id);
+            if (err) _g.note(err); else { _g.mobTurn(); _g.look(); }
+          }
+          break;
+        }
         const t = _g.toTile(x, y);
+        // Armed: this tap is a direction, not a destination.
+        if (_g.aiming !== null) {
+          const id = _g.aiming;
+          _g.aiming = null;
+          const err = castAbility(_g, id, t.x - _g.player.x, t.y - _g.player.y);
+          if (err) _g.note(err); else { _g.mobTurn(); _g.look(); }
+          break;
+        }
         _g.tap(t.x, t.y);
         break;
       }

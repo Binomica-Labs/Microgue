@@ -74,6 +74,17 @@ export function b_install(_p: Plasmid, binIndex: number, slot: number): Result {
     if (displaced?.kind === "gene" && displaced.id === "ori") {
       return { ok: false, err: "cannot displace the origin" };
     }
+    // A gene sits on the ring ONCE. Two copies from the same chromosome
+    // would be counted twice by every dosage figure. Stacking lives in the
+    // bin -- spares wait there -- so installing a gene that is already on the
+    // ring is refused, unless it is displacing its own other copy.
+    if (part.kind === "gene" && part.id !== "ori") {
+      const dup = _p.slots.findIndex(
+        (s, i) => i !== slot && s?.kind === "gene" && s.id === part.id);
+      if (dup >= 0) {
+        return { ok: false, err: `${part.id} is already on the ring` };
+      }
+    }
     // ONE copy off the stack, not the whole row. Splicing the row out put
     // three copies onto a single position and lost two of them.
     const one = _p.takeOne(binIndex);

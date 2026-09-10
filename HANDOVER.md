@@ -1,3 +1,113 @@
+# v1.21.0 — active abilities, and a swarm that encircles
+
+## v1.21.1 — abilities hardened; a duplicate-install bug found by accident
+
+Three real bugs from the ability hardening pass, one of them in the plasmid
+core and player-reachable before abilities existed at all.
+
+* **A dead strain could still cast.** The aftermath screen was up and a cast
+  underneath it laid tiles into a run that was over. `castAbility` refuses
+  when `_g.dead`.
+* **A NaN cooldown locked an ability forever.** `NaN <= turn` is false, so a
+  corrupt entry read as infinitely recharging with no way to clear it.
+  `ready` treats a non-finite entry as READY.
+* **A gene could be installed on the ring twice.** The ability-bar soak
+  randomly tapped a drop, picked up a second celA cassette, and installed it
+  into a different slot -- two copies on one ring, counted twice by every
+  dosage figure. The "installed twice" INVARIANT existed; nothing enforced it
+  at the door. `b_install` now refuses a gene already on the ring, unless it
+  is displacing its own copy. This one predates abilities and any player
+  could hit it: stacking put spares in the bin, and nothing stopped a spare
+  going onto the ring beside its sibling.
+
+The rest held: the ability table is sane (every gene real, every number
+finite and in range, ids unique); garbage directions (NaN, Infinity, 1e9)
+never fire, never move the player, never throw; a secretion at the grid
+corner lays only on real floor; overlapping secretions do not double-hit;
+the armed state does not survive a new run.
+
+## A false green, caught
+
+Verifying the duplicate-install guard bites, my first revert used a regex
+that did not match the block -- so "0 failures with the guard removed" was
+the guard still being there. Re-did it by slicing on exact markers: 3
+failures. A revert that changes nothing proves nothing; check the thing is
+actually gone before trusting the count.
+
+`spec` adds an 800-tap random soak of the ability bar: after every tap, atp
+finite and non-negative, player on floor, every secretion on floor with a
+finite expiry, the armed ability on the bar, and no invariant violation --
+and it asserts the soak actually cast something, so it cannot pass by never
+reaching the system.
+
+## The gap
+
+Every build was passive. Genes raised power, armour, ATP; combat was walking
+into things. The plasmid said what you WERE and never what you could DO, so a
+well-built strain and a badly-built one played the same -- they just took
+different numbers of hits. Enemies already had ranged weapons (bolt, cloud,
+packet, spear) but the player had no active move at all.
+
+## Abilities (abilities.ts, cast.ts, ability_bar.ts)
+
+An ability is an action a gene GRANTS, with an ATP cost and a turn cooldown.
+This is the "spell slot" -- but the slots are not a separate system, they ARE
+your operons. Carry the gene, express it at this depth, and it is on the bar.
+Lose the gene, lose the move. The build screen stays the only place identity
+lives, and a deep gene (dsrA) correctly refuses to cast at the surface.
+
+Four kinds, each a real bacterial behaviour:
+
+* **secrete** -- lay enzyme on the ring of tiles around you; short-lived;
+  damages what ends its move on one. THE ATTACK TILE. cellulase (celA),
+  protease (aprE, new gene).
+* **bolt** -- a directed shot along a line to the first mob. RANGED. phage
+  burst (recA).
+* **burst** -- hit everything in a ring. sulfide (dsrA; burns YOU without
+  sqr), oxidative (katG).
+* **surge** -- a timed self-effect. cold hardening (cspA; halves incoming
+  damage for 3 turns, applied inside `hurt` so every source goes through it),
+  flagellar dash (flhD; 3 tiles in a line, stops at a wall or mob -- breaks a
+  leech).
+
+The bar sits above the log and appears only when the build grants something.
+Tap a slot to cast; a directional one (bolt, dash) ARMS and the next map tap is
+the direction, with an "armed: tap a direction" line so the state is never
+silent. Refusals say why: needs the gene / recharging N turns / costs N ATP.
+Secretions render as pulsing translucent patches. All per-run state resets.
+
+`spec` casts every kind, checks tiles bite and expire, bolts hit only in line
+and refuse blind, bursts hit the ring, the surge halves damage and wears off,
+cost and cooldown are enforced with reasons, dash stops at a mob, and nothing
+carries into a new run. Abilities are also in the integrated random soak
+across every condition.
+
+## The swarm encircles
+
+The old swarm was a chaser with a headcount check: every member came from the
+same direction, so you backed into a corner and fought one at a time. Now each
+member scores its neighbours by how CROWDED that arc around the player is with
+allies, and takes the emptiest -- so three starting in a clump on one flank
+spread past 90 degrees. Needed `allyAt` on `Sensed`. `spec` measures the
+angular spread and it bites: the old swarm fails it.
+
+## Not done, on purpose
+
+* **Armour/weapon gene equivalents** -- the plasmid already has armour, reach
+  and power complexes and alleles with affixes; the ask is really "make them
+  legible", which is a UI pass, not a system.
+* **More dangerous enemies** -- the difficulty curve is deliberate. Danger now
+  comes from smarter enemies (hunt/ambush/flank/leech/swarm) rather than bigger
+  numbers. Elites already scale.
+
+## A fixture lesson
+
+The integrated soak tripped "atp is within its pool" at step 0 after
+assembling six genes. Real, but a WINDOW: the ATP ceiling is recomputed on
+upkeep, so the pool only sees a changed ring after one turn. A player cannot
+change `integrated` without a turn passing; the soak could. One `wait` after
+assemble.
+
 # v1.20.0 — the aftermath is three screens
 
 One screen used to do two jobs: mourn the strain and sell you the next one. The

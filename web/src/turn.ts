@@ -243,6 +243,7 @@ export function t_exploreStep(_g: Game): void {
 }
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 
+import { tickSecretions } from "./cast.js";
 import { isBiofilm } from "./biofilm.js";
 import { SYMBIONTS } from "./symbiont.js";
 import { CONDITIONS } from "./conditions.js";
@@ -283,13 +284,18 @@ import type { Game } from "./main.js";
  * lies about cause of death is worse than none.
  */
 export function hurt(_g: Game, amount: number, cause: string): number {
-  const dmg0 = Math.max(Math.round(Number.isFinite(amount) ? amount : 0), 0);
+  // A cold-shock surge halves incoming damage while it lasts. Applied here so
+  // every damage source -- melee, status, hazard, your own sulfide -- goes
+  // through it.
+  const surged = _g.surge && _g.surge.until > _g.clock.turn
+    ? amount * _g.surge.armour : amount;
+  const dmg0 = Math.max(Math.round(Number.isFinite(surged) ? surged : 0), 0);
   if (dmg0 > 0) {
     _g.trace.push(_g.clock.turn, "hurt",
                   `${cause} for ${String(dmg0)}; hp ${String(_g.player.hp)} -> ` +
                   String(Math.max(_g.player.hp - dmg0, 0)));
   }
-  const dmg = Math.max(Math.round(Number.isFinite(amount) ? amount : 0), 0);
+  const dmg = dmg0;
   if (dmg <= 0) return 0;
   _g.player.hp = Math.max(_g.player.hp - dmg, 0);
   _g.lastAttacker = cause;
@@ -329,6 +335,9 @@ export function t_mobTurn(_g: Game): void {
       packets: _g.packets,
       clouds: _g.clouds,
     });
+
+    // Secreted enzymes bite whatever ended its move on them, then expire.
+    tickSecretions(_g);
 
     // Particles fly and gradients decay after the microbes have acted, so a
     // shot fired this turn does not also land this turn.

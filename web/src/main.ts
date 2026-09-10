@@ -9,6 +9,9 @@ import { newMenu, type MenuState } from "./menu.js";
 import type { MenuBoxes } from "./menu_render.js";
 import { noStations, type StationId } from "./lab_level.js";
 import { newBiofilm, type Biofilm } from "./biofilm.js";
+import type { Cooldowns } from "./abilities.js";
+import type { AbilitySlot } from "./ability_bar.js";
+import type { Secretion, Surge } from "./cast.js";
 import { newAftermath, type Aftermath } from "./aftermath.js";
 import type { AftermathBoxes } from "./aftermath_render.js";
 import { g_openPlasmid } from "./plasmid_open.js";
@@ -130,6 +133,15 @@ class Game {
   facingAt: { x: number; y: number } | null = null;
   /** Territory claimed this floor -- see biofilm.ts. */
   biofilm: Biofilm = newBiofilm();
+  /** Active abilities: per-ability cooldown, lingering secretions, a timed
+   *  self-effect. See abilities.ts and cast.ts. */
+  cooldowns: Cooldowns = new Map<string, number>();
+  secretions: Secretion[] = [];
+  surge: Surge | null = null;
+  /** The ability the player has selected and is aiming, if it needs a
+   *  direction (bolt, dash). Null when nothing is armed. */
+  aiming: string | null = null;
+  abilitySlots: AbilitySlot[] = [];
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;

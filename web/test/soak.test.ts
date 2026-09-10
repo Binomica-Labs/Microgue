@@ -1731,6 +1731,9 @@ describe("state that should persist, does", () => {
     menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
     biofilm: "territory on the current floor; cleared on descent",
+    cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",
+    surge: "a timed self-effect", aiming: "which ability is armed",
+    abilitySlots: "hit boxes, per frame",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",
@@ -3330,17 +3333,23 @@ describe("soak: all four v1.18-1.19 systems under random play", () => {
       g.startRun(0, "phototroph");
       g.run.condition = cond;
       // give it the two new genes and a symbiont so every system is live
-      for (const id of ["epsA", "comA"] as const) {
+      for (const id of ["epsA", "comA", "celA", "katG", "flhD", "cspA"] as const) {
         g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
       }
-      g.genome.assemble(["epsA", "comA"]);
+      g.genome.assemble(["epsA", "comA", "celA", "katG", "flhD", "cspA"]);
+      // Settle: the ATP ceiling is recomputed on upkeep, so the pool must see
+      // one turn after the ring changed or the invariant reads a stale max.
+      g.press("wait");
+      const { castAbility } = await import("../src/cast.js");
       const rng = makeRng(cond.length * 131 + 7);
 
       for (let i = 0; i < 100; i++) {
         if (g.dead) break;
-        switch (rng.int(6)) {
+        switch (rng.int(8)) {
           case 0: g.press("biofilm"); break;
           case 1: g.press("wait"); break;
+          case 6: castAbility(g, ["cellulase", "ros", "coldshock"][rng.int(3)] ?? "ros"); break;
+          case 7: castAbility(g, "dash", rng.int(3) - 1, rng.int(3) - 1); break;
           case 2: g.step(g.player.x + rng.int(3) - 1, g.player.y + rng.int(3) - 1); break;
           case 3: if (i % 20 === 0) g.genome.symbiont = SYMBIONT_IDS[rng.int(SYMBIONT_IDS.length)] ?? null; break;
           case 4: g.frame(100 + i * 30); break;
@@ -3454,5 +3463,348 @@ describe("the aftermath is three screens, not one", () => {
         expect(c.action.length, `${st} has no action label`).toBeGreaterThan(3);
       }
     }
+  });
+});
+
+describe("active abilities: genes grant things you can DO", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const withGenes = async (genes: readonly string[]) => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    g.genome.integrated = 12;
+    for (const id of genes) {
+      g.genome.stash({ kind: "gene", id: id as never, level: 1, mods: [],
+                       allele: WILD_TYPE });
+    }
+    g.genome.assemble(genes as never[]);
+    for (let i = 0; i < 3; i++) g.press("wait");
+    g.player.atp = 100;
+    return g;
+  };
+
+  const placeMob = (g: Awaited<ReturnType<typeof withGenes>>, dx: number, dy: number) => {
+    const m = g.level.mobs.find((x) => x.alive);
+    if (!m) throw new Error("no mob");
+    const x = g.player.x + dx, y = g.player.y + dy;
+    g.level.grid.set(x, y, 0);       // FLOOR
+    m.x = x; m.y = y; m.ax = x; m.ay = y; m.hp = 30; m.maxhp = 30;
+    return m;
+  };
+
+  it("an ability is on the bar only when its gene is expressed", async () => {
+    const { grantedAbilities } = await import("../src/abilities.js");
+    const g = await withGenes(["celA"]);
+    const d = g.dungeon.depth;
+    const ids = grantedAbilities((x) => g.genome.expression(x, d)).map((a) => a.id);
+    expect(ids, "celA did not grant cellulase").toContain("cellulase");
+    expect(ids, "an ungranted ability appeared").not.toContain("phage");
+  });
+
+  it("a secretion lays tiles that hurt what stands on them, then expires", async () => {
+    // The 'attack tile': secreted enzyme, short-lived, bites what crosses it.
+    const { castAbility, tickSecretions } = await import("../src/cast.js");
+    const g = await withGenes(["celA"]);
+    const err = castAbility(g, "cellulase");
+    expect(err, `cast refused: ${String(err)}`).toBeNull();
+    expect(g.secretions.length, "no tiles were laid").toBeGreaterThan(0);
+    const until = g.secretions[0]?.until ?? 0;
+    // put a mob on one of the tiles and tick
+    const s = g.secretions[0];
+    if (!s) return;
+    const m = g.level.mobs.find((x) => x.alive);
+    if (!m) return;
+    m.x = s.x; m.y = s.y; m.hp = 30;
+    tickSecretions(g);
+    expect(m.hp, "the enzyme did not hurt the mob standing on it").toBeLessThan(30);
+    // and it expires
+    g.clock.turn = until + 1;
+    tickSecretions(g);
+    expect(g.secretions.length, "the secretion did not expire").toBe(0);
+  });
+
+  it("a bolt hits the first thing in its line, within range", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["recA"]);
+    // clear a lane and put a mob 3 tiles east
+    for (let i = 1; i <= 5; i++) g.level.grid.set(g.player.x + i, g.player.y, 0);
+    const m = placeMob(g, 3, 0);
+    const hp = m.hp;
+    expect(castAbility(g, "phage", 1, 0)).toBeNull();
+    expect(m.hp, "the bolt missed a mob in its line").toBeLessThan(hp);
+    // no direction: refused, not fired blindly
+    g.cooldowns.clear(); g.player.atp = 100;
+    expect(castAbility(g, "phage"), "a bolt fired with no direction").not.toBeNull();
+  });
+
+  it("a burst hits everything in its ring", async () => {
+    // katG is expressed at D1; dsrA (sulfide) is a deep gene and correctly
+    // refuses to cast up here -- that refusal is itself the gating working.
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["katG"]);
+    const m = placeMob(g, 1, 1);
+    const hp = m.hp;
+    expect(castAbility(g, "ros")).toBeNull();
+    expect(m.hp, "the burst missed an adjacent mob").toBeLessThan(hp);
+    // and a deep gene's ability refuses at the surface, with the reason
+    expect(castAbility(g, "sulfide"), "sulfide cast with dsrA unexpressed")
+      .toMatch(/needs dsrA/);
+  });
+
+  it("a cold-shock surge halves incoming damage while it lasts", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const { hurt } = await import("../src/turn.js");
+    const g = await withGenes(["cspA"]);
+    expect(castAbility(g, "coldshock")).toBeNull();
+    const before = g.player.hp;
+    hurt(g, 10, "test");
+    expect(before - g.player.hp, "the surge did not halve damage").toBe(5);
+    // past its duration, full damage again
+    g.clock.turn += 10;
+    const b2 = g.player.hp;
+    hurt(g, 10, "test");
+    expect(b2 - g.player.hp, "the surge never wore off").toBe(10);
+  });
+
+  it("costs ATP and respects cooldown; refuses with a reason", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["celA"]);
+    const atp = g.player.atp;
+    expect(castAbility(g, "cellulase")).toBeNull();
+    expect(g.player.atp, "casting cost no ATP").toBeLessThan(atp);
+    const again = castAbility(g, "cellulase");
+    expect(again, "cast twice with no cooldown").not.toBeNull();
+    expect(again, "the refusal gave no reason").toMatch(/recharging/);
+    g.cooldowns.clear();
+    g.player.atp = 0;
+    expect(castAbility(g, "cellulase"), "cast with no ATP").toMatch(/ATP/);
+  });
+
+  it("a dash moves in a line and stops at a wall or a mob", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["flhD"]);
+    for (let i = 1; i <= 4; i++) g.level.grid.set(g.player.x + i, g.player.y, 0);
+    placeMob(g, 3, 0);
+    const x0 = g.player.x;
+    expect(castAbility(g, "dash", 1, 0)).toBeNull();
+    expect(g.player.x - x0, "the dash went through a mob").toBe(2);
+  });
+
+  it("per-run state resets: no cooldown or secretion survives a new strain", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["celA"]);
+    castAbility(g, "cellulase");
+    expect(g.secretions.length).toBeGreaterThan(0);
+    g.startRun(1, "phototroph");
+    expect(g.secretions.length, "secretions carried into a new run").toBe(0);
+    expect(g.cooldowns.size, "cooldowns carried into a new run").toBe(0);
+    expect(g.aiming, "an armed ability carried into a new run").toBeNull();
+  });
+});
+
+describe("abilities under adversarial input", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const withGenes = async (genes: readonly string[]) => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    g.genome.integrated = 12;
+    for (const id of genes) {
+      g.genome.stash({ kind: "gene", id: id as never, level: 1, mods: [],
+                       allele: WILD_TYPE });
+    }
+    g.genome.assemble(genes as never[]);
+    for (let i = 0; i < 3; i++) g.press("wait");
+    g.player.atp = 100;
+    return g;
+  };
+
+  it("garbage directions never fire, never move, never throw", async () => {
+    // A bolt or dash with NaN/Infinity/huge direction must refuse or clamp,
+    // never walk the player off the grid or trace an infinite line.
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["recA", "flhD"]);
+    const x0 = g.player.x, y0 = g.player.y;
+    for (const [dx, dy] of [[NaN, 0], [0, NaN], [Infinity, 1], [1, -Infinity],
+                            [1e9, 1e9], [-1e9, 0]] as const) {
+      for (const id of ["phage", "dash"] as const) {
+        g.cooldowns.clear(); g.player.atp = 100;
+        expect(() => { castAbility(g, id, dx, dy); },
+               `${id} threw on direction ${String(dx)},${String(dy)}`).not.toThrow();
+        expect(Number.isFinite(g.player.x) && Number.isFinite(g.player.y),
+               `${id} put the player at a non-finite tile`).toBe(true);
+        expect(g.level.grid.isFloor(g.player.x, g.player.y),
+               `${id} dashed the player into rock`).toBe(true);
+      }
+    }
+    // the player is still where they started or on floor within dash range
+    expect(Math.abs(g.player.x - x0) + Math.abs(g.player.y - y0))
+      .toBeLessThanOrEqual(6);
+  });
+
+  it("casting while dead does nothing", async () => {
+    // A dead strain must not lay tiles or fire -- the aftermath screen is up.
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["celA", "recA"]);
+    g.player.hp = 0;
+    g.die();
+    const before = g.secretions.length;
+    castAbility(g, "cellulase");
+    expect(g.secretions.length, "a dead strain secreted").toBe(before);
+  });
+
+  it("an unknown ability id refuses with a reason and touches nothing", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["celA"]);
+    const atp = g.player.atp;
+    const err = castAbility(g, "nonesuch");
+    expect(err).not.toBeNull();
+    expect(g.player.atp, "an unknown ability cost ATP").toBe(atp);
+    expect(g.cooldowns.size, "an unknown ability set a cooldown").toBe(0);
+  });
+
+  it("a secretion at the map edge lays only on real floor", async () => {
+    // Player at the grid corner: the ring of tiles around them includes
+    // out-of-bounds coordinates. None may become a secretion.
+    const { castAbility } = await import("../src/cast.js");
+    const g = await withGenes(["celA"]);
+    g.level.grid.set(0, 0, 0);
+    g.player.x = 0; g.player.y = 0;
+    castAbility(g, "cellulase");
+    for (const s of g.secretions) {
+      expect(s.x >= 0 && s.y >= 0 && s.x < g.level.grid.w && s.y < g.level.grid.h,
+             `secretion off-grid at ${String(s.x)},${String(s.y)}`).toBe(true);
+      expect(g.level.grid.isFloor(s.x, s.y), "secretion on rock").toBe(true);
+    }
+  });
+
+  it("a mob standing on two overlapping secretions is hurt once per tick, not twice", async () => {
+    // Two casts can overlap tiles. `find` takes the first; the mob must not
+    // be double-dipped per tick.
+    const { castAbility, tickSecretions } = await import("../src/cast.js");
+    const g = await withGenes(["celA"]);
+    castAbility(g, "cellulase");
+    g.cooldowns.clear(); g.player.atp = 100;
+    castAbility(g, "cellulase");           // same tiles again
+    const s = g.secretions[0];
+    const m = g.level.mobs.find((x) => x.alive);
+    if (!s || !m) return;
+    m.x = s.x; m.y = s.y; m.hp = 100; m.maxhp = 100;
+    tickSecretions(g);
+    expect(100 - m.hp, "overlapping secretions double-hit").toBeLessThanOrEqual(s.dmg);
+  });
+
+  it("the armed state cannot survive a run ending or a screen change", async () => {
+    // Arm a bolt, then die: the armed state must clear, or the next tap on the
+    // aftermath screen fires a phage into the void.
+    const g = await withGenes(["recA"]);
+    g.aiming = "phage";
+    g.player.hp = 0;
+    g.die();
+    g.startRun(1, "phototroph");
+    expect(g.aiming, "an armed ability survived into a new run").toBeNull();
+  });
+
+  it("cooldown state with a corrupt turn does not lock an ability forever", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const { ready } = await import("../src/abilities.js");
+    const g = await withGenes(["celA"]);
+    g.cooldowns.set("cellulase", NaN);
+    // NaN <= turn is false, so it would read as never-ready. `ready` must
+    // treat a non-finite entry as ready, not as infinitely recharging.
+    expect(ready(g.cooldowns, "cellulase", g.clock.turn),
+           "a NaN cooldown locked the ability").toBe(true);
+    expect(castAbility(g, "cellulase"), "NaN cooldown blocked a cast").toBeNull();
+  });
+});
+
+describe("soak: the ability bar under random taps", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("800 random taps across bar, map and buttons never wedge or corrupt", async () => {
+    // The bar sits over the world and the armed state redirects the next map
+    // tap. That is exactly the kind of overlapping-input surface where a
+    // stuck state hides: an ability armed forever, a tap that fires AND walks,
+    // a slot tap that falls through to the tile beneath it.
+    const { Game } = await import("../src/main.js");
+    const { firstViolation } = await import("../src/invariants.js");
+    const { makeRng } = await import("../src/rng.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    g.genome.integrated = 14;
+    const genes = ["celA", "recA", "katG", "cspA", "flhD", "aprE"] as const;
+    for (const id of genes) {
+      g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.genome.assemble([...genes]);
+    g.press("wait");
+    g.frame(16);
+    const rng = makeRng(2718);
+    let casts = 0, armedTaps = 0;
+
+    for (let i = 0; i < 800; i++) {
+      if (g.dead) break;
+      g.player.atp = Math.max(g.player.atp, 30);   // keep casting possible
+      const slots = g.abilitySlots;
+      const r = rng.int(5);
+      let x = rng.int(400), y = rng.int(800);
+      if (r === 0 && slots.length > 0) {
+        // a slot
+        const s = slots[rng.int(slots.length)];
+        if (s) { x = s.box.x + s.box.w / 2; y = s.box.y + s.box.h / 2; }
+      } else if (r === 1) {
+        // the map near the player: a direction if armed, a step otherwise
+        x = 200 + (rng.int(3) - 1) * 40; y = 400 + (rng.int(3) - 1) * 40;
+      }
+      const wasArmed = g.aiming;
+      const before = g.cooldowns.size + g.secretions.length;
+      g.pointerDown(x, y);
+      g.pointerUp(x, y);
+      g.frame(100 + i * 16);
+      if (wasArmed !== null) armedTaps++;
+      if (g.cooldowns.size + g.secretions.length > before) casts++;
+
+      // Invariants after every tap.
+      expect(Number.isFinite(g.player.atp) && g.player.atp >= 0,
+             `step ${String(i)}: atp went bad (${String(g.player.atp)})`).toBe(true);
+      expect(g.level.grid.isFloor(g.player.x, g.player.y),
+             `step ${String(i)}: player in rock at ${String(g.player.x)},${String(g.player.y)}`)
+        .toBe(true);
+      for (const s of g.secretions) {
+        expect(g.level.grid.isFloor(s.x, s.y), `step ${String(i)}: secretion in rock`).toBe(true);
+        expect(Number.isFinite(s.until), `step ${String(i)}: secretion with bad expiry`).toBe(true);
+      }
+      // aiming is either null or a real granted ability
+      if (g.aiming !== null) {
+        expect(slots.some((s) => s.ability.id === g.aiming) || g.abilitySlots.some((s) => s.ability.id === g.aiming),
+               `step ${String(i)}: armed "${g.aiming}" is not on the bar`).toBe(true);
+      }
+      const v = firstViolation({
+        plasmid: g.genome, level: g.level, player: g.player, drops: g.drops,
+        packets: g.packets, clouds: g.clouds, barriers: g.level.barriers,
+        run: g.run, floor: g.dungeon.floor, dead: g.dead,
+      });
+      expect(v ? `${v.name}: ${v.detail}` : null, `step ${String(i)}`).toBeNull();
+    }
+    // The soak must actually have exercised the system.
+    expect(casts, "the soak never cast anything -- it tested nothing").toBeGreaterThan(5);
+    void armedTaps;
   });
 });

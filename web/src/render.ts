@@ -10,6 +10,7 @@ import { r_drawPicker } from "./picker_render.js";
 import { r_drawMenu } from "./menu_frame.js";
 import { r_labFurniture } from "./lab_furniture.js";
 import { drawAftermath } from "./aftermath_render.js";
+import { drawAbilityBar } from "./ability_bar.js";
 import { r_drawModals } from "./modal_render.js";
 import { r_drawWalls } from "./wall_render.js";
 import { r_ringReadout } from "./ring_readout.js";
@@ -436,6 +437,19 @@ export function r_draw(_g: Game): void {
         ctx.fill();
       }
     }
+    // Secreted enzymes: a bright, translucent patch on each tile, pulsing so
+    // it reads as active and dangerous rather than as floor tint.
+    if (_g.secretions.length > 0) {
+      const pulse = 0.22 + 0.10 * Math.sin(_g.now / 140);
+      for (const s of _g.secretions) {
+        if (s.x < x0 || s.x > x1 || s.y < y0 || s.y > y1) continue;
+        ctx.fillStyle = s.by === "protease"
+          ? `rgba(240,120,90,${String(pulse)})`
+          : `rgba(200,240,120,${String(pulse)})`;
+        ctx.fillRect(s.x * px + px * 0.06, s.y * px + px * 0.06,
+                     px * 0.88, px * 0.88);
+      }
+    }
     _g.drawFx(px);
     ctx.restore();                       // world clip
     ctx.restore();
@@ -522,6 +536,9 @@ export function r_draw(_g: Game): void {
     } else {
       layoutButtons(_g.buttons, W, H, _g.insets(), u, _g.barH + _g.logH);
       drawButtons(ctx, _g.buttons, u);
+      // The ability bar sits above the log, below the world. Only when the
+      // build grants something.
+      _g.abilitySlots = drawAbilityBar(_g, W, H - _g.insets().bottom - _g.barH - _g.logH, u);
     }
   }
 

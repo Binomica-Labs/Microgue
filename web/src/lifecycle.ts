@@ -157,6 +157,12 @@ export function g_startRun(_g: Game, slot: number, cls: ClassId = DEFAULT_CLASS)
   // Reset here rather than at death: death is not the only way a run ends,
   // and this is the one place a run BEGINS.
   _g.intro = null;                 // the lab is behind you
+  // Abilities are per-run: a cooldown, a laid enzyme or an armed shot
+  // from the last strain is not this one's.
+  _g.cooldowns.clear();
+  _g.secretions = [];
+  _g.surge = null;
+  _g.aiming = null;
   _g.introStations = noStations();
   _g.exploring = false;
   _g.walk = null;

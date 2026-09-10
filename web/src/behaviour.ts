@@ -54,6 +54,9 @@ export interface Sensed {
   /** How threatening the player is right now, 0..1 -- their power relative to
    *  the depth. A predator presses a weak cell and edges off a strong one. */
   readonly threat: number;
+  /** Where nearby allies of the same kind are, for pack coordination. A swarm
+   *  reads this to take the side of the player its allies have NOT taken. */
+  readonly allyAt: readonly { x: number; y: number }[];
 }
 
 /** Chebyshev distance -- the grid is 8-connected. */
@@ -208,10 +211,42 @@ export function decideStep(
       // it a pack stays in perfect formation however much the steps vary.
       return rng.next() < PAUSE ? null : toward();
 
-    case "swarm":
-      // Quorum: only commits once enough of its own kind are around.
+    case "swarm": {
+      // Quorum: only commits once enough of its own kind are around -- and
+      // then it COORDINATES. Each member approaches from the side of the
+      // player its allies have not taken, so a swarm encircles rather than
+      // stacking on one flank. The old swarm was a chaser with a headcount
+      // check: every member came from the same direction and the player
+      // could always back into a corner and fight one at a time.
       if (s.dist > senseRange(b)) return null;
-      return s.alliesNear >= 2 ? toward() : (rng.next() < 0.4 ? toward() : null);
+      if (s.alliesNear < 2) return rng.next() < 0.4 ? toward() : null;
+      if (s.dist <= 1) return toward();               // in reach: strike
+      // Score the eight neighbours by how far they are from every ally's
+      // approach angle around the player: the emptiest arc wins.
+      let best: Point | null = null, bestScore = -Infinity;
+      for (let cy = -1; cy <= 1; cy++) {
+        for (let cx = -1; cx <= 1; cx++) {
+          if (cx === 0 && cy === 0) continue;
+          const nx = at.x + cx, ny = at.y + cy;
+          if (!free(nx, ny)) continue;
+          const dNow = Math.max(Math.abs(nx - px), Math.abs(ny - py));
+          if (dNow > s.dist) continue;                // never retreat
+          // angle of this candidate around the player
+          const ang = Math.atan2(ny - py, nx - px);
+          // nearest ally angle: how crowded is this arc?
+          let crowd = 0;
+          for (const al of s.allyAt) {
+            const aa = Math.atan2(al.y - py, al.x - px);
+            let diff = Math.abs(ang - aa);
+            if (diff > Math.PI) diff = 2 * Math.PI - diff;
+            crowd += Math.max(0, 1 - diff / (Math.PI / 2));   // within 90deg counts
+          }
+          const score = -crowd * 2 - dNow * 0.5;
+          if (score > bestScore) { bestScore = score; best = { x: nx, y: ny }; }
+        }
+      }
+      return best ?? toward();
+    }
 
     case "glide": {
       // Gliding motility needs a surface. Only steps to tiles that touch wall.

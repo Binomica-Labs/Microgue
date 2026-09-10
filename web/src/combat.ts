@@ -172,13 +172,15 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       speedOf(m.behaviour, m.size) * w.mobSpeed, haste(m.status));
     m.banked = budget.banked;
 
-    const allies = w.mobs.filter(
-      (o) => o.alive && o !== m && o.id === m.id && chebyshev(o.x, o.y, m.x, m.y) <= 3).length;
+    const allyList = w.mobs.filter(
+      (o) => o.alive && o !== m && o.id === m.id && chebyshev(o.x, o.y, m.x, m.y) <= 3);
+    const allies = allyList.length;
     for (let s = 0; s < steps; s++) {
     const step = decideStep(
       m.behaviour, { x: m.x, y: m.y },
       { px: w.player.x, py: w.player.y, dist, alliesNear: allies,
-        hpFrac: m.maxhp > 0 ? m.hp / m.maxhp : 1, threat: w.threat },
+        hpFrac: m.maxhp > 0 ? m.hp / m.maxhp : 1, threat: w.threat,
+        allyAt: allyList.map((o) => ({ x: o.x, y: o.y })) },
       w.grid, w.rng,
       (x, y) => (x === w.player.x && y === w.player.y)
         || w.mobs.some((o) => o.alive && o !== m
