@@ -55,6 +55,9 @@ export interface Microbe extends Body {
   eliteStrain?: string;
   /** Unspent fraction of a move, carried across turns. See speed.ts. */
   banked?: number;
+  /** The last posture announced, so an intent event fires on CHANGE only --
+   *  a hunter that circles for six turns says so once. See combat.ts. */
+  lastIntent?: string;
   /** Turns until it may fire again, and how long it has been winding up. */
   reload: number;
   charging: number;

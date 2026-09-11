@@ -152,6 +152,10 @@ export const GENES: Readonly<Record<GeneId, Gene>> = {
 
 export interface Microbe {
   readonly id: string; readonly name: string; readonly depth: number;
+  /** Relative spawn frequency within its depth. Default 1. A predator is
+   *  rare -- you should MEET it, not wade through a floor of it -- so the
+   *  hunters carry a fraction. */
+  readonly weight?: number;
   readonly hp: number; readonly atk: number; readonly glyph: string;
   readonly genes: readonly GeneId[]; readonly note: string;
   /** Actual pigmentation, not a stratum tint. Also guarantees the organism
@@ -172,6 +176,7 @@ export interface Microbe {
 
 export const MICROBES: readonly Microbe[] = [
   { id:"synechococcus",   name:"Synechococcus",   depth:1, hp:6,  atk:2,  glyph:"s", genes:["psbA","cbbL","luxAB","psaA","atpB","recA"], note:"Oxygenic picocyanobacterium. Vents O2 that burns you." , pigment:"#4ec9c0" , facing:"rotate" , behaviour:"drift", size:"pico" , weapon:"melee" },
+  { id:"bdellovibrio",   name:"Bdellovibrio",   depth:1, weight:0.25, hp:7,  atk:3,  glyph:"b", genes:["flhD","recA","aprE","sodA"], note:"Predatory bacterium. Hunts other cells; backs off when hurt." , pigment:"#e0a37a" , facing:"rotate" , behaviour:"hunt", size:"pico" , weapon:"melee" },
   { id:"chlorella",       name:"Chlorella",       depth:1, hp:8,  atk:1,  glyph:"c", genes:["cbbL","katG","luxAB","celA","sodA","uvrA","groL"], note:"Green alga. Passive, tough cell wall." , pigment:"#7ed957" , facing:"none" , behaviour:"drift", size:"small" , weapon:"melee" },
   { id:"nitzschia",       name:"Nitzschia",       depth:1, hp:10, atk:3,  glyph:"d", genes:["psbA","katG","psaA","sodA","uvrA","atpB"], note:"Pennate diatom. Silica frustule; glides." , pigment:"#d4a24c" , facing:"rotate" , behaviour:"glide", size:"medium" , weapon:"melee" },
   { id:"nitrosomonas",    name:"Nitrosomonas",    depth:2, hp:9,  atk:3,  glyph:"n", genes:["amoA","hao","dnaK","cheA","hzsA","hdh","comA"],        note:"Ammonia oxidiser. Acidifies its surroundings." , pigment:"#cbbb9c" , facing:"rotate" , behaviour:"drift", size:"small" , weapon:"melee" },

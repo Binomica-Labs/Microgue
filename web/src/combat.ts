@@ -49,13 +49,22 @@ export interface TurnEvent {
    * only saw the melee path, so a build that wins by poisoning things earned
    * no adaptation from any of its kills.
    */
-  readonly kind: "strike" | "move" | "status" | "charge" | "fire" | "died";
+  readonly kind: "strike" | "move" | "status" | "charge" | "fire" | "died"
+    | "intent";
   readonly mob: Mob;
   readonly dmg?: number;
   readonly status?: StatusId;
   readonly weapon?: string;
   readonly at?: { x: number; y: number };
+  /** For `intent`: what the mob just decided to do. A posture CHANGE, not
+   *  every step -- fleeing, circling, springing, latching. The reactive AI
+   *  was invisible without it: a mob circling and a mob charging both read
+   *  as "a mob moving". */
+  readonly intent?: Intent;
 }
+
+export type Intent = "flees" | "circles" | "springs" | "latches" | "encircles"
+  | "presses";
 
 /** Which status a microbe inflicts, if any. Grounded in what it actually
  *  produces: Thiobacillus makes sulfuric acid, sulfate reducers exhale H2S,
@@ -188,9 +197,17 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       fp);
 
     if (!step) break;
+    // Read the posture off the step: closing, holding distance, or opening.
+    const dBefore = chebyshev(m.x, m.y, w.player.x, w.player.y);
+    const dAfter = chebyshev(step.x, step.y, w.player.x, w.player.y);
+    const intent = intentOf(m, dBefore, dAfter);
     m.heading = Math.atan2(step.y - m.y, step.x - m.x);
     m.x = step.x; m.y = step.y;
     events.push({ kind: "move", mob: m });
+    if (intent !== null && intent !== m.lastIntent) {
+      m.lastIntent = intent;
+      events.push({ kind: "intent", mob: m, intent });
+    }
     // Biofilm mires: a mob that steps onto a claimed tile forfeits the rest of
     // its move this turn -- the matrix traps what swims into it. This is what
     // makes a biofilm pocket defensible against the reactive pursuers.
@@ -199,4 +216,27 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
   }
 
   return events;
+}
+
+/**
+ * What a step MEANS, for the reactive behaviours. Null for the simple ones --
+ * a drifter has no posture to announce.
+ */
+function intentOf(m: Mob, dBefore: number, dAfter: number): Intent | null {
+  switch (m.behaviour) {
+    case "hunt":
+      if (dAfter > dBefore) return "flees";
+      if (dAfter === dBefore && dBefore > 1) return "circles";
+      return "presses";
+    case "ambush":
+      return dAfter < dBefore ? "springs" : null;
+    case "leech":
+      return dAfter <= 1 ? "latches" : "presses";
+    case "flank":
+      return dAfter === dBefore ? "circles" : "presses";
+    case "swarm":
+      return dAfter === dBefore ? "encircles" : "presses";
+    case "chase": case "glide": case "drift": case "sessile": case "wire":
+      return null;                      // no posture to announce
+  }
 }

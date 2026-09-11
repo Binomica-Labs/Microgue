@@ -69,6 +69,14 @@ export const MORPHOLOGY: Readonly<Record<string, readonly Shape[]>> = {
     path([[0.3, 0.44], [0.7, 0.44]], 0.02, "dark"),
     path([[0.3, 0.56], [0.7, 0.56]], 0.02, "dark"),   // thylakoids
   ],
+  bdellovibrio: [
+    // A tiny vibrioid predator with one long polar flagellum.
+    el(0.50, 0.40, 0.22, 0.20, "dark"),
+    el(0.50, 0.40, 0.18, 0.16, "body"),
+    el(0.50, 0.40, 0.07, 0.06, "hi"),
+    { k: "poly", role: "accent",
+      pts: [[0.5,0.52],[0.42,0.66],[0.32,0.80],[0.5,0.52]] },
+  ],
   chlorella: [
     el(0.5, 0.5, 0.31, 0.31, "hi"),
     // parietal cup chloroplast: an arc hugging the wall, open on one side

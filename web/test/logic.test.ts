@@ -8248,3 +8248,67 @@ describe("naming a strain", () => {
   });
 });
 
+
+describe("the AI announces its posture", () => {
+  it("a hunter that changes posture emits one intent event, not one per step", async () => {
+    // The reactive AI was invisible: a mob circling and a mob charging both
+    // read as "a mob moving". An intent event fires when the posture CHANGES
+    // -- a hunter that circles for six turns says so once.
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, 5);
+    const lvl = d.level(1);
+    let row = -1;
+    for (let y = 5; y < 80 && row < 0; y++) {
+      let ok = true;
+      for (let x = 20; x <= 50; x++) if (!lvl.grid.isFloor(x, y)) { ok = false; break; }
+      if (ok) row = y;
+    }
+    if (row < 0) return;
+    const proto = lvl.mobs[0];
+    if (!proto) return;
+    lvl.mobs.length = 0;
+    // a healthy hunter, far off: it should PRESS, and say so once
+    lvl.mobs.push({ ...proto, behaviour: "hunt", alive: true, hp: 30, maxhp: 30,
+                    banked: 0, x: 30, y: row, ax: 30, ay: row });
+    const player = { x: 40, y: row, hp: 999, maxhp: 999, atp: 50, atpMax: 100, status: [] };
+    const world = () => ({ grid: lvl.grid, mobs: lvl.mobs,
+      player: player as unknown as Parameters<typeof microbeTurn>[0]["player"],
+      rng: makeRng(3), armour: 0, threat: 0.2, mobSpeed: 1, mired: () => false,
+      packets: [], clouds: [] });
+    let intents = 0;
+    for (let t = 0; t < 6; t++) {
+      for (const e of microbeTurn(world())) if (e.kind === "intent") intents++;
+    }
+    expect(intents, "no intent announced at all").toBeGreaterThan(0);
+    expect(intents, `${String(intents)} intents over 6 turns -- announcing every step`)
+      .toBeLessThanOrEqual(2);
+  });
+
+  it("D1 has a hunter, and it is rare", () => {
+    // You should MEET the predator on the first floor, not wade through it.
+    const d1 = bio.microbesAt(1);
+    const hunter = d1.find((m) => m.behaviour === "hunt");
+    expect(hunter, "no hunter on D1 -- the reactive AI is never seen on F1")
+      .toBeDefined();
+    expect(hunter?.weight ?? 1, "the D1 hunter is as common as a drifter")
+      .toBeLessThan(0.5);
+    // and its stats sit inside the D1 band
+    const atk = d1.map((m) => m.atk), hp = d1.map((m) => m.hp);
+    expect(hunter?.atk ?? 0).toBeLessThanOrEqual(Math.max(...atk));
+    expect(hunter?.hp ?? 0).toBeLessThanOrEqual(Math.max(...hp));
+  });
+
+  it("spawn weighting is honoured: a weight-0.25 organism is ~a quarter as common", () => {
+    let rare = 0, total = 0;
+    for (let s = 0; s < 30; s++) {
+      for (const m of new Dungeon(96, 96, s).level(1).mobs) {
+        total++;
+        if (m.behaviour === "hunt") rare++;
+      }
+    }
+    const frac = rare / total;
+    // 4 organisms, weights 1,1,1,0.25 -> expected 0.25/3.25 ~ 7.7%
+    expect(frac, `hunters are ${(frac * 100).toFixed(0)}% of D1`).toBeLessThan(0.15);
+    expect(frac, "hunters never spawn").toBeGreaterThan(0.02);
+  });
+});

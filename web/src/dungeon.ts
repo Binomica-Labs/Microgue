@@ -162,7 +162,8 @@ export class Dungeon {
     while (lvl.mobs.length < want && tries < want * 200) {
       tries++;
       const x = rng.int(this.w), y = rng.int(this.h);
-      const p0 = rng.pick(pool);
+      const p0 = pickWeighted(pool, rng);
+      if (!p0) continue;
       if (!lvl.grid.isFloor(x, y)) continue;
       if (Math.abs(x - lvl.up.x) <= 4 && Math.abs(y - lvl.up.y) <= 4) continue;
       if (x === lvl.down?.x && y === lvl.down.y) continue;
@@ -372,9 +373,7 @@ export class Dungeon {
       for (let i = 0; i < style.guard; i++) {
         const t = room.tiles[rng.int(room.tiles.length)];
         if (!t) continue;
-        const p = room.kind === "bloom"
-          ? pool[rng.int(pool.length)]        // one species, chosen per room
-          : pool[rng.int(pool.length)];
+        const p = pickWeighted(pool, rng);
         if (!p) continue;
         if (!this.canPlace(lvl, p.size, t.x, t.y)) continue;
         lvl.mobs.push(this.spawn(p, t.x, t.y));
@@ -385,7 +384,7 @@ export class Dungeon {
 
   private placeBoss(lvl: Level, rng: Rng): void {
     const pool = microbesAt(lvl.depth);
-    const proto = pool[rng.int(pool.length)];
+    const proto = pickWeighted(pool, rng);
     if (!proto) return;
     const at = lvl.down ?? lvl.up;
 
@@ -495,4 +494,20 @@ export class Dungeon {
   aliveCount(): number {
     return this.current().mobs.filter((m) => m.alive).length;
   }
+}
+
+/**
+ * Choose an organism by spawn weight. Uniform was fine while every organism
+ * at a depth was equally worth meeting; a predator that is a quarter of the
+ * floor is not a predator, it is the floor.
+ */
+function pickWeighted(pool: readonly Microbe0[], rng: Rng): Microbe0 | undefined {
+  const total = pool.reduce((a, m) => a + (m.weight ?? 1), 0);
+  if (total <= 0) return pool[rng.int(Math.max(pool.length, 1))];
+  let r = rng.next() * total;
+  for (const m of pool) {
+    r -= m.weight ?? 1;
+    if (r <= 0) return m;
+  }
+  return pool[pool.length - 1];
 }

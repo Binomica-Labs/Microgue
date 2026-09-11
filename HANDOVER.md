@@ -4,6 +4,31 @@ Asked for in v1.12, deferred twice as "first-of-its-kind plumbing". Done.
 Strains got names from a prebaked pool (K-12, MR-1, SP162 -- real reference
 strains, fine to read, not YOURS). A run you named is a run you remember.
 
+## v1.22.1 — the AI you could not see
+
+Reported: "I don't see the enemy behaviour in action." Two causes, both real.
+
+**D1 was entirely drift and glide.** Every reactive behaviour (hunt, ambush,
+flank, leech, swarm) lived on D2+, and runs were dying on F1 -- so the player
+only ever met three drifters and a glider. The first floor is where the AI
+should teach itself. Added Bdellovibrio (a real predatory bacterium, D1, hp 7
+atk 3 -- inside the D1 band) as a HUNTER, and gave it a spawn weight of 0.25 so
+it is ~8% of the floor: you meet it and it is memorable, not the floor itself.
+Spawn weighting is new -- selection was uniform before, so a predator would
+have been a quarter of the population.
+
+I also made Synechococcus SWARM and reverted it. The soak died at turn 26 to
+oxidative stress: the most common D1 organism coordinating to encircle you and
+stacking its status from three sides was lethal on the first floor. A rare
+hunter is the right dose; a common swarmer is not. The measurement is what
+decided it.
+
+**The AI's decisions were invisible.** A mob circling and a mob charging both
+read as "a mob moving". Now a mob emits an `intent` event when its POSTURE
+changes -- flees, circles, springs, latches, encircles, presses -- and the game
+floats the word over it and logs a line. On change only: a hunter that circles
+for six turns says so once. `spec` pins that (<=2 intents over 6 turns).
+
 ## How text entry works on a canvas game
 
 There was no text input anywhere. The only honest way on mobile is a real

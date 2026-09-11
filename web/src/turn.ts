@@ -244,6 +244,22 @@ export function t_exploreStep(_g: Game): void {
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 
 import { tickSecretions } from "./cast.js";
+import type { Intent } from "./combat.js";
+
+/** How each posture is shown. The word floats; the line goes to the log. */
+const INTENT_WORD: Readonly<Record<Intent, string>> = {
+  flees: "flees", circles: "circles", springs: "springs!", latches: "latches",
+  encircles: "encircles", presses: "presses",
+};
+const INTENT_LINE: Readonly<Record<Intent, string>> = {
+  flees: "breaks off, hurt.", circles: "circles you, looking for an opening.",
+  springs: "springs from stillness!", latches: "latches on. It will not let go.",
+  encircles: "moves to encircle you.", presses: "presses in.",
+};
+const INTENT_COLOUR: Readonly<Record<Intent, string>> = {
+  flees: "#8fd8c0", circles: "#ffd166", springs: "#ff6b6b", latches: "#e08a5a",
+  encircles: "#c9a3ff", presses: "#ffd166",
+};
 import { isBiofilm } from "./biofilm.js";
 import { SYMBIONTS } from "./symbiont.js";
 import { CONDITIONS } from "./conditions.js";
@@ -368,6 +384,16 @@ export function t_mobTurn(_g: Game): void {
         _g.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
                                    _g.turnSeed + e.mob.y));
         _g.lastAttacker = e.mob.name;
+      } else if (e.kind === "intent" && e.intent) {
+        // A posture change, said once: the reactive AI is only interesting if
+        // you can READ it. A floating word over the mob and a log line.
+        const word = INTENT_WORD[e.intent];
+        const visible = isVisible(_g.level.sight, e.mob.x, e.mob.y);
+        if (visible) {
+          _g.fx.add({ kind: "text", t0: _g.now, dur: 900, x: e.mob.x, y: e.mob.y,
+                      text: word, colour: INTENT_COLOUR[e.intent] });
+          _g.note(`The ${e.mob.name} ${INTENT_LINE[e.intent]}`);
+        }
       } else if (e.kind === "charge") {
         // The wind-up is the warning. Ring the microbe that is about to fire.
         _g.fx.add({ kind: "ring", t0: _g.now, dur: 400, x: e.mob.x, y: e.mob.y,
