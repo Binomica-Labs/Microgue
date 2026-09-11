@@ -655,3 +655,23 @@ describe("no sequence of operations can strand a part", () => {
     expect(p.at(20), "an out-of-ring read wrapped").toBeNull();
   });
 });
+
+describe("every organism is visible", () => {
+  it("no sprite's body is a speck", () => {
+    // The Bdellovibrio shipped with a ~10-pixel body at pico scale: a
+    // two-pixel blob on screen. A predator you cannot see is a nuisance, not
+    // a threat. Every sprite must carry enough BODY ink (roles 2 and 4, not
+    // the thin flagella/accents) to read at its size class.
+    const scale: Record<string, number> = { pico: 0.55, small: 0.72, medium: 0.92,
+                                            large: 1.15, filament: 1.0 };
+    for (const m of bio.MICROBES) {
+      const rows = PIXELS[m.id];
+      if (!rows) continue;                 // vector fallback only
+      let body = 0;
+      for (const r of rows) for (const c of r) if (c === "2" || c === "4") body++;
+      const onScreen = body * (scale[m.size] ?? 1) ** 2;
+      expect(onScreen, `${m.id}: body ${String(body)}px at ${m.size} reads as `
+        + `~${onScreen.toFixed(0)} -- a speck`).toBeGreaterThan(14);
+    }
+  });
+});

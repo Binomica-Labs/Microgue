@@ -4,6 +4,23 @@ Asked for in v1.12, deferred twice as "first-of-its-kind plumbing". Done.
 Strains got names from a prebaked pool (K-12, MR-1, SP162 -- real reference
 strains, fine to read, not YOURS). A run you named is a run you remember.
 
+## v1.22.2 — the Bdellovibrio was a speck
+
+Reported: "is the bdello sprite the right size?" It was not. Two things
+compounded: the sprite's BODY was ~10 pixels (the rest of its ink was a thin
+flagellum), and it was in the `pico` size class (scale 0.55). Together, a
+two-pixel blob on screen. A predator you cannot see is a nuisance, not a
+threat -- which undercut the whole point of putting a hunter on F1.
+
+Biology note: Bdellovibrio really IS tiny (~0.3 um; it bores into larger
+cells), so `pico` was the honest class. But the game needs the predator to be
+TRACKABLE. Now: a fuller vibrioid body (41 body pixels) at `small` (0.72) --
+roughly five times the visible area.
+
+`spec` pins a minimum visible body for EVERY organism: body ink x size-scale^2
+> 14. It bites on the old sprite (5 failures). A future organism cannot ship
+as a speck.
+
 ## v1.22.1 — the AI you could not see
 
 Reported: "I don't see the enemy behaviour in action." Two causes, both real.
