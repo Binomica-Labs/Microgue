@@ -1,3 +1,44 @@
+# v1.22.0 — name your strain
+
+Asked for in v1.12, deferred twice as "first-of-its-kind plumbing". Done.
+Strains got names from a prebaked pool (K-12, MR-1, SP162 -- real reference
+strains, fine to read, not YOURS). A run you named is a run you remember.
+
+## How text entry works on a canvas game
+
+There was no text input anywhere. The only honest way on mobile is a real
+`<input>`, positioned over the canvas, focused on demand so the system keyboard
+comes up. `name_entry.ts` owns that element: opacity 0, pointer-events none,
+1px, `font-size:16px` (stops iOS zoom-on-focus). The canvas draws the field
+and a blinking caret from the input's value (`name_render.ts`); the input
+exists only to receive keystrokes. Built once at boot, not in the Game
+constructor, so a test-built Game (no DOM) has none and the naming step is
+skipped.
+
+The step sits between choosing a class and inoculating. Enter commits, Escape
+cancels, and a BLUR while open commits -- the keyboard's own "done" on many
+phones dismisses without an Enter, and losing what was typed there is the
+worst outcome. `close()` fires neither callback, for when a canvas "done"
+button has already read the value and taken over -- so the blur that follows
+cannot double-commit and start a second run.
+
+`cleanName` keeps printable characters, trims, caps at 16. Accents survive;
+control characters do not. A blank name falls back to the pool, so the field
+can never produce an unnamed strain. The typed name goes through
+`startRun(slot, cls, name)` and is what `saveSlot` writes, so it shows on
+Continue and survives a resume.
+
+The listeners go through `on()` from safety.ts like every other listener in
+the game -- the safety test caught the two raw `addEventListener` calls.
+
+## What remains
+
+The field is untested on a real phone keyboard from here (no browser in this
+sandbox). The two things to check on-device: that tapping the canvas field
+raises the keyboard at all (some browsers refuse for an opacity-0 input --
+if so, the fix is opacity 0.01), and that "done" on the keyboard commits
+rather than just dismissing.
+
 # v1.21.0 — active abilities, and a swarm that encircles
 
 ## v1.21.1 — abilities hardened; a duplicate-install bug found by accident

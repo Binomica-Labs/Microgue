@@ -16,6 +16,7 @@ import { inBox as inBoxOf, type Box } from "./chrome.js";
 import { i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
 import { castAbility } from "./cast.js";
+import { NAME_POOL } from "./saves.js";
 import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
@@ -111,6 +112,31 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       _g.gesture = "none";
       return;
     }
+    // The naming screen: "done" commits what is typed, "use suggested" takes
+    // the prebaked name. Both go through the field so its state stays honest.
+    if (_g.naming !== null) {
+      const nb = _g.nameBoxes;
+      if (nb && inBoxOf(nb.done, x, y)) {
+        const n = _g.naming, f = _g.nameField;
+        _g.naming = null;
+        const typed = f?.value() ?? "";
+        f?.close();
+        _g.startRun(n.slot, n.cls, typed);
+      } else if (nb && inBoxOf(nb.skip, x, y)) {
+        const n = _g.naming, f = _g.nameField;
+        _g.naming = null;
+        f?.close();
+        _g.startRun(n.slot, n.cls);
+      } else {
+        // A tap on the field refocuses the input, so a dismissed keyboard
+        // can be brought back.
+        _g.nameField?.open(_g.nameField.value(),
+          (name) => { const n = _g.naming; _g.naming = null; if (n) _g.startRun(n.slot, n.cls, name); },
+          () => { /* stay on the screen */ });
+      }
+      _g.gesture = "none";
+      return;
+    }
     // The class picker is modal over the splash: an empty slot asks what to
     // inoculate before anything is created.
     if (_g.pickingClassFor !== null) {
@@ -125,7 +151,21 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
           _g.introChosen = true;
           _g.note(`${CLASSES[hit.id].name} prepared. Take it to the column.`);
         } else {
-          _g.startRun(slot, hit.id);
+          // Name it before it goes in. The class is chosen; the name is the
+          // last thing before inoculation. A prebaked suggestion is offered so
+          // an empty field still yields a real strain.
+          _g.naming = { slot, cls: hit.id };
+          _g.nameField?.open(
+            NAME_POOL[slot % NAME_POOL.length] ?? "strain",
+            (name) => {
+              const n = _g.naming;
+              _g.naming = null;
+              if (n) _g.startRun(n.slot, n.cls, name);
+            },
+            () => { _g.naming = null; _g.pickingClassFor = slot; },
+          );
+          // No DOM (tests, or a field that failed to build): go straight in.
+          if (!_g.nameField) { _g.naming = null; _g.startRun(slot, hit.id); }
         }
       } else if (_g.inClose(x, y)) {
         _g.pickingClassFor = null;      // back to the slots

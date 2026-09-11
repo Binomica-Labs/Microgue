@@ -11,6 +11,8 @@ import { noStations, type StationId } from "./lab_level.js";
 import { newBiofilm, type Biofilm } from "./biofilm.js";
 import type { Cooldowns } from "./abilities.js";
 import type { AbilitySlot } from "./ability_bar.js";
+import { makeNameField, type NameField } from "./name_entry.js";
+import type { NameBoxes } from "./name_render.js";
 import type { Secretion, Surge } from "./cast.js";
 import { newAftermath, type Aftermath } from "./aftermath.js";
 import type { AftermathBoxes } from "./aftermath_render.js";
@@ -142,6 +144,12 @@ class Game {
    *  direction (bolt, dash). Null when nothing is armed. */
   aiming: string | null = null;
   abilitySlots: AbilitySlot[] = [];
+  /** The strain being named, between choosing a class and inoculating. The
+   *  hidden input is up while this is set. */
+  naming: { slot: number; cls: ClassId } | null = null;
+  /** The DOM text field, built once at boot. Null where there is no DOM. */
+  nameField: NameField | null = null;
+  nameBoxes: NameBoxes | null = null;
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;
@@ -689,7 +697,9 @@ class Game {
 
   enterLab(slot: number): void { g_enterLab(this, slot); }
 
-  startRun(slot: number, cls: ClassId = DEFAULT_CLASS): void { g_startRun(this, slot, cls); }
+  startRun(slot: number, cls: ClassId = DEFAULT_CLASS, name?: string): void {
+    g_startRun(this, slot, cls, name);
+  }
 
   /** The field notebook. "Recording the bugs you find along the way." */
 
@@ -724,6 +734,13 @@ function boot(): void {
   const el = document.getElementById("game");
   if (!(el instanceof HTMLCanvasElement)) return;
   const game = new Game(el);
+  // The hidden text field for naming a strain. Built here, not in the
+  // constructor, so a Game made in a test (no DOM) simply has none and the
+  // naming step is skipped.
+  try {
+    game.nameField = makeNameField(document,
+      (msg) => { game.toasts.push(msg, "error", performance.now()); });
+  } catch { game.nameField = null; }
   document.getElementById("boot")?.remove();
   // Registration used to happen once on `load` with default cache handling,
   // which left an installed app one or two versions behind. See sw_client.ts.

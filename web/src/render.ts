@@ -11,6 +11,7 @@ import { r_drawMenu } from "./menu_frame.js";
 import { r_labFurniture } from "./lab_furniture.js";
 import { drawAftermath } from "./aftermath_render.js";
 import { drawAbilityBar } from "./ability_bar.js";
+import { drawNaming } from "./name_render.js";
 import { r_drawModals } from "./modal_render.js";
 import { r_drawWalls } from "./wall_render.js";
 import { r_ringReadout } from "./ring_readout.js";
@@ -64,6 +65,13 @@ export function r_draw(_g: Game): void {
     // `started` false -- and stopped being fine the moment the lab became a
     // level being played.
     if (_g.pickingClassFor !== null) { r_drawPicker(_g, W, H); return; }
+    // Naming is modal too: after the class, before inoculation.
+    if (_g.naming !== null) {
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      _g.nameBoxes = drawNaming(_g, W, H, _g.insets(), u);
+      _g.drawToasts(W, H);
+      return;
+    }
     if (_g.showSplash || !_g.started) {
       r_drawMenu(_g, W, H);
       _g.drawToasts(W, H);

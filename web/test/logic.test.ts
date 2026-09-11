@@ -8234,3 +8234,17 @@ describe("a gene sits on the ring once", () => {
     expect(onRing, "self-replacement left two on the ring").toBe(1);
   });
 });
+
+describe("naming a strain", () => {
+  it("cleans a typed name: printable, trimmed, capped", async () => {
+    const { cleanName, isBlank } = await import("../src/name_entry.js");
+    expect(cleanName("  SP162  ")).toBe("SP162");
+    expect(cleanName("a\u0000b\u0007c")).toBe("abc");        // control chars out
+    expect(cleanName("x".repeat(40)).length, "not capped").toBe(16);
+    expect(cleanName("caf\u00e9 \u00fcber")).toBe("caf\u00e9 \u00fcber"); // accents kept
+    expect(isBlank("   ")).toBe(true);
+    expect(isBlank("\u0000\u0001")).toBe(true);
+    expect(isBlank("K-12")).toBe(false);
+  });
+});
+

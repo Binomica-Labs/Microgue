@@ -1734,6 +1734,8 @@ describe("state that should persist, does", () => {
     cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",
     surge: "a timed self-effect", aiming: "which ability is armed",
     abilitySlots: "hit boxes, per frame",
+    naming: "the strain being named, between class and inoculation",
+    nameField: "the DOM text input, built at boot", nameBoxes: "hit boxes, per frame",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",
@@ -3806,5 +3808,123 @@ describe("soak: the ability bar under random taps", () => {
     // The soak must actually have exercised the system.
     expect(casts, "the soak never cast anything -- it tested nothing").toBeGreaterThan(5);
     void armedTaps;
+  });
+});
+
+describe("naming a strain: game-level", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a typed name wins; a blank one falls back to the pool", async () => {
+    const { Game } = await import("../src/main.js");
+    const mk = () => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    const g = mk();
+    g.startRun(0, "phototroph", "MY STRAIN");
+    expect(g.runName, "the typed name was not used").toBe("MY STRAIN");
+    const h = mk();
+    h.startRun(1, "phototroph", "   ");
+    expect(h.runName, "a blank name did not fall back").not.toBe("");
+    expect(h.runName.length).toBeGreaterThan(0);
+  });
+
+  it("a typed name survives save and shows in the slot list", async () => {
+    const { Game } = await import("../src/main.js");
+    const { listSlots } = await import("../src/saves.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(2, "heterotroph", "Wolffia-9");
+    g.save();
+    const info = listSlots()[2];
+    expect(info?.name, "the slot list does not show the typed name").toBe("Wolffia-9");
+    // and a resume keeps it
+    const h = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    h.startRun(2);
+    expect(h.runName, "resume lost the typed name").toBe("Wolffia-9");
+  });
+});
+
+describe("the hidden name field", () => {
+  // A minimal <input> stand-in: enough to hold a value, focus, blur, and
+  // dispatch the events the field listens for.
+  const fakeDoc = () => {
+    const listeners: Record<string, ((e: unknown) => void)[]> = {};
+    const el = {
+      type: "", maxLength: 0, autocomplete: "", autocapitalize: "", spellcheck: true,
+      value: "", style: {} as Record<string, string>,
+      setAttribute: () => undefined,
+      addEventListener: (k: string, f: (e: unknown) => void) => { (listeners[k] ??= []).push(f); },
+      focus: () => undefined, blur: () => { for (const f of listeners["blur"] ?? []) f({}); },
+      select: () => undefined,
+      key: (k: string) => { for (const f of listeners["keydown"] ?? []) f({ key: k, preventDefault: () => undefined }); },
+    };
+    const doc = { createElement: () => el, body: { appendChild: () => undefined } };
+    return { doc: doc as unknown as Document, el };
+  };
+
+  it("enter commits the cleaned value; escape cancels; done-key blur commits", async () => {
+    const { makeNameField } = await import("../src/name_entry.js");
+    const { doc, el } = fakeDoc();
+    const f = makeNameField(doc, () => undefined);
+    let got: string | null = null, cancelled = 0;
+    f.open("K-12", (n) => { got = n; }, () => { cancelled++; });
+    expect(f.isOpen).toBe(true);
+    el.value = "  my strain  ";
+    el.key("Enter");
+    expect(got, "enter did not commit").toBe("my strain");
+    expect(f.isOpen, "still open after commit").toBe(false);
+
+    got = null;
+    f.open("K-12", (n) => { got = n; }, () => { cancelled++; });
+    el.key("Escape");
+    expect(cancelled, "escape did not cancel").toBe(1);
+    expect(got).toBeNull();
+
+    // the keyboard's own dismiss is a blur: commit, do not lose the text
+    f.open("K-12", (n) => { got = n; }, () => { cancelled++; });
+    el.value = "then dismissed";
+    el.blur();
+    expect(got, "a blur lost what was typed").toBe("then dismissed");
+  });
+
+  it("close() fires neither callback", async () => {
+    // For when the caller has already read the value and taken over -- a
+    // "done" button. The blur that close() triggers must not double-commit.
+    const { makeNameField } = await import("../src/name_entry.js");
+    const { doc, el } = fakeDoc();
+    const f = makeNameField(doc, () => undefined);
+    let commits = 0, cancels = 0;
+    f.open("x", () => { commits++; }, () => { cancels++; });
+    el.value = "abc";
+    f.close();
+    expect(commits, "close committed").toBe(0);
+    expect(cancels, "close cancelled").toBe(0);
+    expect(f.value(), "close lost the value").toBe("abc");
+  });
+
+  it("a commit after close is ignored, not a double start", async () => {
+    // Enter after the caller already took over must not fire a stale callback
+    // and start a second run.
+    const { makeNameField } = await import("../src/name_entry.js");
+    const { doc, el } = fakeDoc();
+    const f = makeNameField(doc, () => undefined);
+    let commits = 0;
+    f.open("x", () => { commits++; }, () => undefined);
+    f.close();
+    el.key("Enter");
+    el.blur();
+    expect(commits, "a stale commit fired after close").toBe(0);
   });
 });

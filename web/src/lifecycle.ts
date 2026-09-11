@@ -28,6 +28,7 @@ import { ROOM_STYLE } from "./rooms.js";
 import { newRun } from "./run.js";
 import { ZOOM_MAX, ZOOM_MIN } from "./save.js";
 import { NAME_POOL, listSlots, loadSlot } from "./saves.js";
+import { cleanName, isBlank } from "./name_entry.js";
 
 export function g_enter(_g: Game, level: Level, arrive: Point): void {
   // Biofilm does not follow you: it is territory on a specific floor, and
@@ -144,7 +145,9 @@ export function g_enter(_g: Game, level: Level, arrive: Point): void {
   _g.save();
 }
 
-export function g_startRun(_g: Game, slot: number, cls: ClassId = DEFAULT_CLASS): void {
+export function g_startRun(
+  _g: Game, slot: number, cls: ClassId = DEFAULT_CLASS, name?: string,
+): void {
 
   // A new strain inherits NOTHING about what the last one was doing.
   //
@@ -189,7 +192,10 @@ export function g_startRun(_g: Game, slot: number, cls: ClassId = DEFAULT_CLASS)
   _g.lastAttacker = null;
   const existing = loadSlot(slot);
   const info = listSlots()[slot];
-  _g.runName = info?.name ?? NAME_POOL[slot % NAME_POOL.length] ?? "unnamed";
+  // A name the player typed wins. A resumed run keeps the name it was saved
+  // with. Only a fresh, unnamed strain draws from the prebaked pool.
+  const typed = name !== undefined && !isBlank(name) ? cleanName(name) : null;
+  _g.runName = typed ?? info?.name ?? NAME_POOL[slot % NAME_POOL.length] ?? "unnamed";
 
   if (existing) {
     _g.applySave(existing);
