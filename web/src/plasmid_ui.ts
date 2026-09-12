@@ -4,6 +4,7 @@
 // inventory workable with a thumb: slot index is just an angle, so the target
 // is as large as the ring is wide.
 
+import { raisedCard } from "./relief.js";
 import type { Box } from "./chrome.js";
 import { countOf } from "./stack.js";
 import { GENES, type Pathway } from "./biology.js";
@@ -144,12 +145,13 @@ export function drawBinList(
 
     const tier = RARITY[partRarity(p)];
     ctx.globalAlpha = dragging === i ? 0.3 : 1;
-    ctx.fillStyle = "rgba(14,20,17,0.92)";
+    // A raised card, not a flat box. Lit from above, with a shadow edge for
+    // thickness; the rarity outline sits on top.
+    raisedCard(ctx, box.x, box.y, box.w, box.h, 5 * u, "#141c18", 2.5 * u);
     ctx.strokeStyle = tier.colour;
     ctx.lineWidth = Math.max(1.4 * u, 1.2);
     ctx.beginPath();
     ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
-    ctx.fill();
     ctx.stroke();
 
     // A spine in the pathway colour: what it DOES, beside how rare it is.
@@ -246,10 +248,10 @@ export function drawBin(
     // Body in the pathway colour, which says what it DOES; outline in the
     // rarity colour, which says how hard it was to find. Two axes, two
     // channels, so neither has to be read off the other.
-    ctx.fillStyle = partColour(p);
-    ctx.beginPath();
-    ctx.roundRect(c.x, c.y, g.cell, g.cell, g.cell * 0.22);
-    ctx.fill();
+    // A raised card in the pathway colour: a small tile with thickness, not
+    // a flat swatch.
+    raisedCard(ctx, c.x, c.y, g.cell, g.cell, g.cell * 0.22, partColour(p),
+               Math.max(g.cell * 0.09, 2));
 
     ctx.strokeStyle = tier.colour;
     ctx.lineWidth = Math.max(g.cell * 0.075, 1.5);

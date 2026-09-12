@@ -8595,3 +8595,73 @@ describe("the leftward read STOPS at an owned gene, it does not skip past it", (
     expect(reached.has("katG"), "the rightward read was lost").toBe(true);
   });
 });
+
+describe("relief and floor", () => {
+  it("shade lightens and darkens a hex colour, and survives garbage", async () => {
+    const { shade } = await import("../src/relief.js");
+    expect(shade("#808080", 0.5)).toBe("#c0c0c0");
+    expect(shade("#808080", -0.5)).toBe("#404040");
+    expect(shade("#ffffff", 0.5), "clamped high").toBe("#ffffff");
+    expect(shade("#000000", -0.5), "clamped low").toBe("#000000");
+    expect(shade("garbage", 0.5), "non-hex passes through").toBe("garbage");
+  });
+
+  it("a raised card draws a shadow, a gradient face and a lip", async () => {
+    // Three moves give depth. Count them: two fills (shadow, face) and one
+    // stroke (lip), and the face uses a gradient not a flat colour.
+    const { raisedCard } = await import("../src/relief.js");
+    let fills = 0, strokes = 0, gradients = 0;
+    let lastFill: unknown = null;
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (p === "createLinearGradient") { gradients++; return () => ({ addColorStop: () => undefined, __g: true }); }
+        if (p === "fillStyle") return lastFill;
+        return (...a: unknown[]) => {
+          if (p === "fill") fills++;
+          if (p === "stroke") strokes++;
+          void a;
+          return undefined;
+        };
+      },
+      set: (_o, p, v) => { if (p === "fillStyle") lastFill = v; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    raisedCard(ctx, 10, 10, 60, 30, 5, "#3fd27a", 3);
+    expect(fills, "shadow + face").toBe(2);
+    expect(strokes, "the lip").toBe(1);
+    expect(gradients, "face and lip gradients").toBe(2);
+  });
+
+  it("the floor is lifted clearly above the surround but well below the wall", () => {
+    // Was 3% above the surround: invisible. Must read as sediment, not void,
+    // without competing with the walls that carry the texture.
+    const lum = (h: string): number => {
+      const n = Number.parseInt(h.slice(1), 16);
+      return (((n >> 16) & 255) * 0.30 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) / 255;
+    };
+    const surround = lum("#010303");
+    for (const s of bio.STRATA) {
+      const n = Number.parseInt(s.floor.slice(1), 16);
+      const ch = (v: number): number => Math.min(Math.round(v + (255 - v) * 0.14), 255);
+      const lifted = `#${(((ch((n >> 16) & 255)) << 16) | (ch((n >> 8) & 255) << 8) | ch(n & 255)).toString(16).padStart(6, "0")}`;
+      const above = lum(lifted) - surround;
+      const wall = lum(s.wall) - surround;
+      expect(above, `D${String(s.depth)} floor is ${(above * 100).toFixed(0)}% above surround -- invisible`)
+        .toBeGreaterThan(0.08);
+      expect(above, `D${String(s.depth)} floor competes with the wall`)
+        .toBeLessThan(wall * 0.6);
+    }
+  });
+
+  it("the floor pattern is cached: one rasterise per stratum and size", async () => {
+    const { floorPattern, forgetFloor } = await import("../src/floor_render.js");
+    forgetFloor();
+    let made = 0;
+    const doc = (globalThis as unknown as { document: { createElement: () => unknown } }).document;
+    const real = doc.createElement.bind(doc);
+    doc.createElement = () => { made++; return real(); };
+    const ctx = { createPattern: () => undefined } as unknown as CanvasRenderingContext2D;
+    for (let i = 0; i < 20; i++) floorPattern(ctx, 1, 16, "#282f2c");
+    expect(made, `${String(made)} rasterises for 20 identical calls`).toBe(1);
+    doc.createElement = real;
+  });
+});

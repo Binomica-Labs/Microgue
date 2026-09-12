@@ -12,6 +12,8 @@ import { r_labFurniture } from "./lab_furniture.js";
 import { drawAftermath } from "./aftermath_render.js";
 import { drawAbilityBar } from "./ability_bar.js";
 import { drawNaming } from "./name_render.js";
+import { floorPattern } from "./floor_render.js";
+import { shade } from "./relief.js";
 import { r_drawModals } from "./modal_render.js";
 import { r_drawWalls } from "./wall_render.js";
 import { r_ringReadout } from "./ring_readout.js";
@@ -133,6 +135,16 @@ export function r_draw(_g: Game): void {
     //
     // Whole-floor and cached: it changes only when a barrier dissolves.
     const sight = _g.level.sight;
+    // The floor, under the walls. The stratum's floor colour is near-black
+    // (3% above the surround -- it was never drawn before), so lift it a
+    // little toward the wall colour and lay a faint grain on it. Fog covers
+    // the unexplored part afterwards, so this only shows where you have been.
+    if (!hc) {
+      const tone = shade(s.floor, 0.14);
+      const pat = floorPattern(ctx, s.depth, px, tone);
+      ctx.fillStyle = pat ?? tone;
+      ctx.fillRect(x0 * px, y0 * px, (x1 - x0 + 1) * px, (y1 - y0 + 1) * px);
+    }
     r_drawWalls(_g, ctx, s, px, x0, y0, x1, y1, hc, inLab);
     if (_g.path) {
       // Trim the stretch already walked, so the trail shows where you are

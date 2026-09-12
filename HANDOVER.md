@@ -1,3 +1,39 @@
+# v1.24.0 — relief on the parts, grain on the floor
+
+## Parts are raised, not flat
+
+Every part in the bin and on the ring was a flat fill with a 1px outline: a
+diagram, not an object. `relief.ts` gives a card depth with three cheap moves
+-- a top-lit vertical gradient on the face, a dark shadow band offset
+down-right for thickness, a bright lip along the top edge. Light is from the
+top-left everywhere, always; one card lit differently breaks all of them. The
+ring's rotation applies only to the label text, so every cell lights the same
+way. `shade()` derives all three from the base colour, so a card in any of
+the twelve pathway colours lights identically.
+
+`shade` had a robustness hole: `parseInt("arbage", 16)` partially parses, so
+the finite check let garbage through as a colour. It requires six hex digits
+now.
+
+## The floor was never drawn
+
+Flat black was not a choice, it was an absence: the wall silhouette sat
+straight on the #010303 surround, so every floor tile was the same colour as
+unexplored fog and read as void. The stratum floor colours existed but were
+~3% above the surround -- invisible -- because nothing had ever drawn them.
+
+`floor_render.ts` lifts the floor colour 14% toward light and lays a faint
+deterministic grain (three hashed specks per tile, in a 4x4 pattern tile so
+the repeat is not obvious). Now ~17% above the surround, a quarter of the
+wall's contrast: sediment, not void, and the walls still carry the texture.
+
+Rasterised once per stratum and tile size and cached -- and the cache had a
+real bug: a stub `createPattern` returns undefined, which was stored and then
+failed the `!== undefined` hit check, re-rasterising every frame. The
+allocation test caught it (61 canvases for 60 frames). In a real browser it
+would not have leaked, but the miss path was wrong regardless. Coerced to
+null; one rasterise per key, tested.
+
 # v1.23.0 — deeper builds: colours, parts, bulk loot
 
 ## Twelve distinct colours, and defense split four ways
