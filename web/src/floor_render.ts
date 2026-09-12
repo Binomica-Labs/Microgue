@@ -57,7 +57,7 @@ export function floorPattern(
       // A stub context returns undefined here; coerce so the miss is CACHED
       // as null and not re-rasterised every frame. That exact leak cost one
       // canvas per frame in the allocation test.
-      pat = (ctx.createPattern(c, "repeat") as CanvasPattern | null | undefined) ?? null;
+      pat = ctx.createPattern(c, "repeat") ?? null;
     }
   } catch {
     pat = null;

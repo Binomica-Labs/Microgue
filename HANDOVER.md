@@ -1,5 +1,48 @@
 # v1.24.0 — relief on the parts, grain on the floor
 
+## v1.24.1 — a lint-gated packager, because this happened twice
+
+CI failed v1.24.0 on `floor_render.ts:60`: an unnecessary `as CanvasPattern`
+cast. My working tree had NO such cast and linted clean. So the tarball was
+cut from a state that predated an `eslint --fix` in the same session -- the
+exact failure v1.19.1 documented and I said I would not repeat.
+
+A written rule did not hold, so it is a mechanism now: `tools/pack.sh`.
+Before tar, it runs PLAIN lint (no --fix) and tsc on the working tree and
+refuses to package on either failure (exit 1, last good tarball left alone).
+After tar, it lints the PACKAGED copy -- the exact bytes going out -- so the
+working tree and the package can no longer disagree. Proven: reintroducing
+the CI-failing cast makes the gate refuse.
+
+The general shape: a rule you have to remember is a rule you will break on
+the day it matters. Put it in the path.
+
+## v1.24.1 — CI lint failure, and the hollow check behind it
+
+CI failed on one lint error in floor_render.ts: the `as CanvasPattern | null |
+undefined` cast I added for the cache fix is redundant (createPattern is
+already typed `| null`; the `?? null` alone handles a stub's undefined).
+Dropped. One line.
+
+The real finding is WHY local reported "final lint: 0" while CI failed -- for
+the SECOND time. The pre-package check was:
+
+    npm run lint 2>&1 | tail -1; echo "final lint: $?"
+
+That `$?` is tail's exit code. Always 0. The check has been printing a pass
+for several versions regardless of whether lint passed, and it also ran from
+the wrong directory once via a silently-failing `cd`. A hollow check is worse
+than no check: it produced confidence I then repeated to the user.
+
+`tools/prepack.sh` replaces it: guard, tsc, lint, test, each step's OWN exit
+status with no pipe in the way, and a non-zero exit if any fails. Proven both
+directions -- it FAILS on the bad cast (showing the error) and PASSES clean.
+This is now the only pass signal before packaging.
+
+The general lesson, which I have now learned the expensive way: a pipe to tail
+swallows the exit code. Any `cmd | filter; echo $?` reports the filter. Use
+`set -o pipefail` or check the command's status directly.
+
 ## Parts are raised, not flat
 
 Every part in the bin and on the ring was a flat fill with a 1px outline: a
