@@ -103,33 +103,62 @@ export function transcribe(
     const def = (PROMOTERS as Record<string, typeof PROMOTERS[PromoterId] | undefined>)[head.id];
     if (!def) continue;
     const output = def.strength * Math.min(Math.max(def.active(ctx), 0), 1);
-    const readings: Reading[] = [];
 
-    let flow = 1;
-    let rank = 0;
-    let relief = 0;
-    for (let step = 1; step < n; step++) {
-      const at = norm(p + step);
-      const part = slots[at] ?? null;
-      if (part === null) break;                     // a gap ends the transcript
-      if (part.kind === "promoter") break;          // the next unit starts here
+    // Walk one direction from the promoter, reading genes until a gap, the
+    // next promoter, or the flow decays below the floor. Terminators cut flow
+    // by their readthrough and are stepped over.
+    const walk = (dir: 1 | -1): Reading[] => {
+      const readings: Reading[] = [];
+      let flow = 1;
+      let rank = 0;
+      let relief = 0;
+      for (let step = 1; step < n; step++) {
+        const at = norm(p + dir * step);
+        const part = slots[at] ?? null;
+        if (part === null) break;                     // a gap ends the transcript
+        if (part.kind === "promoter") break;          // the next unit starts here
+        // Walking LEFT: a gene whose own left neighbour is a promoter belongs
+        // to that promoter. Stop BEFORE it -- a stop, not a skip, so nothing
+        // beyond it is reached either. A gene has one orientation.
+        if (dir === -1 && part.kind === "gene"
+            && slots[norm(at - 1)]?.kind === "promoter") break;
 
-      if (part.kind === "terminator") {
-        const term = (TERMINATORS as Record<string, typeof TERMINATORS[TerminatorId] | undefined>)[part.id];
-        flow *= term ? term.readthrough : 1;   // unknown terminator: no effect
+        if (part.kind === "terminator") {
+          const term = (TERMINATORS as Record<string, typeof TERMINATORS[TerminatorId] | undefined>)[part.id];
+          // A conditional terminator reads the context; a flat one its value.
+          const rt = term ? (term.readthroughIn ? term.readthroughIn(ctx) : term.readthrough) : 1;
+          flow *= Math.min(Math.max(rt, 0), 1);
+          if (flow < FLOOR) break;
+          continue;                                   // and keep reading
+        }
+
+        const decay = POLARITY + (1 - POLARITY) * relief;
+        flow *= rank === 0 ? 1 : decay;
         if (flow < FLOOR) break;
-        continue;                                   // and keep reading
+        readings.push({ slot: at, id: part.id, rank, flow, from: p });
+        relief = Math.max(relief, modEffect(part.mods).relief);
+        rank++;
       }
+      return readings;
+    };
 
-      const decay = POLARITY + (1 - POLARITY) * relief;
-      flow *= rank === 0 ? 1 : decay;
-      if (flow < FLOOR) break;
-      readings.push({ slot: at, id: part.id, rank, flow, from: p });
-      relief = Math.max(relief, modEffect(part.mods).relief);
-      rank++;
-    }
-
+    const readings = walk(1);
     if (output > 0 || readings.length > 0) out.push({ promoter: p, output, readings });
+
+    // A bidirectional promoter also reads LEFTWARD: one site, two operons.
+    // The leftward operon is its own entry, so it forms its own synergy group
+    // and its own burden -- two operons, not one big one.
+    //
+    // The leftward walk must not poach a gene that ALREADY belongs to a
+    // forward promoter. In [j23106][cbbL]<-pbidir, cbbL is j23106's cargo;
+    // a naive leftward walk read it too, so one gene was driven twice by two
+    // promoters facing each other. A gene has one orientation. The rule: a
+    // leftward walk stops at a gene whose own left neighbour is a promoter --
+    // that promoter owns it.
+    if (def.bidirectional) {
+      const left = walk(-1);
+      if (left.length > 0) out.push({ promoter: p, output, readings: left });
+    }
   }
   return out;
 }

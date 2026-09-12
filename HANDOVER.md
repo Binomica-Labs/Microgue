@@ -1,3 +1,52 @@
+# v1.23.0 — deeper builds: colours, parts, bulk loot
+
+## Twelve distinct colours, and defense split four ways
+
+The old palette had six of nine pathway colours in near-identical pairs
+(photo/carbon green, nitrogen/sulfur yellow, iron/methane brown). On a
+twelve-gene ring, "same colour means an easy operon" was a guess. Every pair
+is now >45 RGB units apart, pinned by a test.
+
+`defense` was a sixteen-gene catch-all -- repair, motility, secretion and
+resistance all one colour, so a "defense operon" meant nothing. Split into
+stress (the tank), motility (the skirmisher), secretion (the controller) and
+resist (the deep-diver): four real builds. Seven real genes added so the thin
+ones can form a synergy operon (merA czcA copA acrB / motA fliC cheY), all
+sourced and carried. 88 genes, 23 organisms, curve holds.
+
+## Bidirectional promoters, and more conditionals
+
+`Pdiv` and `PdivFNR` drive transcription BOTH ways from one site: one part,
+two operons, each its own synergy group and burden. `transcribe`'s walk is now
+direction-parameterised. Plus nitrate (PnarK), iron (Pfur), cold-shock (PcspA,
+night), light (PpsbA, day) and quorum (Plux) conditionals; the plasmid reads
+`light` from the clock.
+
+**A bug the hardening found and fixed twice.** The leftward walk from a
+divergent promoter POACHED a gene that already belonged to a forward promoter
+facing it: [j23106][cbbL]<-Pdiv drove cbbL twice. First fix was a post-filter,
+which was wrong -- it dropped the poached gene but the walk had already
+continued PAST it. The real fix is a stop inside the walk: walking left, a
+gene whose own left neighbour is a promoter is owned, stop before it. A gene
+has one orientation. Removing the stop is six failures.
+
+## Terminators that do something
+
+leaky (a deliberate half-stop), riboswitch (sealed in oxygen, opens in
+sulfide -- one transcript splits differently by zone, tested), attenuator
+(opens under starvation). `TerminatorDef.readthroughIn` reads the context.
+
+## Take all / eat all
+
+Two buttons on the loot container. Eat-all yields EXACTLY what eating from
+the bin would (tested), so neither path is a trap. Both report what they
+skipped.
+
+## plasmid.ts split again
+
+The `light` setter pushed it to 903. `transact` moved to `plasmid_tx.ts`.
+865 now.
+
 # v1.22.0 — name your strain
 
 Asked for in v1.12, deferred twice as "first-of-its-kind plumbing". Done.

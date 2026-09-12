@@ -398,10 +398,12 @@ export function drawResearch(
  * Self-contained: it needs the drop and the geometry and nothing else from the
  * game, which is why it could move out of main.ts without ceremony.
  */
+export interface ContainerBoxes { takeAll: Box; eatAll: Box }
+
 export function drawContainer(
   ctx: CanvasRenderingContext2D, W: number, H: number,
   ins: Insets, u: number, d: Drop, boxes: Box[], wrap: Wrap,
-): void {
+): ContainerBoxes {
                     
     ctx.fillStyle = "rgba(4,7,6,0.86)";
     ctx.fillRect(0, 0, W, H);
@@ -469,6 +471,32 @@ export function drawContainer(
       wrap(itemNote(first), panelW - 28 * u).slice(0, 2)
         .forEach((l, i) => { ctx.fillText(l, px0 + 14 * u, y + i * 12 * u); });
     }
+
+    // Bulk actions under the panel. One tap per item was a decision you had
+    // already made, five times over. TAKE ALL fills the bin with what fits;
+    // EAT ALL digests every cassette where it lies.
+    const bw = (panelW - 12 * u) / 2, bh = 36 * u, by = py0 + panelH + 12 * u;
+    const takeAll: Box = { x: px0, y: by, w: bw, h: bh };
+    const eatAll: Box = { x: px0 + bw + 12 * u, y: by, w: bw, h: bh };
+    const anyCassette = d.items.some((it) => it.kind === "cassette");
+    for (const [box, label, colour, on] of [
+      [takeAll, "take all", "#7fe0a4", true],
+      [eatAll, "eat all", anyCassette ? "#cfe04a" : "rgba(255,255,255,0.2)", anyCassette],
+    ] as [Box, string, string, boolean][]) {
+      ctx.fillStyle = "rgba(12,18,15,0.94)";
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = Math.max(1.3 * u, 1.1);
+      ctx.beginPath();
+      ctx.roundRect(box.x, box.y, box.w, box.h, 7 * u);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = on ? colour : "rgba(255,255,255,0.3)";
+      ctx.font = `${12 * u}px ui-monospace,monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, box.x + box.w / 2, box.y + box.h / 2);
+    }
+    return { takeAll, eatAll };
 }
 
 export interface ShopRow { readonly box: Box; readonly offer: Offer }

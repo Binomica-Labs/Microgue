@@ -1736,6 +1736,7 @@ describe("state that should persist, does", () => {
     abilitySlots: "hit boxes, per frame",
     naming: "the strain being named, between class and inoculation",
     nameField: "the DOM text input, built at boot", nameBoxes: "hit boxes, per frame",
+    containerBoxes: "hit boxes, per frame",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",
@@ -3926,5 +3927,84 @@ describe("the hidden name field", () => {
     el.key("Enter");
     el.blur();
     expect(commits, "a stale commit fired after close").toBe(0);
+  });
+});
+
+describe("bulk loot: take all and eat all", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const withDrop = async () => {
+    const { Game } = await import("../src/main.js");
+    const { addDrop } = await import("../src/items.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    for (let i = 0; i < 3; i++) g.press("wait");
+    // a drop under the player with three cassettes and a substrate
+    addDrop(g.drops, g.player.x, g.player.y, [
+      { kind: "cassette", gene: "cbbL", allele: WILD_TYPE },
+      { kind: "cassette", gene: "katG", allele: WILD_TYPE },
+      { kind: "cassette", gene: "sodA", allele: WILD_TYPE },
+      { kind: "substrate", id: "glucose" },
+    ]);
+    const d = g.drops.find((x) => x.x === g.player.x && x.y === g.player.y);
+    if (!d) throw new Error("no drop");
+    g.openDrop = d;
+    return { g, d };
+  };
+
+  it("take all fills the bin with what fits and reports the rest", async () => {
+    const { takeAll } = await import("../src/bulk_loot.js");
+    const { g, d } = await withDrop();
+    const binBefore = g.genome.bin.length;
+    const r = takeAll(g, d);
+    expect(r.taken, "nothing was taken").toBeGreaterThan(0);
+    expect(g.genome.bin.length, "the bin did not grow").toBeGreaterThan(binBefore);
+    expect(r.taken + r.left, "items vanished").toBe(4);
+  });
+
+  it("eat all digests every cassette for hp and ATP, leaves the substrate", async () => {
+    const { eatAll } = await import("../src/bulk_loot.js");
+    const { g, d } = await withDrop();
+    g.player.hp = 5; g.player.atp = 10;
+    const r = eatAll(g, d);
+    expect(r.taken, "no cassette was digested").toBe(3);
+    expect(g.player.hp, "eating gave no hp").toBeGreaterThan(5);
+    expect(g.player.atp, "eating gave no ATP").toBeGreaterThan(10);
+    expect(d.items.every((it) => it.kind === "substrate"),
+           "eat all ate a substrate").toBe(true);
+    expect(d.items.length).toBe(1);
+  });
+
+  it("eat all on a drop with no cassettes does nothing and says so", async () => {
+    const { eatAll } = await import("../src/bulk_loot.js");
+    const { g, d } = await withDrop();
+    d.items = d.items.filter((it) => it.kind === "substrate");
+    const hp = g.player.hp;
+    const r = eatAll(g, d);
+    expect(r.taken).toBe(0);
+    expect(g.player.hp).toBe(hp);
+  });
+
+  it("eat all yields exactly what eating from the bin would", async () => {
+    // Floor and bin must be worth the same, or one path is strictly better
+    // and the other is a trap.
+    const { eatAll } = await import("../src/bulk_loot.js");
+    const { g, d } = await withDrop();
+    d.items = [{ kind: "cassette", gene: "cbbL", allele: WILD_TYPE }];
+    g.player.hp = 1; g.player.atp = 1; g.player.maxhp = 999; g.player.atpMax = 999;
+    eatAll(g, d);
+    const floorHp = g.player.hp - 1, floorAtp = g.player.atp - 1;
+    // now the same cassette via the bin
+    g.player.hp = 1; g.player.atp = 1;
+    g.genome.stash({ kind: "gene", id: "cbbL", level: 1, mods: [], allele: WILD_TYPE });
+    const i = g.genome.bin.findIndex((b) => b.kind === "gene" && b.id === "cbbL");
+    g.catabolise(i);
+    expect(g.player.hp - 1, "floor and bin hp differ").toBe(floorHp);
+    expect(g.player.atp - 1, "floor and bin ATP differ").toBe(floorAtp);
   });
 });

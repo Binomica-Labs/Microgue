@@ -17,6 +17,7 @@ import { i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
 import { castAbility } from "./cast.js";
 import { NAME_POOL } from "./saves.js";
+import { eatAll, takeAll } from "./bulk_loot.js";
 import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
 import { on } from "./safety.js";
@@ -40,6 +41,18 @@ function cardSlot(_g: Game): number {
 
 export function i_pointerDown(_g: Game, x: number, y: number): void {
     if (_g.openDrop) {
+      // Bulk buttons first: they sit below the item grid.
+      const cb = _g.containerBoxes;
+      if (cb && inBoxOf(cb.takeAll, x, y)) {
+        takeAll(_g, _g.openDrop);
+        _g.gesture = "none";
+        return;
+      }
+      if (cb && inBoxOf(cb.eatAll, x, y)) {
+        eatAll(_g, _g.openDrop);
+        _g.gesture = "none";
+        return;
+      }
       const i = _g.dropBoxes.findIndex((b) => inBoxOf(b, x, y));
       if (i >= 0) {
         const d = _g.openDrop;

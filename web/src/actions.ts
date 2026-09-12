@@ -7,6 +7,7 @@
 // and `t_explore`. What is left in turn.ts is the bookkeeping around an action:
 // stairs, pickup, world-building, repath.
 
+import { isNight } from "./cycle.js";
 import { CONDITIONS } from "./conditions.js";
 import type { Game } from "./main.js";
 import * as bio from "./biology.js";
@@ -49,6 +50,8 @@ export function t_upkeep(_g: Game): void {
     // Conditional and inducible promoters read this. Without it every promoter
     // would silently behave as constitutive.
     _g.genome.depth = d;
+    // Light-regulated and cold-shock promoters read the clock.
+    _g.genome.light = !isNight(_g.clock);
     // A runaway replicon reads this. Without it pUC sits at a quarter of
     // its nominal copy number for ever, which is the wrong end of its
     // own trade.

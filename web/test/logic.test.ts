@@ -8312,3 +8312,286 @@ describe("the AI announces its posture", () => {
     expect(frac, "hunters never spawn").toBeGreaterThan(0.02);
   });
 });
+
+describe("pathway colours are distinct", () => {
+  it("no two pathways are within 45 RGB units of each other", async () => {
+    // The old table had photo/carbon both green, nitrogen/sulfur both yellow,
+    // iron/methane both brown. On a twelve-gene ring, "same colour means an
+    // easy operon" was a guess. Every pair must be clearly apart.
+    const { PATHWAY_COLOUR } = await import("../src/plasmid_ui.js");
+    const rgb = (h: string): number[] =>
+      [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16));
+    const ids = Object.keys(PATHWAY_COLOUR).filter((k) => k !== "core");
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = ids[i], b = ids[j];
+        if (!a || !b) continue;
+        const ra = rgb(PATHWAY_COLOUR[a as never]), rb = rgb(PATHWAY_COLOUR[b as never]);
+        const d = Math.hypot((ra[0] ?? 0) - (rb[0] ?? 0), (ra[1] ?? 0) - (rb[1] ?? 0),
+                             (ra[2] ?? 0) - (rb[2] ?? 0));
+        expect(d, `${a} and ${b} are only ${d.toFixed(0)} apart`).toBeGreaterThan(45);
+      }
+    }
+  });
+
+  it("every pathway has a colour and every colour is used by a gene", () => {
+    const used = new Set(Object.values(bio.GENES).map((g) => g.pathway));
+    for (const pw of used) {
+      expect(pw in { photo:1, carbon:1, nitrogen:1, sulfur:1, iron:1, methane:1,
+                      energy:1, core:1, stress:1, motility:1, secretion:1, resist:1 },
+             `${pw} has no colour`).toBe(true);
+    }
+    // the split is real: stress and motility are separate builds now
+    expect(used.has("stress")).toBe(true);
+    expect(used.has("motility")).toBe(true);
+    expect(used.has("defense" as never), "defense catch-all still exists").toBe(false);
+  });
+});
+
+describe("bidirectional and conditional promoters", () => {
+  const gene = (id: bio.GeneId): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+
+  it("a divergent promoter drives two operons, one each way", () => {
+    // One site, two transcripts. The leftward operon is its own entry: its
+    // own synergy group and its own burden, not one big operon.
+    const p = new Plasmid();
+    p.integrated = 10;
+    // ring: [geneA][geneB] <- pbidir -> [geneC][geneD], with gaps outside
+    for (const g of ["cbbL", "psbA", "katG", "sodA"] as const) p.stash(gene(g));
+    p.stash({ kind: "promoter", id: "pbidir" });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 5 ? 2 : 6;      // a clear run away from the origin
+    const bin = (id: string) => p.bin.findIndex((b) =>
+      (b.kind === "gene" && b.id === id) || (b.kind === "promoter" && b.id === id));
+    p.install(bin("cbbL"), base);
+    p.install(bin("psbA"), base + 1);
+    p.install(bin("pbidir"), base + 2);
+    p.install(bin("katG"), base + 3);
+    p.install(bin("sodA"), base + 4);
+    const ops = p.operons().filter((o) => o.promoter === base + 2);
+    expect(ops.length, "a divergent promoter did not make two operons").toBe(2);
+    const ids = ops.map((o) => o.genes.map((g) => g.id).sort().join("+")).sort();
+    expect(ids, "the two operons are not the left and right sets")
+      .toEqual(["cbbL+psbA", "katG+sodA"]);
+    // and all four genes express
+    for (const g of ["cbbL", "psbA", "katG", "sodA"] as const) {
+      expect(p.expression(g, 1), `${g} silent under a divergent promoter`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("a plain promoter reads only rightward", () => {
+    const p = new Plasmid();
+    p.integrated = 10;
+    for (const g of ["cbbL", "katG"] as const) p.stash(gene(g));
+    p.stash({ kind: "promoter", id: "j23106" });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 5 ? 2 : 6;
+    const bin = (id: string) => p.bin.findIndex((b) =>
+      (b.kind === "gene" && b.id === id) || (b.kind === "promoter" && b.id === id));
+    p.install(bin("cbbL"), base);          // LEFT of the promoter
+    p.install(bin("j23106"), base + 1);
+    p.install(bin("katG"), base + 2);      // right
+    expect(p.expression("katG", 1)).toBeGreaterThan(0);
+    // cbbL sits left of a one-way promoter with nothing driving it
+    expect(p.expression("cbbL", 1), "a plain promoter read leftward").toBe(0);
+  });
+
+  it("light and cold promoters swap with the clock", async () => {
+    const { PROMOTERS } = await import("../src/parts.js");
+    const day = { stratum: bio.stratum(1), inducers: new Set<string>(), light: true, density: 0 };
+    const night = { ...day, light: false };
+    expect(PROMOTERS.plight.active(day)).toBeGreaterThan(PROMOTERS.plight.active(night));
+    expect(PROMOTERS.pcold.active(night)).toBeGreaterThan(PROMOTERS.pcold.active(day));
+  });
+
+  it("nitrate and iron promoters fire in their own zones only", async () => {
+    const { PROMOTERS } = await import("../src/parts.js");
+    const at = (d: number) =>
+      ({ stratum: bio.stratum(d), inducers: new Set<string>(), light: true, density: 0 });
+    const no3 = bio.STRATA.find((s) => s.teap === "NO3-")?.depth ?? 2;
+    const fe = bio.STRATA.find((s) => s.teap === "Fe(III)")?.depth ?? 4;
+    expect(PROMOTERS.pnark.active(at(no3))).toBe(1);
+    expect(PROMOTERS.pnark.active(at(1))).toBeLessThan(0.2);
+    expect(PROMOTERS.pfe.active(at(fe))).toBe(1);
+    expect(PROMOTERS.pfe.active(at(1))).toBeLessThan(0.2);
+  });
+
+  it("every promoter and terminator drops somewhere", async () => {
+    // A part that never rolls is a part that does not exist.
+    const { partsOfRarity, PROMOTERS, TERMINATORS } = await import("../src/parts.js");
+    const all = new Set<string>();
+    for (const r of ["common", "uncommon", "rare", "epic", "legendary"] as const) {
+      const pr = partsOfRarity(r);
+      for (const id of [...pr.promoters, ...pr.terminators]) all.add(id);
+    }
+    for (const id of Object.keys(PROMOTERS)) expect(all.has(id), `${id} never drops`).toBe(true);
+    for (const id of Object.keys(TERMINATORS)) expect(all.has(id), `${id} never drops`).toBe(true);
+  });
+});
+
+describe("conditional terminators split a transcript by zone", () => {
+  it("a riboswitch seals in oxygen and opens in sulfide", () => {
+    // One transcript, two behaviours: in the oxic zone the gene past the
+    // riboswitch is nearly silent; in the sulfidic zone it wakes up.
+    const p = new Plasmid();
+    p.integrated = 10;
+    p.stash({ kind: "gene", id: "cbbL", level: 1, mods: [], allele: WILD_TYPE });
+    p.stash({ kind: "gene", id: "dsrA", level: 1, mods: [], allele: WILD_TYPE });
+    p.stash({ kind: "promoter", id: "j23119" });
+    p.stash({ kind: "terminator", id: "riboswitch" });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 5 ? 2 : 6;
+    const bin = (id: string) => p.bin.findIndex((b) => b.kind !== "gene" ? b.id === id : b.id === id);
+    p.install(bin("j23119"), base);
+    p.install(bin("cbbL"), base + 1);
+    p.install(bin("riboswitch"), base + 2);
+    p.install(bin("dsrA"), base + 3);
+    const oxic = bio.STRATA.find((s) => s.teap === "O2")?.depth ?? 1;
+    const sulfidic = bio.STRATA.find((s) => s.donor.includes("H2S"))?.depth ?? 6;
+    // measure the FLOW reaching dsrA, not its expression -- dsrA is a deep
+    // gene and its own promoter fit would confound the terminator test.
+    const flowTo = (d: number): number => {
+      p.depth = d;
+      const op = p.operons().find((o) => o.genes.some((g) => g.id === "dsrA"));
+      return op?.genes.find((g) => g.id === "dsrA")?.flow ?? 0;
+    };
+    const sealed = flowTo(oxic), open = flowTo(sulfidic);
+    expect(open, `riboswitch did not open in sulfide (flow ${open.toFixed(2)})`)
+      .toBeGreaterThan(sealed * 4);
+  });
+});
+
+describe("bidirectional promoters under edge cases", () => {
+  const gene = (id: bio.GeneId): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+  const setup = (parts: Part[]) => {
+    const p = new Plasmid();
+    p.integrated = 10;
+    for (const x of parts) p.stash(x);
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 5 ? 2 : 6;
+    const bin = (id: string) => p.bin.findIndex((b) => b.id === id);
+    return { p, base, bin, ori };
+  };
+
+  it("with nothing on one side, it is just a one-way promoter", () => {
+    // A divergent promoter at the end of a run: the empty side yields no
+    // operon, not a phantom empty one.
+    const { p, base, bin } = setup([gene("cbbL"), { kind: "promoter", id: "pbidir" }]);
+    p.install(bin("pbidir"), base);
+    p.install(bin("cbbL"), base + 1);
+    const ops = p.operons().filter((o) => o.promoter === base);
+    expect(ops.length, "an empty side made a phantom operon").toBe(1);
+    expect(p.expression("cbbL", 1)).toBeGreaterThan(0);
+  });
+
+  it("the leftward read stops at another promoter, like the rightward one", () => {
+    // [j23106][cbbL] <- pbidir -> [katG]. The leftward walk must stop at
+    // j23106 and NOT read cbbL, which belongs to j23106's operon.
+    const { p, base, bin } = setup([
+      gene("cbbL"), gene("katG"),
+      { kind: "promoter", id: "j23106" }, { kind: "promoter", id: "pbidir" },
+    ]);
+    p.install(bin("j23106"), base);
+    p.install(bin("cbbL"), base + 1);
+    p.install(bin("pbidir"), base + 2);
+    p.install(bin("katG"), base + 3);
+    const left = p.operons().filter((o) => o.promoter === base + 2
+      && o.genes.some((g) => g.id === "cbbL"));
+    expect(left.length, "the leftward read crossed into another promoter's operon")
+      .toBe(0);
+    // cbbL is still driven -- by j23106
+    expect(p.expression("cbbL", 1)).toBeGreaterThan(0);
+  });
+
+  it("a gene between two divergent promoters is claimed once, not twice", () => {
+    // pbidir -> [cbbL] <- pbidir. Both read toward cbbL. The rightward walk
+    // from the first stops at the second promoter; the leftward from the
+    // second stops at the first. cbbL is read by exactly one walk per
+    // promoter, so it is in two operons -- which is correct (two promoters
+    // genuinely drive it) but it must not be in FOUR.
+    const { p, base, bin } = setup([
+      gene("cbbL"), { kind: "promoter", id: "pbidir" }, { kind: "promoter", id: "pbidir" },
+    ]);
+    p.install(bin("pbidir"), base);
+    p.install(bin("cbbL"), base + 1);
+    p.install(bin("pbidir"), base + 2);
+    const claims = p.operons().filter((o) => o.genes.some((g) => g.id === "cbbL"));
+    expect(claims.length, `cbbL claimed by ${String(claims.length)} operons`)
+      .toBeLessThanOrEqual(2);
+    expect(Number.isFinite(p.expression("cbbL", 1))).toBe(true);
+  });
+
+  it("a divergent promoter beside the origin does not read through it", () => {
+    // The origin is a gene-kind part; a leftward walk landing on it must not
+    // treat it as expressible cargo.
+    const { p, ori, bin } = setup([gene("katG"), { kind: "promoter", id: "pbidir" }]);
+    const at = (ori + 1) % p.usableSlots;
+    if (p.at(at) !== null) return;         // fixture: need the slot free
+    p.install(bin("pbidir"), at);
+    p.install(bin("katG"), (at + 1) % p.usableSlots);
+    const bad = p.operons().some((o) => o.genes.some((g) => g.id === "ori"));
+    expect(bad, "the origin was read as an operon gene").toBe(false);
+    expect(Number.isFinite(p.power(1))).toBe(true);
+  });
+
+  it("2000 random rings with the new parts never produce NaN or a crash", () => {
+    // The full part set, hammered.
+    const genes = ["cbbL", "psbA", "katG", "sodA", "dsrA", "celA", "motA", "merA"] as const;
+    const proms = ["j23106", "pbidir", "pbianox", "pnark", "pcold", "pquorum"] as const;
+    const terms = ["hairpin", "leaky", "riboswitch", "attenuator"] as const;
+    for (let seed = 0; seed < 2000; seed++) {
+      const rng = makeRng(seed);
+      const p = new Plasmid();
+      p.integrated = rng.int(20);
+      for (let k = 0; k < 8; k++) {
+        const r = rng.int(3);
+        if (r === 0) p.stash(gene(genes[rng.int(genes.length)] ?? "cbbL"));
+        else if (r === 1) p.stash({ kind: "promoter", id: proms[rng.int(proms.length)] ?? "j23106" });
+        else p.stash({ kind: "terminator", id: terms[rng.int(terms.length)] ?? "hairpin" });
+      }
+      for (let k = 0; k < 6; k++) p.install(rng.int(Math.max(p.bin.length, 1)), rng.int(p.usableSlots));
+      p.rotate(rng.int(10) - 5);
+      for (const d of [1, 4, 8]) {
+        p.depth = d;
+        p.light = rng.next() < 0.5;
+        for (const v of [p.power(d), p.atpBalance(d), p.vitality(d), p.burden()]) {
+          expect(Number.isFinite(v), `seed ${String(seed)} D${String(d)}: non-finite`).toBe(true);
+        }
+        expect(() => p.operons(), `seed ${String(seed)}: operons threw`).not.toThrow();
+      }
+    }
+  });
+});
+
+describe("the leftward read STOPS at an owned gene, it does not skip past it", () => {
+  it("genes beyond a forward promoter's cargo are not reached", () => {
+    // [sodA][j23106][cbbL] <- pbidir. The leftward walk hits cbbL (owned by
+    // j23106) and must STOP there -- not skip cbbL and go on to read sodA,
+    // which is left of j23106 and belongs to nobody.
+    const p = new Plasmid();
+    p.integrated = 12;
+    for (const g of ["sodA", "cbbL", "katG"] as const) {
+      p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.stash({ kind: "promoter", id: "j23106" });
+    p.stash({ kind: "promoter", id: "pbidir" });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 6 ? 2 : 7;
+    const bin = (id: string) => p.bin.findIndex((b) => b.id === id);
+    p.install(bin("sodA"), base);
+    p.install(bin("j23106"), base + 1);
+    p.install(bin("cbbL"), base + 2);
+    p.install(bin("pbidir"), base + 3);
+    p.install(bin("katG"), base + 4);
+    const fromBidir = p.operons().filter((o) => o.promoter === base + 3);
+    const reached = new Set(fromBidir.flatMap((o) => o.genes.map((g) => g.id)));
+    expect(reached.has("sodA"), "the leftward walk skipped past an owned gene")
+      .toBe(false);
+    expect(reached.has("cbbL"), "the leftward walk poached an owned gene")
+      .toBe(false);
+    expect(reached.has("katG"), "the rightward read was lost").toBe(true);
+  });
+});

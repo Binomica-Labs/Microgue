@@ -488,8 +488,10 @@ export function r_draw(_g: Game): void {
     // it has to be answerable before anything else is.
     r_drawOffer(_g, Math.max(Math.min(W, H) / 420, 1), W, H);
     if (_g.openDrop) {
-      drawContainer(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)), Math.max(Math.min(W, H) / 420, 1),
-                    _g.openDrop, _g.dropBoxes, (t, w) => _g.wrap(t, w));
+      _g.containerBoxes = drawContainer(
+        ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
+        Math.max(Math.min(W, H) / 420, 1), _g.openDrop, _g.dropBoxes,
+        (t, w) => _g.wrap(t, w));
     }
     _g.drawToasts(W, H);
     const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;

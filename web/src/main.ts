@@ -13,6 +13,7 @@ import type { Cooldowns } from "./abilities.js";
 import type { AbilitySlot } from "./ability_bar.js";
 import { makeNameField, type NameField } from "./name_entry.js";
 import type { NameBoxes } from "./name_render.js";
+import type { ContainerBoxes } from "./screens.js";
 import type { Secretion, Surge } from "./cast.js";
 import { newAftermath, type Aftermath } from "./aftermath.js";
 import type { AftermathBoxes } from "./aftermath_render.js";
@@ -150,6 +151,8 @@ class Game {
   /** The DOM text field, built once at boot. Null where there is no DOM. */
   nameField: NameField | null = null;
   nameBoxes: NameBoxes | null = null;
+  /** The container's bulk buttons, per frame. */
+  containerBoxes: ContainerBoxes | null = null;
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;

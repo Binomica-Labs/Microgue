@@ -12,10 +12,29 @@ import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS, type Rarity } from "./parts.
 import { PREFIXES, SUFFIXES, alleleName, alleleRarity, alleleReadout }
   from "./allele.js";
 
+/**
+ * Twelve pathways, twelve hues spaced round the wheel so no two collide.
+ *
+ * The old table had photo and carbon both green, nitrogen and sulfur both
+ * yellow, iron and methane both brown -- six of nine colours in near-identical
+ * pairs. On a ring of twelve genes that made "same colour, easy operon" a
+ * guess. Each hue here is at least ~25 degrees from its neighbours, with
+ * lightness varied so the pairs that ARE close in hue (sulfur/methane) still
+ * read apart.
+ */
 export const PATHWAY_COLOUR: Readonly<Record<Pathway, string>> = {
-  photo: "#5ec98a", carbon: "#8fd4c2", nitrogen: "#cfe04a", sulfur: "#e0c25a",
-  iron: "#d0603c", methane: "#c9a55e", energy: "#9ec9e8", defense: "#c58ad0",
-  core: "#e8e8e8",
+  photo:     "#3fd27a",   // spring green     -- light, chlorophyll
+  carbon:    "#38b6d4",   // cyan             -- fixation, water
+  nitrogen:  "#b8ff3a",   // lime             -- the N cycle
+  sulfur:    "#ffb020",   // amber            -- elemental S
+  iron:      "#e8552e",   // vermilion        -- Fe(III), rust
+  methane:   "#c2833a",   // ochre            -- deep, anoxic
+  energy:    "#5f8cff",   // cobalt           -- ATP, the current
+  core:      "#e8e8e8",   // white            -- the origin
+  stress:    "#d55aa8",   // magenta          -- repair, the tank
+  motility:  "#8e6cf0",   // violet           -- flagella, the skirmisher
+  secretion: "#ff8fab",   // rose             -- enzymes, the controller
+  resist:    "#b8c4cc",   // slate            -- detox, the deep-diver
 };
 
 export interface RingGeom {

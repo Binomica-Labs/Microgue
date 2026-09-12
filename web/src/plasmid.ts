@@ -14,6 +14,7 @@
 // carries over from the previous flat model.
 
 import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
+import { p_transact } from "./plasmid_tx.js";
 import { b_install, b_stash, b_takeOne, b_uninstall } from "./bin.js";
 import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
          type Complex, type GeneId, type Hazard } from "./biology.js";
@@ -109,45 +110,7 @@ export class Plasmid {
     );
   }
 
-  /**
-   * Run a compound edit, or leave nothing behind.
-   *
-   * Validating everything before touching anything is better where it is
-   * possible -- `expand`, `acquire` and `buy` all do that. But a multi-step
-   * edit that places parts one at a time cannot always know its last failure
-   * in advance: `assemble` splices parts OUT of the bin and then places them,
-   * and a refused `put` partway through destroys whatever it had removed.
-   *
-   * Snapshots the ring and the bin, runs `fn`, and restores both if it returns
-   * a failure OR throws. A throw is re-raised afterwards: rolling back is not
-   * the same as pretending nothing went wrong, and swallowing it would turn a
-   * crash into silent corruption -- which is the failure class this exists to
-   * remove.
-   *
-   * A shallow copy of each array is enough. Parts are replaced wholesale,
-   * never mutated in place; a deep copy would be slower and would HIDE a real
-   * bug if that ever stopped being true.
-   */
-  transact(fn: () => Result): Result {
-    const slots = this.slots.slice();
-    const bin = this.bin.slice();
-    const restore = (): void => {
-      this.slots.length = 0;
-      this.slots.push(...slots);
-      this.bin.length = 0;
-      this.bin.push(...bin);
-      this.touch();
-    };
-    let out: Result;
-    try {
-      out = fn();
-    } catch (e) {
-      restore();
-      throw e;
-    }
-    if (!out.ok) restore();
-    return out;
-  }
+  transact(fn: () => Result): Result { return p_transact(this, fn); }
 
   /** Put a part in the bin rather than on the ring. */
   /**
@@ -477,8 +440,19 @@ export class Plasmid {
   get usableSlots(): number {
     return Math.min(slotsFor(this.integrated, bonusSlots(this.strain)), SLOTS);
   }
+  /** Day or night, for light- and cold-responsive promoters. Set by upkeep
+   *  from the clock; defaults to day so a fresh plasmid is not mysteriously
+   *  cold-shocked. Changing it invalidates the caches like depth does. */
+  private _light = true;
+  get light(): boolean { return this._light; }
+  set light(v: boolean) {
+    if (v === this._light) return;
+    this._light = v;
+    this.invalidate();
+  }
   private context(): Context {
-    return { stratum: stratum(this.depth), inducers: this.inducers };
+    return { stratum: stratum(this.depth), inducers: this.inducers,
+             light: this._light, density: 0 };
   }
 
   /** The operon a slot belongs to, if any. */

@@ -105,6 +105,13 @@ export const SOURCES: Partial<Record<GeneId, Source>> = {
   epsA: { query: 'epsA[Gene] AND "Vibrio cholerae"[Organism]', organism: "Vibrio cholerae" },
   comA: { query: 'comEA[Gene] AND "Bacillus subtilis"[Organism]', organism: "Bacillus subtilis" },
   aprE: { query: 'aprE[Gene] AND "Bacillus subtilis"[Organism]', organism: "Bacillus subtilis" },
+  merA: { query: 'merA[Gene] AND "Pseudomonas"[Organism]', organism: "Pseudomonas aeruginosa" },
+  czcA: { query: 'czcA[Gene] AND "Cupriavidus metallidurans"[Organism]', organism: "Cupriavidus metallidurans" },
+  copA: { query: 'copA[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
+  acrB: { query: 'acrB[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
+  motA: { query: 'motA[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
+  fliC: { query: 'fliC[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
+  cheY: { query: 'cheY[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
   mcrA: { query: 'mcrA[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   hdrB: { query: 'hdrB[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   // oriV is a design element, not a locus. It has no NCBI record and must not
