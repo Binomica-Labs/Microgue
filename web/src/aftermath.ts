@@ -19,6 +19,15 @@
 
 export type AftermathStage = "report" | "store" | "ready";
 
+/**
+ * The synthesis store is PAUSED pending rebalancing. The flow skips from
+ * report straight to ready. Everything -- the screen, the offers, the credit
+ * economy, the tests -- stays in place; this flag is the only thing between
+ * the store and the player. Flip it to bring the store back.
+ */
+export function storeEnabled(): boolean { return STORE_OPEN; }
+const STORE_OPEN = false;
+
 export interface Aftermath {
   stage: AftermathStage;
 }
@@ -29,7 +38,7 @@ export function newAftermath(): Aftermath {
 
 /** The forward step. Each screen has exactly one. */
 export function advance(a: Aftermath): AftermathStage {
-  a.stage = a.stage === "report" ? "store"
+  a.stage = a.stage === "report" ? (storeEnabled() ? "store" : "ready")
     : a.stage === "store" ? "ready"
     : "ready";
   return a.stage;

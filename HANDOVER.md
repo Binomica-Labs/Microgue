@@ -1,3 +1,31 @@
+# v1.27.0 — version on the start screen; the store is paused
+
+## Version on the menu
+
+The credit line at the foot of the main menu now reads
+`v1.27.0 · © 2026 Binomica Labs · CC BY-NC-SA 4.0`. A bug report can say
+which build it is without opening the notebook. Pinned by the menu test.
+
+## The synthesis store is PAUSED, not removed
+
+`storeEnabled()` in aftermath.ts returns false. The flow after a strain is
+lost goes report -> ready, skipping the store. Everything stays: the screen,
+the offers, the credit economy, the tests. Flip `STORE_OPEN` to bring it
+back -- one line, not a rebuild.
+
+Pending a rebalance. The store was the only sink for synthesis credit and the
+only source of persistent power between runs, and with abilities, symbionts,
+conditions and eleven pathways added since it was tuned, its prices and its
+offers no longer sit where they should. Better off than on until that is
+done.
+
+What the pause must NOT do is lose earnings: credit banks exactly as before,
+tested, so when the store returns the player has it waiting. The two flow
+tests that walked through the store now read the flag -- they test the
+paused path today and will test the store path the day it is re-enabled,
+without editing. A third test draws the store screen directly and asserts it
+still has rows, so re-enabling cannot surface a rotted screen.
+
 # v1.26.0 — ring relief, complete operons, tandem terminators
 
 ## Measured first

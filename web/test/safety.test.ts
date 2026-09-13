@@ -246,6 +246,8 @@ describe("the copyright is everywhere it needs to be", () => {
     const credit = texts.find((t) => t.includes("Binomica Labs"));
     expect(credit, "the main menu shows no copyright").toBeDefined();
     expect(credit).toContain("CC BY-NC-SA");
+    // and the version, so a bug report can say which build it is
+    expect(credit, "the main menu shows no version").toMatch(/^v\S+/);
   });
 
   it("the built bundle carries the banner", () => {

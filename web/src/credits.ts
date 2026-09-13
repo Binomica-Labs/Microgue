@@ -4,13 +4,15 @@
 // One place, so the menu, the notebook and the bundle header all say the
 // same thing and cannot drift. If the licence ever changes, it changes here.
 
+import { VERSION } from "./version.js";
+
 export const COPYRIGHT = "\u00a9 2026 Binomica Labs";
 export const LICENCE_SHORT = "CC BY-NC-SA 4.0";
 export const LICENCE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/";
 export const REPO_URL = "https://github.com/Binomica-Labs/Microgue";
 
-/** The line under the title on the main menu. */
-export const CREDIT_LINE = `${COPYRIGHT} \u00b7 ${LICENCE_SHORT}`;
+/** The line at the foot of the main menu: version, copyright, licence. */
+export const CREDIT_LINE = `v${VERSION} \u00b7 ${COPYRIGHT} \u00b7 ${LICENCE_SHORT}`;
 
 /** The fuller statement, for the notebook. */
 export const CREDIT_LONG = [

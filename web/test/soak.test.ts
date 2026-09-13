@@ -3412,13 +3412,18 @@ describe("the aftermath is three screens, not one", () => {
     expect(g.aftermathBoxes?.rows.length, "the report showed the store")
       .toBe(0);
 
+    // The store is PAUSED pending rebalancing: continue goes straight to
+    // ready. When it is re-enabled (storeEnabled() true) this test must see
+    // the store in between; it checks whichever the flag says.
+    const { storeEnabled } = await import("../src/aftermath.js");
     tapAction(g);
-    expect(g.aftermath.stage, "continue did not reach the store").toBe("store");
-    expect((g.aftermathBoxes?.rows.length ?? 0) > 0, "the store has no rows")
-      .toBe(true);
-
-    tapAction(g);
-    expect(g.aftermath.stage, "done did not reach ready").toBe("ready");
+    if (storeEnabled()) {
+      expect(g.aftermath.stage, "continue did not reach the store").toBe("store");
+      expect((g.aftermathBoxes?.rows.length ?? 0) > 0, "the store has no rows")
+        .toBe(true);
+      tapAction(g);
+    }
+    expect(g.aftermath.stage, "the flow did not reach ready").toBe("ready");
 
     tapAction(g);
     expect(g.showSplash, "send-it-down did not return to the menu").toBe(true);
@@ -3426,6 +3431,8 @@ describe("the aftermath is three screens, not one", () => {
   });
 
   it("ordering works only on the store screen", async () => {
+    const { storeEnabled } = await import("../src/aftermath.js");
+    if (!storeEnabled()) return;          // paused; the store's own tests still run
     const g = await die();
     // on the report: a tap where a row WOULD be does nothing
     const before = g.lab.credit;
@@ -4006,5 +4013,53 @@ describe("bulk loot: take all and eat all", () => {
     g.catabolise(i);
     expect(g.player.hp - 1, "floor and bin hp differ").toBe(floorHp);
     expect(g.player.atp - 1, "floor and bin ATP differ").toBe(floorAtp);
+  });
+});
+
+describe("the store is paused, and pausing it loses nothing", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("with the store off, the flow is report -> ready, and credit still banks", async () => {
+    // Paused pending rebalancing. The one thing a pause must NOT do is throw
+    // away what the strain earned: credit banks exactly as before, so when
+    // the store returns the player has it waiting.
+    const { storeEnabled, advance, newAftermath } = await import("../src/aftermath.js");
+    if (storeEnabled()) return;
+    const a = newAftermath();
+    expect(advance(a), "report did not skip the paused store").toBe("ready");
+
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "phototroph");
+    const before = g.lab.credit;
+    g.player.hp = 0;
+    g.die();
+    expect(g.lab.credit, "the paused store cost the player their credit")
+      .toBeGreaterThan(before);
+  });
+
+  it("the store's own logic still works when the flag is flipped", async () => {
+    // The pause is a flag, not a deletion. The store screen must still draw
+    // rows and price them, so re-enabling it is one line and not a rebuild.
+    const { drawAftermath } = await import("../src/aftermath_render.js");
+    const { newLab, offers } = await import("../src/lab.js");
+    const lab = newLab();
+    lab.credit = 500;
+    const nul = new Proxy({}, {
+      get: (_o, p: string) => p === "measureText" ? () => ({ width: 10 })
+        : p === "createLinearGradient" ? () => ({ addColorStop: () => undefined })
+        : ["fillStyle","strokeStyle","font","textAlign","textBaseline","lineWidth"].includes(p) ? ""
+        : () => undefined,
+      set: () => true,
+    }) as never;
+    const b = drawAftermath(nul, 393, 852, { top: 47, right: 0, bottom: 34, left: 0 },
+                            1.86, "store", lab, null, [], (s) => [s]);
+    expect(b.rows.length, "the paused store lost its rows").toBeGreaterThan(0);
+    expect(offers(lab, []).length).toBeGreaterThan(0);
   });
 });
