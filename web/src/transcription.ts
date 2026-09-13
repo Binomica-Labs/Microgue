@@ -36,6 +36,9 @@ export const SLOTS = 24;
 
 /** Polarity: expression decays with distance from the promoter. */
 const POLARITY = 0.82;
+/** A terminator immediately after another terminator reads through at this
+ *  fraction of its own value: the tandem bonus. See the walk. */
+export const TANDEM = 0.4;
 
 export interface Reading {
   readonly slot: number;
@@ -127,7 +130,14 @@ export function transcribe(
         if (part.kind === "terminator") {
           const term = (TERMINATORS as Record<string, typeof TERMINATORS[TerminatorId] | undefined>)[part.id];
           // A conditional terminator reads the context; a flat one its value.
-          const rt = term ? (term.readthroughIn ? term.readthroughIn(ctx) : term.readthrough) : 1;
+          let rt = term ? (term.readthroughIn ? term.readthroughIn(ctx) : term.readthrough) : 1;
+          // TANDEM: a terminator directly after another terminator catches
+          // the polymerase the first one slowed. Real tandem terminators
+          // (rrnB T1T2) are more than the product of their parts. The second
+          // and later in a run read through at a fraction of their own value,
+          // so two hairpins (0.38 each) stop harder than 0.38 x 0.38.
+          const prev = slots[norm(at - dir)];
+          if (prev?.kind === "terminator") rt *= TANDEM;
           flow *= Math.min(Math.max(rt, 0), 1);
           if (flow < FLOOR) break;
           continue;                                   // and keep reading

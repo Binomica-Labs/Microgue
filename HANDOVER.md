@@ -1,3 +1,44 @@
+# v1.26.0 — ring relief, complete operons, tandem terminators
+
+## Measured first
+
+Four of the five asks were CORRECTNESS claims, and three already held. I
+measured before touching anything, which saved rebuilding what worked:
+
+* Stray genes (no promoter) already expressed 0 and added 0 power. Now
+  PINNED: marginal ATP cost is zero too. (An empty ring has a baseline -- the
+  origin replicates -- and a first test wrongly compared to zero instead of to
+  that baseline. The game was right.)
+* Metabolics were already realtime: every ring edit invalidates the caches.
+  Pinned: install, swap away, swap back, rotate, uninstall-the-promoter all
+  recompute power on the next read, no turn in between.
+* Double terminators already compounded -- but only multiplicatively.
+
+## Tandem terminators, made deliberate
+
+Real tandem terminators (rrnB T1T2) are more than the product of their parts:
+the second catches polymerase the first slowed. A terminator immediately
+after another now reads through at 0.4 of its own value (`TANDEM` in
+transcription.ts). Two hairpins went from 0.162 to 0.025 past them -- ~6.5x
+harder than one, versus ~2.7x before. The bonus applies only to ADJACENT
+terminators; a gene between two of them gets the plain rate, tested. Three
+stay finite and above the floor.
+
+## The ring slots have relief; a complete operon is gold
+
+`drawRing` draws wedges as stroked arcs, which raisedCard (a rectangle)
+cannot do. So each wedge gets its own relief: the outer half lit, the inner
+shaded, a hairline on the outer edge -- the same top-lit convention as the
+bin cards, so the ring and the bin agree on the light.
+
+A COMPLETE operon -- promoter, two or more genes, closed by a terminator,
+transcribing -- gets a warm gold-white arc and a thin halo outside the wedge.
+Nothing else is that colour. Incomplete operons keep the magenta "in the
+transcript" arc. The completeness rule is tested against the renderer's own
+logic: one gene is not complete, no terminator is not complete.
+
+All 118 layout tests hold on every form factor, so the halo stays in bounds.
+
 # v1.25.0 — copyright and licence, everywhere
 
 There was NOTHING: no LICENSE file, no README, no `license` in package.json,

@@ -5,7 +5,7 @@
 // inventory workable with a thumb: slot index is just an angle, so the target
 // is as large as the ring is wide.
 
-import { raisedCard } from "./relief.js";
+import { raisedCard, shade } from "./relief.js";
 import type { Box } from "./chrome.js";
 import { countOf } from "./stack.js";
 import { GENES, type Pathway } from "./biology.js";
@@ -337,6 +337,14 @@ export function drawRing(
     const flowAt = new Map(op.genes.map((x) => [x.slot, x.flow]));
 
     ctx.lineWidth = band + 8 * o.u;
+    // A COMPLETE operon -- promoter, two or more genes, closed by a
+    // terminator -- is the thing you are trying to build, and it should look
+    // unlike everything else on the ring. Incomplete ones keep the magenta
+    // "in the transcript" arc; a complete one gets a warm white-gold arc,
+    // brighter, and a second thin ring outside it. Nothing else is that
+    // colour, so a finished operon reads at a glance.
+    const closed = span < n && p.at((op.promoter + span) % n)?.kind === "terminator";
+    const complete = closed && op.genes.length >= 2 && op.output > 0.05;
     let flow = 1;
     for (let k = 0; k < span; k++) {
       const at = (op.promoter + k) % n;
@@ -345,15 +353,25 @@ export function drawRing(
       // a different statement from "not transcribed at all".
       const alpha = 0.12 + (0.18 + 0.5 * Math.min(op.output / 1.4, 1))
         * Math.min(Math.max(flow, 0), 1);
-      // A colour that belongs to no PART. This was #ffd166, exactly the
-      // promoter's own colour, so the annotation and the thing it annotates
-      // were indistinguishable. Magenta sits about 40 degrees from every
-      // saturated colour on the ring.
-      ctx.strokeStyle = `rgba(240,75,144,${alpha.toFixed(3)})`;
+      // A colour that belongs to no PART. Magenta sits about 40 degrees from
+      // every saturated colour on the ring; the complete-operon gold-white
+      // belongs to no pathway either.
+      ctx.strokeStyle = complete
+        ? `rgba(255,236,170,${Math.min(alpha + 0.35, 1).toFixed(3)})`
+        : `rgba(240,75,144,${alpha.toFixed(3)})`;
       const a0 = angleOf(at);
       ctx.beginPath();
       ctx.arc(g.cx, g.cy, mid, a0 + 0.01, a0 + step - 0.01);
       ctx.stroke();
+      if (complete) {
+        // The outer halo: a thin bright line just past the wedge.
+        ctx.strokeStyle = "rgba(255,244,200,0.55)";
+        ctx.lineWidth = Math.max(band * 0.12, 1.5);
+        ctx.beginPath();
+        ctx.arc(g.cx, g.cy, g.rOuter + Math.max(band * 0.18, 2), a0 + 0.01, a0 + step - 0.01);
+        ctx.stroke();
+        ctx.lineWidth = band + 8 * o.u;        // back to the operon-arc width
+      }
     }
   }
 
@@ -362,12 +380,37 @@ export function drawRing(
     const part = p.at(i);
     const dragging = o.dragFrom === i;
 
-    ctx.strokeStyle = dragging ? "rgba(255,255,255,0.15)"
+    const base = dragging ? "rgba(255,255,255,0.15)"
       : part ? partColour(part) : "rgba(255,255,255,0.1)";
+    if (part && !dragging) {
+      // Relief on the wedge: a stroked arc is flat. Light the OUTER half
+      // (nearer the viewer on a ring seen from above) and shade the inner,
+      // with a bright hairline on the outer edge. Same top-lit convention as
+      // the raised cards, so the ring and the bin agree on where the light
+      // is.
+      const lit = shade(base, 0.22), dark = shade(base, -0.28);
+      ctx.lineWidth = band * 0.5;
+      ctx.strokeStyle = dark;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, g.rInner + band * 0.25, a0 + 0.018, a0 + step - 0.018);
+      ctx.stroke();
+      ctx.strokeStyle = lit;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, g.rOuter - band * 0.25, a0 + 0.018, a0 + step - 0.018);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.lineWidth = Math.max(band * 0.07, 1);
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, g.rOuter - ctx.lineWidth / 2, a0 + 0.018, a0 + step - 0.018);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = base;
+      ctx.lineWidth = band;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, mid, a0 + 0.018, a0 + step - 0.018);
+      ctx.stroke();
+    }
     ctx.lineWidth = band;
-    ctx.beginPath();
-    ctx.arc(g.cx, g.cy, mid, a0 + 0.018, a0 + step - 0.018);
-    ctx.stroke();
 
     // A rarity band on the INNER edge of the wedge.
     //

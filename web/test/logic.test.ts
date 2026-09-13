@@ -8665,3 +8665,170 @@ describe("relief and floor", () => {
     doc.createElement = real;
   });
 });
+
+describe("the ring recomputes on every move; stray genes are silent", () => {
+  const gene = (id: bio.GeneId): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+  const fresh = () => {
+    const p = new Plasmid();
+    p.integrated = 10;
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 5 ? 2 : 6;
+    const bin = (id: string) => p.bin.findIndex((b) => b.id === id);
+    return { p, base, bin };
+  };
+
+  it("a gene with no promoter upstream expresses nothing and adds no power", () => {
+    // "Stray genes without expression machinery should not count." They do
+    // not: no promoter, no transcript, zero -- and zero into every derived
+    // number, not a residual.
+    const { p, base, bin } = fresh();
+    // An empty ring has a baseline: the origin replicates and that costs
+    // ATP. A stray gene must add NOTHING to it -- the marginal cost is zero.
+    const baseline = p.atpCost(1);
+    p.stash(gene("cbbL"));
+    p.install(bin("cbbL"), base);
+    expect(p.expression("cbbL", 1)).toBe(0);
+    expect(p.power(1)).toBe(0);
+    expect(p.atpCost(1), "a stray gene added upkeep").toBeCloseTo(baseline, 9);
+  });
+
+  it("installing, swapping and rotating recompute power immediately", () => {
+    // "Metabolics are realtime calculated." Every ring edit invalidates the
+    // caches; the next read is the new geometry, with no turn in between.
+    const { p, base, bin } = fresh();
+    p.stash(gene("cbbL")); p.stash({ kind: "promoter", id: "j23119" });
+    p.install(bin("cbbL"), base + 1);
+    expect(p.power(1), "stray").toBe(0);
+    p.install(bin("j23119"), base);
+    const driven = p.power(1);
+    expect(driven, "promoter installed but power unchanged").toBeGreaterThan(0);
+    // swap the gene three slots away from its promoter: silent again, at once
+    p.swap(base + 1, base + 4);
+    expect(p.power(1), "swap did not recompute").toBe(0);
+    // swap it back: driven again
+    p.swap(base + 4, base + 1);
+    expect(p.power(1), "swap back did not recompute").toBeCloseTo(driven, 6);
+    // rotate the whole ring: geometry preserved, power preserved
+    p.rotate(3);
+    expect(p.power(1), "rotate changed power").toBeCloseTo(driven, 6);
+  });
+
+  it("uninstalling the promoter silences its operon at once", () => {
+    const { p, base, bin } = fresh();
+    p.stash(gene("cbbL")); p.stash({ kind: "promoter", id: "j23119" });
+    p.install(bin("j23119"), base);
+    p.install(bin("cbbL"), base + 1);
+    expect(p.power(1)).toBeGreaterThan(0);
+    p.uninstall(base);
+    expect(p.power(1), "uninstalling the promoter left power behind").toBe(0);
+  });
+});
+
+describe("tandem terminators stop harder than the product", () => {
+  const gene = (id: bio.GeneId): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+  const build = (terms: number) => {
+    const p = new Plasmid();
+    p.integrated = 12;
+    p.stash({ kind: "promoter", id: "j23119" });
+    p.stash(gene("cbbL")); p.stash(gene("katG"));
+    for (let i = 0; i < terms; i++) p.stash({ kind: "terminator", id: "hairpin" });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 6 ? 2 : 7;
+    const bin = (id: string) => p.bin.findIndex((b) => b.id === id);
+    p.install(bin("j23119"), base);
+    p.install(bin("cbbL"), base + 1);
+    for (let i = 0; i < terms; i++) p.install(bin("hairpin"), base + 2 + i);
+    p.install(bin("katG"), base + 2 + terms);
+    return p.expression("katG", 1);
+  };
+
+  it("two hairpins pass less than the square of one", async () => {
+    const { TERMINATORS } = await import("../src/parts.js");
+    const one = build(1), two = build(2);
+    const rt = TERMINATORS.hairpin.readthrough;
+    expect(two, "a second terminator did nothing").toBeLessThan(one);
+    // the tandem bonus: strictly below plain multiplication
+    expect(two / one, "two terminators only multiplied -- no tandem bonus")
+      .toBeLessThan(rt * 0.9);
+  });
+
+  it("three do not go negative or NaN, and the floor holds", () => {
+    const three = build(3);
+    expect(Number.isFinite(three)).toBe(true);
+    expect(three).toBeGreaterThanOrEqual(0);
+    // nearly sealed but the transcript is still a transcript
+    expect(three).toBeLessThan(build(2));
+  });
+
+  it("the bonus applies only to ADJACENT terminators, not any two on the ring", () => {
+    // [P][cbbL][T][katG][T][sodA]: the second T is not tandem with the first
+    // -- a gene sits between them. katG must read through at the plain rate.
+    const p = new Plasmid();
+    p.integrated = 12;
+    p.stash({ kind: "promoter", id: "j23119" });
+    for (const g of ["cbbL", "katG", "sodA"] as const) p.stash(gene(g));
+    p.stash({ kind: "terminator", id: "hairpin" });
+    p.stash({ kind: "terminator", id: "hairpin" });
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 6 ? 2 : 7;
+    const bin = (id: string) => p.bin.findIndex((b) => b.id === id);
+    p.install(bin("j23119"), base);
+    p.install(bin("cbbL"), base + 1);
+    p.install(bin("hairpin"), base + 2);
+    p.install(bin("katG"), base + 3);
+    p.install(bin("hairpin"), base + 4);
+    p.install(bin("sodA"), base + 5);
+    const op = p.operons().find((o) => o.promoter === base);
+    const katG = op?.genes.find((g) => g.id === "katG")?.flow ?? 0;
+    const cbbL = op?.genes.find((g) => g.id === "cbbL")?.flow ?? 0;
+    // katG's flow relative to cbbL's is one plain hairpin (x polarity decay),
+    // NOT the tandem-reduced rate
+    expect(katG / cbbL, "a non-adjacent terminator got the tandem bonus")
+      .toBeGreaterThan(0.38 * 0.5);
+  });
+});
+
+describe("a complete operon is detected only when it is complete", () => {
+  // The ring paints a complete operon gold. "Complete" is: a promoter, two
+  // or more genes, closed by a terminator, actually transcribing.
+  const gene = (id: bio.GeneId): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+  const layout = (parts: Part[]) => {
+    const p = new Plasmid();
+    p.integrated = 12;
+    for (const x of parts) p.stash(x);
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    const base = ori >= 6 ? 2 : 7;
+    let k = 0;
+    for (const x of parts) {
+      const i = p.bin.findIndex((b) => b.id === x.id && b.kind === x.kind);
+      p.install(i, base + k++);
+    }
+    // mirror the renderer's rule
+    const n = p.usableSlots;
+    return p.operons().map((op) => {
+      let span = 1;
+      for (let s = 1; s < n; s++) {
+        const q = p.at((op.promoter + s) % n);
+        if (q === null || q.kind === "promoter" || q.kind === "terminator") break;
+        span++;
+      }
+      const closed = span < n && p.at((op.promoter + span) % n)?.kind === "terminator";
+      return closed && op.genes.length >= 2 && op.output > 0.05;
+    });
+  };
+  it("promoter + two genes + terminator: complete", () => {
+    expect(layout([{ kind: "promoter", id: "j23119" }, gene("cbbL"), gene("katG"),
+                   { kind: "terminator", id: "hairpin" }])).toContain(true);
+  });
+  it("one gene: not complete", () => {
+    expect(layout([{ kind: "promoter", id: "j23119" }, gene("cbbL"),
+                   { kind: "terminator", id: "hairpin" }])).not.toContain(true);
+  });
+  it("no terminator: not complete, however many genes", () => {
+    expect(layout([{ kind: "promoter", id: "j23119" }, gene("cbbL"), gene("katG"),
+                   gene("sodA")])).not.toContain(true);
+  });
+});
