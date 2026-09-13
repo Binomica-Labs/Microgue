@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Allelic variation: the loot roll.
 //
 // Two copies of the same gene are not the same enzyme. Homologues of mtrC from

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Day and night.
 //
 // A Winogradsky column sits on a windowsill. Its phototrophs run on a diel

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Gesture classification, kept pure so it can be tested without a canvas.
 //
 // The bug this exists to prevent: a tap on the plasmid button opened the screen

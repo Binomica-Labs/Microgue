@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Microgue -- browser shell. Canvas rendering, pointer + keyboard input,
 // localStorage persistence. Everything above this file is engine-free logic.
 

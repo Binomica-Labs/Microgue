@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Rendering: the world, the HUD, and the two screens that need game state.
 //
 // The self-contained screens (splash, notebook, research, container) live in

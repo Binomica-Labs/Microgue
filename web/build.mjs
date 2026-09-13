@@ -44,16 +44,22 @@ for (const f of [...walk("src"), "public/index.html", "public/manifest.webmanife
 const BUILD = hash.digest("hex").slice(0, 12);
 const define = { __VERSION__: JSON.stringify(VERSION), __BUILD__: JSON.stringify(BUILD) };
 
+// The copyright rides in the bundle itself, so a lifted microgue.js still
+// says whose it is. esbuild strips ordinary comments on minify; a banner does
+// not get stripped.
+const banner = { js: "/*! Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. "
+  + "https://github.com/Binomica-Labs/Microgue */" };
+
 await build({
   entryPoints: ["src/main.ts"],
   bundle: true, minify: !dev, format: "esm", target: "es2022",
-  sourcemap: dev, outfile: "public/microgue.js", define,
+  sourcemap: dev, outfile: "public/microgue.js", define, banner,
 });
 
 await build({
   entryPoints: ["src/sw.ts"],
   bundle: true, minify: !dev, format: "iife", target: "es2022",
-  outfile: "public/sw.js", define,
+  outfile: "public/sw.js", define, banner,
 });
 
 const sw = readFileSync("public/sw.js", "utf8");

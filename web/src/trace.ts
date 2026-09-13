@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // A flight recorder.
 //
 // "Killed by an affliction" is the kind of report you cannot act on: the log

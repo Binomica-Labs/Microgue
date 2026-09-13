@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Organic wall contours.
 //
 // A grid of filled squares reads as a grid of filled squares. This traces the

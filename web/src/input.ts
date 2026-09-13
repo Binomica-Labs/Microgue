@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Input routing: pointers, gestures, keys, buttons.
 //
 // Everything here is reached through safety.on(), so a throw in a handler is

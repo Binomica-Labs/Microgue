@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Sacred invariants.
 //
 // Each of these is a property that must NEVER be false. Not a balance

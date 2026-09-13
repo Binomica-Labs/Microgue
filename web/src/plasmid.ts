@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The plasmid as an arrangeable ring, not a bag.
 //
 // Genes occupy contiguous slots. A promoter transcribes everything downstream

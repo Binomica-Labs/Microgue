@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Combat and the microbe turn, lifted out of main.ts.
 //
 // Everything here takes its world explicitly rather than reaching for game

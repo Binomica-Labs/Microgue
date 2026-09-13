@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The column, this time.
 //
 // Every strain that goes down meets the SAME twenty-four strata -- the seed

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Cave generation. Engine-free: the RNG is injected, so the same seed produces
 // the same column everywhere, and the whole module is unit-testable.
 //

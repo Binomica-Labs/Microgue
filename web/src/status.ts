@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Status effects: the useful tenth of an ECS, without the framework.
 //
 // One list on the entity, one loop applying it. Every effect is data, so

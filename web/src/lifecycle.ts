@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Entering a level and starting a run.
 //
 // Split from main.ts, which had been sitting one line under the 900-line

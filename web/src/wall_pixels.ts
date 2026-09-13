@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Wall art, as sprite sheets in source.
 //
 // The walls were a flat fill plus a handful of scattered dots. This replaces

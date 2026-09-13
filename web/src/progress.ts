@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Progression: what happens to the lineage rather than to the turn.
 //
 // Death, catabolism, subcloning and the research bench. Split out when turn.ts

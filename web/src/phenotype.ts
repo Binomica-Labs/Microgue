@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // What the cell LOOKS like, derived from what it is expressing.
 //
 // The avatar was a fixed white capsule for the whole game. You spend a run

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The console handle.
 //
 // A phone has no devtools worth the name, so this is the only way to get the

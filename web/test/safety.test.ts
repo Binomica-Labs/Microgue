@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { installGlobalHandlers, on, safe, safeAsync } from "../src/safety.js";
@@ -202,5 +202,60 @@ describe("the module split holds", () => {
       expect(src, `${f} has a runtime import of main.js`)
         .not.toMatch(/^import \{[^}]*\} from "\.\/main\.js";/m);
     }
+  });
+});
+
+describe("the copyright is everywhere it needs to be", () => {
+  it("every source file carries the notice on line one", () => {
+    // A single lifted .ts file must say whose it is. A notice only in
+    // LICENSE is a notice a copier never sees.
+    const bad: string[] = [];
+    for (const f of readdirSync("src")) {
+      if (!f.endsWith(".ts")) continue;
+      const first = readFileSync(`src/${f}`, "utf8").split("\n")[0] ?? "";
+      if (!first.includes("Binomica Labs") || !first.includes("CC BY-NC-SA")) bad.push(f);
+    }
+    expect(bad, "source files without the copyright header").toEqual([]);
+  });
+
+  it("the LICENSE, README, package.json and index.html all agree", () => {
+    const lic = readFileSync("LICENSE", "utf8");
+    expect(lic).toContain("Binomica Labs");
+    expect(lic).toContain("Attribution-NonCommercial-ShareAlike 4.0");
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { license?: string; author?: string };
+    expect(pkg.license).toBe("CC-BY-NC-SA-4.0");
+    expect(pkg.author).toBe("Binomica Labs");
+    const html = readFileSync("public/index.html", "utf8");
+    expect(html, "index.html has no copyright").toContain("Binomica Labs");
+    expect(html).toContain("CC BY-NC-SA");
+  });
+
+  it("the main menu draws the credit line", async () => {
+    const { drawMenu } = await import("../src/menu_render.js");
+    const texts: string[] = [];
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (["fillStyle","strokeStyle","font","textAlign","textBaseline","lineWidth"].includes(p)) return "";
+        return (...a: unknown[]) => { if (p === "fillText") texts.push(String(a[0])); };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    drawMenu(ctx, 393, 852, { top: 47, right: 0, bottom: 34, left: 0 }, 1.86,
+             "main", [null, null, null, null], null,
+             { autoAttack: false, minimap: true, diagonal: false, highContrast: false, reduceMotion: false });
+    const credit = texts.find((t) => t.includes("Binomica Labs"));
+    expect(credit, "the main menu shows no copyright").toBeDefined();
+    expect(credit).toContain("CC BY-NC-SA");
+  });
+
+  it("the built bundle carries the banner", () => {
+    // esbuild strips ordinary comments on minify. A `banner` does not, so a
+    // lifted microgue.js still says whose it is. Only checkable when a build
+    // exists; the packaged tarball excludes public/*.js, so CI's build is the
+    // one that proves it.
+    if (!existsSync("public/microgue.js")) return;
+    const js = readFileSync("public/microgue.js", "utf8");
+    expect(js.slice(0, 300), "the bundle does not start with the copyright banner")
+      .toContain("Binomica Labs");
   });
 });

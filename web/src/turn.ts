@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The turn engine: everything that happens because time passed.
 //
 // Split out of main.ts, which had reached 2272 lines and was where every save

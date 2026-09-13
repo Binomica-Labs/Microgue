@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Transient notices, including recovered errors.
 //
 // The failure mode this exists to prevent is the one that already happened: a

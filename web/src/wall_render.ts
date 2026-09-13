@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Drawing the wall mass: silhouette, depth gradient, lit lip, and sediment
 // texture.
 //

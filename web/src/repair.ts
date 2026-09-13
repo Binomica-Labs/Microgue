@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Repair.
 //
 // A cell does not heal. It repairs, and repair is expensive: damage to a

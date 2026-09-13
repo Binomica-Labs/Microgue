@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The three lines inside the plasmid ring.
 //
 // Split from render.ts at the 900-line ceiling. It is the one place the

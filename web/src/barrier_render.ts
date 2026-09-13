@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Barriers, as material.
 //
 // They were drawn one `fillRect` per tile, which read as a grid of doors --

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Things on the floor.
 //
 // Two kinds, and they are different in kind rather than in degree:

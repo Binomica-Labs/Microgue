@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Message text.
 //
 // A roguelike log is half the game's voice. "Geobacter destroyed." says

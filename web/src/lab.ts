@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The lab: what persists when the strain does not.
 //
 // A run is one strain sent down the column. When it dies, it dies -- there is

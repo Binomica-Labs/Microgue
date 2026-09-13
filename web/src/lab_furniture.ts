@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The furniture.
 //
 // The stations were FLOOR TILES with no drawing, so the room rendered as a

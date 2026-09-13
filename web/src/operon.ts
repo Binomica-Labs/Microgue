@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Building an operon out of the bin.
 //
 // Split from plasmid.ts when that crossed the 900-line ceiling `spec`

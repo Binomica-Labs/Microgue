@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Active abilities: what a gene lets you DO, not just what it makes you.
 //
 // Every build in the game was passive. Genes raised power, armour, ATP; combat

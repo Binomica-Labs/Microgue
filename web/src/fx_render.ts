@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Effect rendering: lunges, flashes, damage numbers, bursts, bolts, rings.
 //
 // Split out when render.ts crossed the 900-line ceiling `spec` enforces. It is

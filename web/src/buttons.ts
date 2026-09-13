@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // On-screen controls. A phone has no keyboard, and the previous build hid
 // stairs, zoom and the inventory behind keys that do not exist there.
 

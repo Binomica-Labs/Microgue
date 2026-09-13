@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Auto-explore, and travel that ends in a blow.
 //
 // Both are one INPUT that spends many turns, and both stop the moment

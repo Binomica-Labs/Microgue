@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The three aftermath screens: report, store, ready.
 //
 // Each names itself, says in one line what it is for, and has one big action

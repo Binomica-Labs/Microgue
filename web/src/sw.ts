@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 /// <reference lib="webworker" />
 // Service worker: precache everything, then serve cache-first.
 //

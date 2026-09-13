@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Primary production and the biological pump.
 //
 // A Winogradsky column is fed from the TOP. Phototrophs in the photic zone fix

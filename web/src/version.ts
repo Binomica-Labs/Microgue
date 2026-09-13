@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The build's identity, injected at compile time.
 //
 // `__VERSION__` comes from package.json and `__BUILD__` from a hash of the

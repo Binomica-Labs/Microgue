@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Run state: the roguelike layer.
 //
 // The original design said "If your character dies, you get resynthesized with

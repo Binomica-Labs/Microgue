@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Perception: what the cell can see, and what is worth stopping for.
 //
 // Split from turn.ts when that hit the 900-line ceiling `spec` enforces. The

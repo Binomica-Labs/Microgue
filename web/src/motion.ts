@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Facing and movement feel. Pure, because the angle-wrap bug -- turning from
 // 170 degrees to -170 by going the long way round -- is invisible in review and
 // obvious in play.

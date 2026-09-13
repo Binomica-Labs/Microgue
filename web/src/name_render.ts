@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The "name your strain" screen.
 //
 // The real text lives in a hidden <input> (name_entry.ts); this draws what it

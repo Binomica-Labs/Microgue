@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Effects. Timing, easing and decay live here as pure functions so the feel is
 // testable without a canvas -- the failure mode for juice is an effect that
 // never expires, and that is exactly the kind of thing a test catches and an

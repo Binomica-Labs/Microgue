@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Shape painter + offscreen sprite cache. Sprites are rasterised once per
 // (organism, size, palette) and blitted thereafter, so per-frame cost is a
 // drawImage rather than dozens of path operations.

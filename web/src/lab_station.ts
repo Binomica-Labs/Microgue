@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Walking onto a station.
 //
 // Each one is a part of preparing a culture, and stepping on it IS the

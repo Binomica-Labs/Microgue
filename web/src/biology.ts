@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 import type { WeaponKind } from "./weapons.js";
 import type { Behaviour, Size } from "./behaviour.js";
 import type { Facing } from "./motion.js";

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The wall silhouette, built from a contour rather than from tiles.
 //
 // `traceWalls` drew each wall SQUARE with its corners rounded, which is why a

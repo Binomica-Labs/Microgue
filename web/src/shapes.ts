@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Sprite primitives in unit space (0..1), emitted as data rather than drawn
 // directly. Two reasons: the same shape list renders on canvas in the browser
 // and in an offline previewer, so what I check is exactly what ships; and a

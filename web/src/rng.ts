@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Seeded PRNG. The Lua version reached for love.math.random, which made
 // generation unreproducible and coupled the logic to the engine. Injecting the
 // RNG fixes both: same seed, same column, every time, on every platform.

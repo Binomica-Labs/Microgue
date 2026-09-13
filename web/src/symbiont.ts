@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Symbionts: loot that is a CHOICE, not a stat.
 //
 // Every other drop is additive -- a gene, a part, a substrate, all pure gain.

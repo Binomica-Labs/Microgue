@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Drawing the front-of-game menus.
 //
 // Four modes, one per screen, plus a confirm modal that can sit over any of
@@ -5,6 +6,7 @@
 // without the renderer knowing what a tap means.
 
 import { mainRows, type Confirm, type MenuMode } from "./menu.js";
+import { CREDIT_LINE } from "./credits.js";
 import type { SlotInfo } from "./saves.js";
 import type { Box, Insets } from "./chrome.js";
 
@@ -83,6 +85,11 @@ export function drawMenu(
     ctx.fillStyle = DIM;
     ctx.font = `${11 * u}px ui-monospace,monospace`;
     ctx.fillText("descend the Winogradsky column", W / 2, top - 6 * u);
+    // The copyright, on the first screen anyone sees. A LICENSE file in a
+    // repo is invisible to a player; this is not.
+    ctx.fillStyle = "rgba(216,255,232,0.32)";
+    ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+    ctx.fillText(CREDIT_LINE, W / 2, H - ins.bottom - 14 * u);
 
     const has = slots.some((s) => s !== null);
     const rows = mainRows(has);

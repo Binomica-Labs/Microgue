@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Named characters in numbered slots.
 //
 // A run is a nanobot with a name, a depth reached and a plasmid. Keeping the

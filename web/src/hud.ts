@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Graphical HUD.
 //
 // The centrepiece is a Winogradsky column running down the screen edge: eight

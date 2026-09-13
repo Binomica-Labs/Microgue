@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The lab, as a real floor.
 //
 // The first version of this was a painted scene with its own state machine and

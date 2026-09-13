@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Routing a tap on the front-of-game menus.
 //
 // The confirm logic lives here and is the point of the whole feature: an

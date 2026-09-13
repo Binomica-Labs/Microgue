@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Pixel art. Each sprite is a 16x16 grid of ROLE indices, not colours, so the
 // organism's own pigment still tints it and every sprite stays a block of
 // editable text in version control.

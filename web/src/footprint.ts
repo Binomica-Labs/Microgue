@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Multi-tile bodies.
 //
 // Size in this game is not decorative. A Beggiatoa filament reaches 200 um

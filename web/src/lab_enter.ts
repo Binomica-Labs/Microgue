@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Walking into the lab.
 //
 // Split from main.ts at the 900-line ceiling. The lab is a Level like any

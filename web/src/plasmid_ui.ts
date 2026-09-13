@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The plasmid screen: a ring you spin, with slots you drag parts between.
 //
 // Everything is hit-tested in polar coordinates, which is what makes a circular

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Strain level: what the lineage has learned.
 //
 // Not experience points. A strain advances by CATALOGUING -- by how much of

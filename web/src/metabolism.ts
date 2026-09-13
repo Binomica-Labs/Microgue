@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Per-gene metabolic data.
 //
 // Split out of plasmid.ts, which owns ARRANGEMENT and economics rather than

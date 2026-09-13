@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Movement speed.
 //
 // Bacteria do not all move at one rate, and the differences are enormous and

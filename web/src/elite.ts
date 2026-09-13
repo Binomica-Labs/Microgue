@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Elites on ordinary floors.
 //
 // Elites existed only on boss floors -- 8.4 per boss, zero across the other

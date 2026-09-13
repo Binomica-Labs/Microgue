@@ -1,3 +1,35 @@
+# v1.25.0 — copyright and licence, everywhere
+
+There was NOTHING: no LICENSE file, no README, no `license` in package.json,
+and zero copyright anywhere in the game. Anyone could have taken it with
+nothing to point to.
+
+**Licence: CC BY-NC-SA 4.0.** Play, share, adapt -- with credit, not for
+sale, same terms downstream. Chosen because it is the one that most directly
+says "credit me, don't sell it". If AGPL-3.0 is preferred (open source, but
+anyone running a modified version must publish source), it is a one-file
+swap: LICENSE, `credits.ts`, package.json.
+
+Where it lives now, and why each:
+
+* `LICENSE` (root and web/) -- the legal text, in plain terms.
+* `README.md` -- the GitHub landing page, with the licence stated up front.
+* `package.json` -- `license` and `author`, which npm and GitHub both read.
+* `public/index.html` -- an HTML comment and meta tags, for view-source.
+* **Every source file, line one** -- a lifted `.ts` carries the notice.
+* **The built bundle** -- an esbuild `banner`, which survives minification
+  (ordinary comments do not). The first bytes of `microgue.js` are the
+  copyright. Verified in a real build.
+* **The main menu** -- a credit line on the first screen anyone sees. A
+  LICENSE in a repo is invisible to a player; this is not.
+* **The field notebook** -- the fuller statement, ellipsised to fit 320px.
+
+`credits.ts` is the single source for the in-game text, so the surfaces
+cannot drift. `spec` enforces all of it: every source file has the header
+(stripping one is three failures), LICENSE/README/package.json/index.html
+agree, the menu draws the credit, and the built bundle starts with the
+banner.
+
 # v1.24.0 — relief on the parts, grain on the floor
 
 ## v1.24.1 — a lint-gated packager, because this happened twice

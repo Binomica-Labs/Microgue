@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // A* on a 4/8-connected grid. Replaces jumper (~1400 lines of vendored Lua)
 // with ~90, and returns null instead of asserting on a bad destination.
 //

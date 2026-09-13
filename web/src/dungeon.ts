@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Multi-level descent. One cave per stratum, generated from that stratum's
 // parameters, cached so climbing back finds the same level.
 

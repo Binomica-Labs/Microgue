@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The transcription model.
 //
 // Extracted from the plasmid so the part catalogue can grow without touching

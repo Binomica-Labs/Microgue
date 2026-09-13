@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // KEGG-style module map.
 //
 // Modules, not pathway maps: a full KEGG map is dozens of nodes and unreadable

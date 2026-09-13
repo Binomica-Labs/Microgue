@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Choosing what to inoculate.
 //
 // Shown once, when an EMPTY slot is tapped: the class is fixed for the life of

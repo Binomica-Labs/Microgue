@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // What happens after a strain is lost (or wins).
 //
 // One screen used to do two jobs -- mourn the strain and sell you the next one

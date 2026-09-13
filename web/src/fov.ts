@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Field of view, by recursive shadowcasting.
 //
 // Until now the whole level was visible at once, which removes exploration,

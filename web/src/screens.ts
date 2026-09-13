@@ -1,8 +1,10 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Overlays that need nothing from the Game object beyond plain data.
 //
 // Extracted so main.ts stops being the only place a screen can live, and so
 // each is callable from a test without constructing a game.
 
+import { CREDIT_LONG } from "./credits.js";
 import * as bio from "./biology.js";
 import { drawClose, drawHeader, type Box, type Insets } from "./chrome.js";
 import { notebook, type RunState } from "./run.js";
@@ -135,6 +137,17 @@ export function drawNotes(
 
   const maxW = W - ins.left - ins.right - 28 * u;
   const floor = H - ins.bottom - 60 * u;
+
+  // The full credit, in the one place a curious player reads text.
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(216,255,232,0.35)";
+  ctx.font = `${8 * u}px ui-monospace,monospace`;
+  // Ellipsised to the width: the repo URL alone is wider than a 320px phone.
+  CREDIT_LONG.forEach((line, i) => {
+    ctx.fillText(ellipsise(ctx, line, maxW), ins.left + 14 * u,
+                 H - ins.bottom - 46 * u + i * 10 * u);
+  });
 
   for (const s of seen) {
     if (y > floor) {

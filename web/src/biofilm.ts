@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Biofilm: holding ground.
 //
 // The whole game is descent -- every mechanic pushes you down, and the reactive

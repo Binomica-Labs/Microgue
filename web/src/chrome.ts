@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Shared screen furniture.
 //
 // Three overlays each hand-rolled an identical close button and an identical

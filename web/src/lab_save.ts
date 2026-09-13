@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The lab is saved SEPARATELY from the run.
 //
 // A run save belongs to a slot and dies with the strain. The lab outlives

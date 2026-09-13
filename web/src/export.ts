@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The FASTA export.
 //
 // Split out of main.ts, which holds STATE and LIFECYCLE only -- fetching

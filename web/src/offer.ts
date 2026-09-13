@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Answering the eat-or-leave prompt.
 //
 // Split from turn.ts at the 900-line ceiling. The seam is real: this is where

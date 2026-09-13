@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The error boundary, made hard to bypass.
 //
 // Guarding call sites one at a time does not work: I wrapped the three gesture

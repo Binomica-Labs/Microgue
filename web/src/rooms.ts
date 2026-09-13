@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Chambers carved into the cave.
 //
 // A pure cellular automaton gives you caves and nothing else: no landmarks, no

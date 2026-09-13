@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Real sequences, fetched from NCBI at export time.
 //
 // Two deliberate choices:

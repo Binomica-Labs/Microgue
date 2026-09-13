@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Chasing a target.
 //
 // Tapping a microbe should mean "go kill that", not "walk to where it was".

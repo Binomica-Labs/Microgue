@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // The pathway graph: metabolite boxes joined by enzyme-labelled edges, panned
 // and zoomed over freely.
 //

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // A compact picture of every variable that matters, for the flight recorder.
 //
 // The events in the log say what HAPPENED. They do not say what the world

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Barriers: material you have to digest your way through.
 //
 // Every one is something that genuinely accumulates in a column, and every one

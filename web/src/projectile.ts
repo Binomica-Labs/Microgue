@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Travelling particles and lingering gradients.
 //
 // A tailocin or vesicle moves a tile per turn, which is the point: it can be

@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Persistence.
 //
 // Writing the run to a slot and reading it back. Split from main.ts when that

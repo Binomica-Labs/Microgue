@@ -1,3 +1,4 @@
+// Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Bulk loot: take all, eat all.
 //
 // The container was one tap per item. With three cassettes and two substrates
