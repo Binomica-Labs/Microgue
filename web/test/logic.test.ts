@@ -8832,3 +8832,121 @@ describe("a complete operon is detected only when it is complete", () => {
                    gene("sodA")])).not.toContain(true);
   });
 });
+
+describe("idle life: nothing alive is still, and nothing goes wild", () => {
+  it("breath and drift are small, bounded, and never NaN", async () => {
+    const { lifeOf } = await import("../src/life.js");
+    for (let t = 0; t < 20000; t += 37) {
+      for (const uid of [0, 1, 7, 99999, 2 ** 31]) {
+        const l = lifeOf(t, uid, -Infinity, true, false);
+        for (const v of [l.sx, l.sy, l.dx, l.dy]) expect(Number.isFinite(v)).toBe(true);
+        expect(Math.abs(l.sx - 1), "breath too big").toBeLessThan(0.06);
+        expect(Math.abs(l.dx), "drift too big").toBeLessThan(0.12);
+        expect(Math.abs(l.dy), "drift too big").toBeLessThan(0.12);
+      }
+    }
+  });
+
+  it("two creatures breathe out of phase", async () => {
+    // Desync is most of what makes a crowd look alive. Same instant, two
+    // uids, different breath.
+    const { lifeOf } = await import("../src/life.js");
+    let differ = 0;
+    for (let t = 0; t < 5000; t += 250) {
+      if (Math.abs(lifeOf(t, 1, -Infinity, true, false).sx
+                 - lifeOf(t, 2, -Infinity, true, false).sx) > 0.005) differ++;
+    }
+    expect(differ, "uids 1 and 2 breathe in lockstep").toBeGreaterThan(10);
+  });
+
+  it("a flinch is sharp at the hit and gone within 400ms", async () => {
+    const { lifeOf } = await import("../src/life.js");
+    const rest = lifeOf(10000, 5, -Infinity, true, false).sx;
+    const hit = lifeOf(10001, 5, 10000, true, false).sx;
+    expect(hit, "no flinch at the moment of a hit").toBeLessThan(rest - 0.15);
+    const later = lifeOf(10500, 5, 10000, true, false).sx;
+    expect(Math.abs(later - rest), "the flinch did not decay").toBeLessThan(0.01);
+    // a hit in the FUTURE (clock skew) or NaN must not flinch or throw
+    expect(Number.isFinite(lifeOf(10000, 5, 99999, true, false).sx)).toBe(true);
+    expect(Number.isFinite(lifeOf(10000, 5, NaN, true, false).sx)).toBe(true);
+  });
+
+  it("reduce-motion stills everything", async () => {
+    const { lifeOf } = await import("../src/life.js");
+    const l = lifeOf(12345, 3, 12000, true, true);
+    expect(l).toEqual({ sx: 1, sy: 1, dx: 0, dy: 0 });
+  });
+});
+
+describe("marine snow", () => {
+  it("motes are bounded to the window, finite, and denser with depth", async () => {
+    const { motes } = await import("../src/snow.js");
+    const counts: number[] = [];
+    for (const d of [1, 4, 8]) {
+      const ms = motes(5000, 7, bio.stratum(d), 10, 10, 30, 40);
+      counts.push(ms.length);
+      for (const m of ms) {
+        expect(Number.isFinite(m.x) && Number.isFinite(m.y)).toBe(true);
+        expect(m.x, "mote left the window").toBeGreaterThanOrEqual(9.5);
+        expect(m.x).toBeLessThanOrEqual(31.5);
+        expect(m.y).toBeGreaterThanOrEqual(8);
+        expect(m.y).toBeLessThanOrEqual(43);
+        expect(m.a).toBeGreaterThan(0);
+        expect(m.a).toBeLessThan(0.3);
+      }
+    }
+    expect(counts[2] ?? 0, "deep water is not murkier").toBeGreaterThan(counts[0] ?? 0);
+  });
+
+  it("motes sink: a mote is lower later", async () => {
+    const { motes } = await import("../src/snow.js");
+    const a = motes(1000, 7, bio.stratum(2), 0, 0, 20, 20);
+    const b = motes(1500, 7, bio.stratum(2), 0, 0, 20, 20);
+    // same seed and window, so mote i is the same lane; most should have sunk
+    let sank = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const ya = a[i]?.y ?? 0, yb = b[i]?.y ?? 0;
+      if (yb > ya || yb < ya - 15) sank++;    // lower, or wrapped to the top
+    }
+    expect(sank / Math.max(a.length, 1), "motes do not sink").toBeGreaterThan(0.9);
+  });
+
+  it("a degenerate window yields no motes and no crash", async () => {
+    const { motes } = await import("../src/snow.js");
+    expect(motes(0, 1, bio.stratum(1), 5, 5, 5, 5).length).toBeLessThanOrEqual(1);
+    expect(() => motes(NaN, 1, bio.stratum(1), 0, 0, 10, 10)).not.toThrow();
+    expect(() => motes(0, 1, bio.stratum(1), 10, 10, 0, 0)).not.toThrow();
+  });
+});
+
+describe("the motion layer survives a misbehaving clock", () => {
+  it("a NaN, infinite, negative or huge clock never yields a NaN scale", async () => {
+    // A NaN scale on the canvas blanks the sprite SILENTLY -- the body just
+    // stops being drawn, no error anywhere. A tab restored from sleep or a
+    // stubbed timer can hand the renderer exactly that clock.
+    const { lifeOf } = await import("../src/life.js");
+    const { motes } = await import("../src/snow.js");
+    const clocks = [0, 1e9, 6e11, -5000, NaN, Infinity, -Infinity, 1e15,
+                    Number.MAX_SAFE_INTEGER];
+    for (const now of clocks) {
+      for (const hurt of [-Infinity, now - 100, now + 100, NaN, 0]) {
+        const l = lifeOf(now, 7, hurt, true, false);
+        for (const v of [l.sx, l.sy, l.dx, l.dy]) {
+          expect(Number.isFinite(v), `lifeOf(now=${String(now)}) non-finite`).toBe(true);
+        }
+        expect(l.sx, "wild squash").toBeGreaterThan(0.5);
+        expect(l.sx).toBeLessThan(1.5);
+        expect(Math.abs(l.dx), "wild drift").toBeLessThan(0.2);
+      }
+      // uid can be garbage too (a mob built by a corrupt save)
+      const g = lifeOf(1000, NaN, -Infinity, true, false);
+      expect(Number.isFinite(g.sx)).toBe(true);
+      for (const m of motes(now, 3, bio.stratum(4), 0, 0, 30, 30)) {
+        expect([m.x, m.y, m.r, m.a].every(Number.isFinite),
+               `motes(now=${String(now)}) non-finite`).toBe(true);
+      }
+    }
+    // an inverted window is empty, not a crash
+    expect(motes(0, 1, bio.stratum(1), 10, 10, 0, 0)).toEqual([]);
+  });
+});

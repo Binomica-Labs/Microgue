@@ -37,6 +37,8 @@ import { RESEARCHER_PALETTE } from "./paint.js";
 import { phenotypeOf } from "./phenotype.js";
 import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
+import { lifeOf } from "./life.js";
+import { motes } from "./snow.js";
 import { r_barriers } from "./barrier_render.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
@@ -146,6 +148,20 @@ export function r_draw(_g: Game): void {
       ctx.fillStyle = pat ?? tone;
       ctx.fillRect(x0 * px, y0 * px, (x1 - x0 + 1) * px, (y1 - y0 + 1) * px);
     }
+    // Marine snow: motes sinking through the water, so the medium reads as
+    // fluid. Only on seen tiles -- a mote in the fog would give away the map.
+    if (!hc && !inLab && !_g.settings.reduceMotion) {
+      ctx.fillStyle = s.depth <= 2 ? "rgba(220,240,230,1)" : "rgba(180,170,140,1)";
+      for (const m of motes(_g.now, _g.dungeon.seed, s, x0, y0, x1, y1)) {
+        const tx = Math.floor(m.x), ty = Math.floor(m.y);
+        if (!isSeen(_g.level.sight, tx, ty) || !_g.level.grid.isFloor(tx, ty)) continue;
+        ctx.globalAlpha = m.a;
+        ctx.beginPath();
+        ctx.arc(m.x * px, m.y * px, Math.max(m.r * px, 0.8), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
     r_drawWalls(_g, ctx, s, px, x0, y0, x1, y1, hc, inLab);
     if (_g.path) {
       // Trim the stretch already walked, so the trail shows where you are
@@ -201,8 +217,14 @@ export function r_draw(_g: Game): void {
                                      paletteForPigment(m.pigment));
       if (img) {
         const v = travel(m.ax, m.ay, m.x, m.y);
-        const sq = squashFor(v, 0.16);
-        const bx = (c.x + mx + 0.5) * px, by = (c.y + my + 0.5) * px;
+        const mv = squashFor(v, 0.16);
+        // Idle life on top of motion: breath, drift, and a flinch on a hit.
+        // Multiplied in, so a swimming cell still breathes.
+        const life = lifeOf(_g.now, m.uid, m.hurtAt ?? -Infinity,
+                            m.behaviour !== "sessile" && m.behaviour !== "wire",
+                            _g.settings.reduceMotion);
+        const sq = { sx: mv.sx * life.sx, sy: mv.sy * life.sy };
+        const bx = (c.x + mx + 0.5 + life.dx) * px, by = (c.y + my + 0.5 + life.dy) * px;
         for (const w of wake(m.heading, v, 2)) {
           drawBody(ctx, img, bx + w.dx * px, by + w.dy * px, px * scale * spread,
                    m.facing, m.heading, sq, w.alpha * 0.7, "east", stretchOf(fp));
@@ -247,7 +269,12 @@ export function r_draw(_g: Game): void {
       : playerSprite(px * 0.92, ph);
     if (me) {
       const v = travel(_g.player.ax, _g.player.ay, _g.player.x, _g.player.y);
-      const sq = squashFor(v);
+      const mv = squashFor(v);
+      // The player breathes and flinches too. Not in the lab: a researcher
+      // does not squash, and there is nothing in there to hit them.
+      const life = inLab ? { sx: 1, sy: 1, dx: 0, dy: 0 }
+        : lifeOf(_g.now, 0, _g.hurtAt, true, _g.settings.reduceMotion);
+      const sq = { sx: mv.sx * life.sx, sy: mv.sy * life.sy };
       // The beat runs always, and faster when swimming. A still flagellum is
       // just a wire; the motion is what makes it read as one.
       // The filament reads as strongly as the cell actually expresses it. A
@@ -260,8 +287,8 @@ export function r_draw(_g: Game): void {
         len: 0.34 + ph.flagellum * 0.3,
         amp: 0.09 + ph.flagellum * 0.1,
       };
-      const bx = (_g.player.ax + lx + 0.5) * px;
-      const by = (_g.player.ay + ly + 0.5) * px;
+      const bx = (_g.player.ax + lx + 0.5 + life.dx) * px;
+      const by = (_g.player.ay + ly + 0.5 + life.dy) * px;
       // Wake: a cell moving through fluid leaves one.
       for (const w of wake(_g.player.heading, v)) {
         drawBody(ctx, me, bx + w.dx * px, by + w.dy * px, px * 0.92,

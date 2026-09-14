@@ -135,6 +135,8 @@ class Game {
   /** What the cell is facing because it just struck, rather than because
    *  it is travelling. Cleared on the next step. */
   facingAt: { x: number; y: number } | null = null;
+  /** ms of the last hit YOU took, for the flinch. */
+  hurtAt = -Infinity;
   /** Territory claimed this floor -- see biofilm.ts. */
   biofilm: Biofilm = newBiofilm();
   /** Active abilities: per-ability cooldown, lingering secretions, a timed

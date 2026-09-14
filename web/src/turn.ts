@@ -315,6 +315,7 @@ export function hurt(_g: Game, amount: number, cause: string): number {
   const dmg = dmg0;
   if (dmg <= 0) return 0;
   _g.player.hp = Math.max(_g.player.hp - dmg, 0);
+  _g.hurtAt = _g.now;                    // the flinch; see life.ts
   _g.lastAttacker = cause;
   return dmg;
 }

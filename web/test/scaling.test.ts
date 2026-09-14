@@ -949,3 +949,54 @@ describe("the world is clipped to the fogged window", () => {
       .not.toBeNull();
   });
 });
+
+describe("snow and life stay within the frame budget", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it("a frame with snow draws a bounded number of arcs", async () => {
+    // Motes are per-frame arcs. On a phone that is the budget; a window of
+    // 26x60 tiles at D8 density 3.0 is ~47 motes, which is fine. Pin that it
+    // never balloons.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.startRun(0);
+    for (let i = 0; i < 5; i++) g.press("wait");
+    t.arcs.length = 0;
+    g.frame(200);
+    expect(t.arcs.length, `${String(t.arcs.length)} arcs in one frame`).toBeLessThan(400);
+  });
+
+  it("snow draws only on seen floor: uncovering tiles adds motes, covering removes them", async () => {
+    // Proven by CONSTRUCTION, not observation. On a fresh floor the player has
+    // seen a handful of tiles and 83 motes over a 96x96 grid rarely land on
+    // them, so "count leaks" measured nothing and passed vacuously. Instead:
+    // mark the whole floor seen, count mote arcs; mark it all unseen, count
+    // again. The second must be zero and the first must not be.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(393, 852, t);
+    g.startRun(0);
+    g.press("wait");
+    const px = 32 * g.zoom;
+    const lo = Math.max(0.04 * px, 0.8) * 0.95, hi = Math.max(0.09 * px, 0.8) * 1.05;
+    const moteArcs = (): number => t.arcs.filter((a) => {
+      const [ax, ay, ar] = a;
+      if (ax === undefined || ay === undefined || ar === undefined) return false;
+      if (ar < lo || ar > hi) return false;
+      const tx = Math.floor(ax / px), ty = Math.floor(ay / px);
+      return g.level.grid.inBounds(tx, ty) && g.level.grid.isFloor(tx, ty);
+    }).length;
+
+    // everything seen: motes appear on floor
+    g.level.sight.seen.fill(1);
+    t.arcs.length = 0;
+    g.frame(200);
+    const withSight = moteArcs();
+    expect(withSight, "no motes even with the whole floor seen").toBeGreaterThan(0);
+
+    // nothing seen: every mote is suppressed
+    g.level.sight.seen.fill(0);
+    t.arcs.length = 0;
+    g.frame(240);
+    expect(moteArcs(), "motes drawn on unseen floor").toBe(0);
+  });
+});

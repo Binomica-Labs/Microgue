@@ -59,6 +59,8 @@ export interface Microbe extends Body {
   /** The last posture announced, so an intent event fires on CHANGE only --
    *  a hunter that circles for six turns says so once. See combat.ts. */
   lastIntent?: string;
+  /** ms of the last hit taken, for the flinch. See life.ts. */
+  hurtAt?: number;
   /** Turns until it may fire again, and how long it has been winding up. */
   reload: number;
   charging: number;

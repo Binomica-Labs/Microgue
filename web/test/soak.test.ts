@@ -1730,6 +1730,7 @@ describe("state that should persist, does", () => {
     aftermathBoxes: "hit boxes, per frame",
     menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
+    hurtAt: "ms of the last hit, for the flinch animation",
     biofilm: "territory on the current floor; cleared on descent",
     cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",
     surge: "a timed self-effect", aiming: "which ability is armed",

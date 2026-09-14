@@ -222,6 +222,7 @@ export function t_upkeep(_g: Game): void {
         if (!m.alive) continue;
         if (Math.abs(m.x - _g.player.x) <= 1 && Math.abs(m.y - _g.player.y) <= 1) {
           m.hp = Math.max(m.hp - aura, 0);
+          m.hurtAt = _g.now;
           if (m.hp <= 0) {
             m.alive = false;
             // The aura is the PLAYER's -- it is centred on them and it exists
@@ -441,6 +442,7 @@ export function t_attack(_g: Game, m: Mob): void {
     _g.fx.hitstop(28, now);
 
     m.hp = Math.max(m.hp - dmg, 0);
+    m.hurtAt = _g.now;                   // the flinch; see life.ts
     if (m.hp > 0) _g.note(say.hitLine(m.name, dmg, false, _g.turnSeed + dmg));
     if (m.hp <= 0) {
       m.alive = false;

@@ -1,3 +1,69 @@
+# v1.28.0 — idle life, flinch, and marine snow
+
+The sprites already squashed on movement and beat a flagellum; the water was
+static and nothing moved when it held still. Three layers of motion, all
+cheap, all deterministic in time:
+
+## v1.28.1 — the motion layer and a misbehaving clock
+
+Hardening found the one thing animation code must survive: a clock that does
+what a clock should not. `lifeOf(NaN)` and `lifeOf(Infinity)` returned NaN
+squash -- `Math.sin(NaN)` -- and a NaN scale on the canvas blanks the sprite
+SILENTLY. No error, the body just stops being drawn. The codebase's own
+`squashFor` already guards this exact failure and I had not copied the guard.
+A tab restored from sleep or a stubbed timer can hand the renderer that
+clock. Both `lifeOf` and `motes` now fall to rest on a non-finite `now`;
+`motes` also returns empty for an inverted window. The frame loop's dt clamp
+(1/15s) already covers the hour-asleep-tab case. Tested across nine clock
+values; removing the guard is three failures.
+
+Deleted a placeholder test I had written that proved nothing. A test that
+asserts `true` is worse than no test: it is a green light with nothing
+behind it.
+
+## Idle life (life.ts)
+
+Nothing alive is ever perfectly still. Every creature breathes (a +-3% squash
+on a 2.2s period), drifts sub-pixel on two incommensurate sines (so the path
+never visibly repeats), and FLINCHES when hit: a sharp squash-away that
+decays over 320ms with a wobble, so damage visibly lands rather than only
+appearing as a number. Phased by uid, so a crowd does not pulse in unison --
+that desynchrony is most of what makes it look alive rather than animated.
+Multiplied into the movement squash, so a swimming cell still breathes. The
+player has it too (and `hurtAt` on Game); not in the lab, where a researcher
+does not squash. Reduce-motion stills all of it.
+
+`hurtAt` is stamped at every one of the five places a mob loses hp -- melee,
+aura, bolt, burst, secretion -- so no hit is silent.
+
+## Marine snow (snow.ts)
+
+A stratified column is cloudy with sinking detritus. A slow rain of faint
+motes across the visible area says "this is fluid you are suspended in" and
+gives fixed things a moving reference. Denser and darker with depth. Every
+mote is a pure function of (time, seed) -- no state, nothing to save. Drawn
+ONLY on seen floor: a mote in the fog would give away the map.
+
+## A test that passed vacuously, four times
+
+"Snow never draws on an unseen tile" went green on the first try and proved
+nothing. Chasing it:
+
+1. it counted arcs in a radius band, but TILE is 32 not 16, so the band was
+   wrong and matched no motes -- zero leaks, zero motes, green;
+2. fixed the band; now it found 34 "leaks" that were screen-space UI dots
+   near the origin, not motes;
+3. required a floor tile; back to zero motes, because on a fresh floor the
+   player has seen so few tiles that 83 motes over a 96x96 grid land on none
+   of them -- the guard was working, and there was nothing to observe;
+4. proved it by CONSTRUCTION instead: mark the whole floor seen and count
+   motes (must be >0), mark it all unseen and count (must be 0). Removing the
+   guard is three failures.
+
+The rule that caught it, added after step 1: a test that asserts "zero bad
+things" must also assert it SAW some things, or it cannot tell a working
+guard from an empty measurement. Vacuous green is the worst green.
+
 # v1.27.0 — version on the start screen; the store is paused
 
 ## Version on the menu

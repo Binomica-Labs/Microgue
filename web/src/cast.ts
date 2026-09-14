@@ -78,6 +78,7 @@ export function castAbility(
         const m = _g.dungeon.mobAt(x, y, _g.level);
         if (m?.alive) {
           m.hp -= power;
+          m.hurtAt = _g.now;
           _g.fx.add({ kind: "flash", t0: _g.now, dur: 220, x: m.x, y: m.y, colour: "#ffe08a" });
           _g.note(`${a.name} hits the ${m.name} for ${String(power)}.`);
           if (m.hp <= 0) { m.alive = false; _g.run.killed += 1; _g.note(`The ${m.name} lyses.`); }
@@ -94,6 +95,7 @@ export function castAbility(
         if (!m.alive) continue;
         if (Math.max(Math.abs(m.x - px), Math.abs(m.y - py)) > a.range) continue;
         m.hp -= power;
+        m.hurtAt = _g.now;
         _g.fx.add({ kind: "flash", t0: _g.now, dur: 220, x: m.x, y: m.y, colour: "#ffe08a" });
         if (a.id === "sulfide") applyStatus(m.status, "slowed", 3, 1);
         if (m.hp <= 0) { m.alive = false; _g.run.killed += 1; }
@@ -147,6 +149,7 @@ export function tickSecretions(_g: Game): void {
     const s = _g.secretions.find((q) => q.x === m.x && q.y === m.y);
     if (!s) continue;
     m.hp -= s.dmg;
+    m.hurtAt = _g.now;
     _g.fx.add({ kind: "flash", t0: _g.now, dur: 220, x: m.x, y: m.y, colour: "#ffe08a" });
     if (m.hp <= 0) {
       m.alive = false;
