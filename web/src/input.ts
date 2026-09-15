@@ -17,6 +17,7 @@ import { inBox as inBoxOf, type Box } from "./chrome.js";
 import { i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
 import { castAbility } from "./cast.js";
+import { unlockAudio } from "./audio.js";
 import { NAME_POOL } from "./saves.js";
 import { eatAll, takeAll } from "./bulk_loot.js";
 import { CLASSES } from "./classes.js";
@@ -41,6 +42,8 @@ function cardSlot(_g: Game): number {
 }
 
 export function i_pointerDown(_g: Game, x: number, y: number): void {
+    // Web Audio needs a gesture. The first tap is it; later calls are no-ops.
+    unlockAudio();
     if (_g.openDrop) {
       // Bulk buttons first: they sit below the item grid.
       const cb = _g.containerBoxes;

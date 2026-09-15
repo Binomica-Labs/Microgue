@@ -8,6 +8,8 @@
 // and `t_explore`. What is left in turn.ts is the bookkeeping around an action:
 // stairs, pickup, world-building, repath.
 
+import { play } from "./audio.js";
+import { lyse } from "./cast.js";
 import { isNight } from "./cycle.js";
 import { CONDITIONS } from "./conditions.js";
 import type { Game } from "./main.js";
@@ -225,6 +227,7 @@ export function t_upkeep(_g: Game): void {
           m.hurtAt = _g.now;
           if (m.hp <= 0) {
             m.alive = false;
+            lyse(_g, m);
             // The aura is the PLAYER's -- it is centred on them and it exists
             // because of a gene they express. A kill by it is theirs.
             _g.run.killed += 1;
@@ -443,9 +446,11 @@ export function t_attack(_g: Game, m: Mob): void {
 
     m.hp = Math.max(m.hp - dmg, 0);
     m.hurtAt = _g.now;                   // the flinch; see life.ts
+    play("hit");
     if (m.hp > 0) _g.note(say.hitLine(m.name, dmg, false, _g.turnSeed + dmg));
     if (m.hp <= 0) {
       m.alive = false;
+      lyse(_g, m, false);                  // cue + lysate; melee bursts below
       // Fighting used to advance nothing: only the FIRST kill of a species
       // counted, as cataloguing. See strain.ts -- the term saturates, so
       // this rewards fighting without rewarding grinding.

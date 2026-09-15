@@ -43,6 +43,8 @@ export interface Settings {
   readonly uiScale: number;
   readonly highContrast: boolean;
   readonly reduceMotion: boolean;
+  /** Sound off. Separate from reduce-motion; they are different needs. */
+  readonly muted: boolean;
   readonly diagonal: boolean;
 }
 
@@ -104,7 +106,7 @@ export interface SaveData {
 
 export const DEFAULT_SETTINGS: Settings = {
   autoAttack: false, minimap: true,
-  zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true,
+  zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true, muted: false,
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -267,6 +269,7 @@ function parseSettings(v: unknown): Settings {
     highContrast: bool(v["highContrast"], false),
     reduceMotion: bool(v["reduceMotion"], false),
     diagonal: bool(v["diagonal"], true),
+    muted: v["muted"] === true,          // absent means sound on
   };
 }
 

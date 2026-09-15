@@ -6,6 +6,7 @@
 // player taps the row AND THEN taps yes on a modal whose default is no. A
 // modal that is up swallows every tap but its own two buttons.
 
+import { setMuted } from "./audio.js";
 import { loadSlot, deleteSlot } from "./saves.js";
 import { labEnabled } from "./lab_level.js";
 import { mainRows, type MenuMode } from "./menu.js";
@@ -58,6 +59,7 @@ export function i_menuTap(_g: Game, x: number, y: number): void {
     // written the moment a strain is inoculated.
     _g.settings = { ..._g.settings, [hit.toggle]: !_g.settings[hit.toggle] };
     _g.autoAttack = _g.settings.autoAttack;
+    setMuted(_g.settings.muted);
     return;
   }
   if (hit?.slot === undefined) return;

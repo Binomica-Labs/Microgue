@@ -38,7 +38,7 @@ import { phenotypeOf } from "./phenotype.js";
 import { drawMinimap, makeCanvas, miniBox } from "./minimap.js";
 import { squashFor, travel, wake } from "./motion.js";
 import { lifeOf } from "./life.js";
-import { motes } from "./snow.js";
+import { r_drawSnow, r_drawWater } from "./atmosphere_render.js";
 import { r_barriers } from "./barrier_render.js";
 import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
@@ -148,20 +148,7 @@ export function r_draw(_g: Game): void {
       ctx.fillStyle = pat ?? tone;
       ctx.fillRect(x0 * px, y0 * px, (x1 - x0 + 1) * px, (y1 - y0 + 1) * px);
     }
-    // Marine snow: motes sinking through the water, so the medium reads as
-    // fluid. Only on seen tiles -- a mote in the fog would give away the map.
-    if (!hc && !inLab && !_g.settings.reduceMotion) {
-      ctx.fillStyle = s.depth <= 2 ? "rgba(220,240,230,1)" : "rgba(180,170,140,1)";
-      for (const m of motes(_g.now, _g.dungeon.seed, s, x0, y0, x1, y1)) {
-        const tx = Math.floor(m.x), ty = Math.floor(m.y);
-        if (!isSeen(_g.level.sight, tx, ty) || !_g.level.grid.isFloor(tx, ty)) continue;
-        ctx.globalAlpha = m.a;
-        ctx.beginPath();
-        ctx.arc(m.x * px, m.y * px, Math.max(m.r * px, 0.8), 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-    }
+    r_drawSnow(_g, ctx, s, px, x0, y0, x1, y1, hc, inLab);
     r_drawWalls(_g, ctx, s, px, x0, y0, x1, y1, hc, inLab);
     if (_g.path) {
       // Trim the stretch already walked, so the trail shows where you are
@@ -471,6 +458,7 @@ export function r_draw(_g: Game): void {
       ctx.fillStyle = "rgba(2,4,4,0.82)";
       ctx.fill(dim);
     }
+    r_drawWater(_g, ctx, s, px, x0, y0, x1, y1, hc, inLab, ph);
     // Biofilm: a translucent matrix patch on each claimed tile, drawn after the
     // fog so a remembered-but-unseen patch is dimmed with the rest.
     if (_g.biofilm.floor === _g.level.floor && _g.biofilm.tiles.size > 0) {

@@ -8,6 +8,9 @@
 // a reason on refusal, because a silent no on a deliberate action is the
 // worst UI.
 
+import { play } from "./audio.js";
+import { makeRng } from "./rng.js";
+import { addDrop, substratesAt } from "./items.js";
 import { ABILITY_BY_ID, ready, spend, type Ability } from "./abilities.js";
 import { apply as applyStatus } from "./status.js";
 import type { Game } from "./main.js";
@@ -33,7 +36,7 @@ export function castAbility(
   _g: Game, id: string, dx = 0, dy = 0,
 ): string | null {
   const a: Ability | undefined = ABILITY_BY_ID[id];
-  if (!a) return "No such ability.";
+  if (!a) { play("denied"); return "No such ability."; }
   // A lost strain does not act. The aftermath screen is up; a cast underneath
   // it would lay tiles into a run that is over.
   if (_g.dead) return "The strain is lost.";
@@ -81,7 +84,7 @@ export function castAbility(
           m.hurtAt = _g.now;
           _g.fx.add({ kind: "flash", t0: _g.now, dur: 220, x: m.x, y: m.y, colour: "#ffe08a" });
           _g.note(`${a.name} hits the ${m.name} for ${String(power)}.`);
-          if (m.hp <= 0) { m.alive = false; _g.run.killed += 1; _g.note(`The ${m.name} lyses.`); }
+          if (m.hp <= 0) { m.alive = false; _g.run.killed += 1; lyse(_g, m); _g.note(`The ${m.name} lyses.`); }
           hit = true;
           break;
         }
@@ -98,7 +101,7 @@ export function castAbility(
         m.hurtAt = _g.now;
         _g.fx.add({ kind: "flash", t0: _g.now, dur: 220, x: m.x, y: m.y, colour: "#ffe08a" });
         if (a.id === "sulfide") applyStatus(m.status, "slowed", 3, 1);
-        if (m.hp <= 0) { m.alive = false; _g.run.killed += 1; }
+        if (m.hp <= 0) { m.alive = false; _g.run.killed += 1; lyse(_g, m); }
         hits++;
       }
       // Sulfide hurts you too, unless you route it: sqr.
@@ -134,8 +137,40 @@ export function castAbility(
 
   _g.player.atp -= a.cost;
   spend(_g.cooldowns, a, t);
+  play("cast");
   _g.trace.push(t, "attack", `cast ${a.id}`);
   return null;
+}
+
+/**
+ * A cell lyses. Every kill path calls this so death is the same event
+ * whether by melee, bolt, burst, enzyme or aura: the body bursts in its own
+ * pigment, sinks as motes, and enriches the tile -- a lysate is food. Real
+ * ecology: what dies here feeds what comes next. The burst rides the
+ * existing fx; the substrate is the new part.
+ */
+export function lyse(
+  _g: Game, m: { x: number; y: number; pigment: string; name: string; uid: number },
+  burst = true,
+): void {
+  play("kill");
+  // Melee draws its own bigger burst (with shake and hitstop); the ability
+  // and aura kills had none. `burst` false skips it to avoid a double.
+  if (burst) {
+    _g.fx.add({ kind: "burst", t0: _g.now, dur: 520, x: m.x, y: m.y,
+                colour: m.pigment, n: 22, seed: m.uid });
+  }
+  // Lysate feeds the tile: a substrate drop, most of the time, where the cell
+  // died. Not always -- a body that always paid out would be a vending
+  // machine, and the floor would carpet with food.
+  const rng = makeRng(_g.turnSeed++);
+  if (rng.next() < 0.45) {
+    const subs = substratesAt(_g.dungeon.depth);
+    const sid = subs[rng.int(Math.max(subs.length, 1))];
+    if (sid && _g.level.grid.isFloor(m.x, m.y)) {
+      addDrop(_g.drops, m.x, m.y, [{ kind: "substrate", id: sid }]);
+    }
+  }
 }
 
 /** Tick secretions: expire old ones, hurt mobs standing on them. Run once per
@@ -154,6 +189,7 @@ export function tickSecretions(_g: Game): void {
     if (m.hp <= 0) {
       m.alive = false;
       _g.run.killed += 1;
+      lyse(_g, m);
       _g.note(`The ${m.name} is digested in the ${ABILITY_BY_ID[s.by]?.name ?? "enzyme"}.`);
     }
   }

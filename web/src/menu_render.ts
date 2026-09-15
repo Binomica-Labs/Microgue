@@ -13,7 +13,7 @@ import type { Box, Insets } from "./chrome.js";
 /** Just the boolean settings a row can flip. */
 export interface ToggleView {
   autoAttack: boolean; minimap: boolean; diagonal: boolean;
-  highContrast: boolean; reduceMotion: boolean;
+  highContrast: boolean; reduceMotion: boolean; muted: boolean;
 }
 
 export interface MenuBoxes {
@@ -110,10 +110,12 @@ export function drawMenu(
       ["diagonal movement", "diagonal"],
       ["high contrast", "highContrast"],
       ["reduce motion", "reduceMotion"],
+      ["sound", "muted"],
     ];
     opts.forEach(([label, key], i) => {
       const box: Box = { x: rx, y: top + 14 * u + i * (rowH + gap), w: rw, h: rowH };
-      row(ctx, box, u, label, toggles[key] ? "on" : "off", true);
+      const on = key === "muted" ? !toggles[key] : toggles[key];
+      row(ctx, box, u, label, on ? "on" : "off", true);
       boxes.rows.push({ box, toggle: key });
     });
   }

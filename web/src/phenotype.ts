@@ -32,6 +32,11 @@ export interface Phenotype {
   readonly pili: number;
   /** 0..1. Refractile inclusions -- sulfur globules, chlorosomes, granules. */
   readonly granules: number;
+  /** 0..1. Photosynthetic light: a phototroph brightens the water around it.
+   *  What you ARE, visible in the world and not only on the ring. */
+  readonly light: number;
+  /** 0..1. Sulfide venting: a sulfur-reducing strain stains the water. */
+  readonly stain: number;
   /** A cheap identity for cache keys. */
   readonly key: string;
 }
@@ -73,6 +78,8 @@ const APPENDAGE: Readonly<Record<string, readonly GeneId[]>> = {
   pili: ["pilA"],
   granules: ["soxB", "dsrA", "csmA"],
   glow: ["luxAB"],
+  light: ["psbA", "psaA", "cbbL"],
+  stain: ["dsrA", "sqr", "hdrB"],
 };
 
 /** Total expression of a set, so a strong promoter shows more than a weak one. */
@@ -134,6 +141,8 @@ function compute(p: Plasmid, depth: number): Phenotype {
   const flagellum = saturate(output(p, APPENDAGE["flagellum"] ?? [], depth));
   const pili = saturate(output(p, APPENDAGE["pili"] ?? [], depth));
   const granules = saturate(output(p, APPENDAGE["granules"] ?? [], depth));
+  const light = Math.min(output(p, APPENDAGE["light"] ?? [], depth) / 1.2, 1);
+  const stain = Math.min(output(p, APPENDAGE["stain"] ?? [], depth) / 1.0, 1);
 
   const body = pigment?.body ?? PLAIN.body;
   const dark = pigment?.dark ?? PLAIN.dark;
@@ -146,7 +155,7 @@ function compute(p: Plasmid, depth: number): Phenotype {
   // the sprite cache every single frame.
   const q = (x: number): number => Math.round(x * 4);
   return {
-    body, dark, accent, hi, glow, flagellum, pili, granules,
+    body, dark, accent, hi, glow, flagellum, pili, granules, light, stain,
     key: `${body}|${hi}|${String(q(glow))}${String(q(flagellum))}`
       + `${String(q(pili))}${String(q(granules))}`,
   };

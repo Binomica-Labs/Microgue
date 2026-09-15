@@ -7,6 +7,7 @@
 // strain. Everything a run must forget from the last one, and everything a
 // floor must set up on arrival, lives here.
 
+import { ambient } from "./audio.js";
 import { clearBiofilm } from "./biofilm.js";
 import type { Game } from "./main.js";
 import type { Level } from "./dungeon.js";
@@ -32,6 +33,9 @@ import { NAME_POOL, listSlots, loadSlot } from "./saves.js";
 import { cleanName, isBlank } from "./name_entry.js";
 
 export function g_enter(_g: Game, level: Level, arrive: Point): void {
+  // The ambient bed retunes to the stratum: bright at the surface, a low
+  // rumble in the deep, silent in the lab.
+  ambient(level.depth);
   // Biofilm does not follow you: it is territory on a specific floor, and
   // arriving somewhere new clears it.
   clearBiofilm(_g.biofilm);

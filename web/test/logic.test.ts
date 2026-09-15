@@ -7768,7 +7768,7 @@ describe("the delete tab wins over the row it sits on", () => {
     ];
     const nul = new Proxy({}, { get: () => () => undefined }) as never;
     const tog = { autoAttack: false, minimap: true, diagonal: false,
-                  highContrast: false, reduceMotion: false };
+                  highContrast: false, reduceMotion: false, muted: false };
     const b = drawMenu(nul, 393, 852, { top: 47, right: 0, bottom: 34, left: 0 },
                        1.86, "continue", slots, null, tog);
     const del = b.rows.find((r) => r.del);
@@ -8948,5 +8948,73 @@ describe("the motion layer survives a misbehaving clock", () => {
     }
     // an inverted window is empty, not a crash
     expect(motes(0, 1, bio.stratum(1), 10, 10, 0, 0)).toEqual([]);
+  });
+});
+
+describe("the water shows what the game knows", () => {
+  it("night darkens the surface and fades with depth", async () => {
+    const { dayTint } = await import("../src/water.js");
+    // full night at the surface: a real tint
+    const night = dayTint(0, 1);
+    expect(night, "no night tint at the surface").not.toBeNull();
+    // full day: none
+    expect(dayTint(1, 1), "a day tint").toBeNull();
+    // the deep column does not see the sun
+    expect(dayTint(0, 8), "night tinted the methanogenic sediment").toBeNull();
+    // garbage light
+    expect(dayTint(NaN, 1)).toBeNull();
+    expect(() => dayTint(Infinity, 1)).not.toThrow();
+  });
+
+  it("every non-neutral condition has a tint; neutral has none", async () => {
+    const { conditionTint } = await import("../src/water.js");
+    const { CONDITIONS, CONDITION_IDS } = await import("../src/conditions.js");
+    for (const id of CONDITION_IDS) {
+      const t = conditionTint(CONDITIONS[id], 1000, false);
+      if (id === "none") expect(t, "a stable column got weather").toBeNull();
+      else {
+        expect(t, `${id} has no tint`).not.toBeNull();
+        expect(t).toMatch(/^rgba\(\d+,\d+,\d+,0\.\d+\)$/);
+      }
+    }
+    // reduce-motion: no pulse, but still the tint (it is information)
+    expect(conditionTint(CONDITIONS.anoxic, 1000, true)).not.toBeNull();
+  });
+
+  it("a phototroph carries light; a sulfide strain stains; a plain strain does neither", async () => {
+    const { strainAura } = await import("../src/water.js");
+    const { phenotypeOf } = await import("../src/phenotype.js");
+    const mk = (genes: readonly bio.GeneId[]) => {
+      const p = new Plasmid();
+      p.integrated = 10;
+      for (const g of genes) p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+      p.assemble([...genes]);
+      return p;
+    };
+    const photo = strainAura(phenotypeOf(mk(["psbA", "psaA", "cbbL"]), 1), 500, false);
+    expect(photo, "a phototroph casts no light").not.toBeNull();
+    expect(photo?.colour, "light is not warm").toBe("255,240,180");
+    const sulf = strainAura(phenotypeOf(mk(["dsrA", "sqr"]), 6), 500, false);
+    expect(sulf, "a sulfide strain leaves no stain").not.toBeNull();
+    expect(sulf?.colour).not.toBe(photo?.colour);
+    const plain = strainAura(phenotypeOf(mk(["groL", "dnaK"]), 1), 500, false);
+    expect(plain, "a repair strain got an aura").toBeNull();
+    // NaN clock does not NaN the radius
+    const bad = strainAura(phenotypeOf(mk(["psbA", "psaA", "cbbL"]), 1), NaN, false);
+    expect(Number.isFinite(bad?.r ?? 1)).toBe(true);
+  });
+
+  it("the aura grows with expression, so a stronger build shows more", async () => {
+    const { strainAura } = await import("../src/water.js");
+    const { phenotypeOf } = await import("../src/phenotype.js");
+    const weak = new Plasmid(); weak.integrated = 10;
+    weak.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    weak.assemble(["psbA"]);
+    const strong = new Plasmid(); strong.integrated = 10;
+    for (const g of ["psbA", "psaA", "cbbL"] as const) strong.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    strong.assemble(["psbA", "psaA", "cbbL"]);
+    const rw = strainAura(phenotypeOf(weak, 1), 0, true)?.r ?? 0;
+    const rs = strainAura(phenotypeOf(strong, 1), 0, true)?.r ?? 0;
+    expect(rs, "three photo genes cast no more light than one").toBeGreaterThan(rw);
   });
 });

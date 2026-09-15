@@ -4064,3 +4064,117 @@ describe("the store is paused, and pausing it loses nothing", () => {
     expect(offers(lab, []).length).toBeGreaterThan(0);
   });
 });
+
+describe("audio never crashes, whatever the browser gives it", () => {
+  // Every call must be silent-or-sound, never a throw. The first module in
+  // the codebase touching an API that can be absent (no AudioContext),
+  // refused (autoplay policy), or half-built (resume rejects). Each is a
+  // real phone.
+
+  it("with no AudioContext at all, every call is a no-op", async () => {
+    const { unlockAudio, play, ambient, setMuted, audioReady } = await import("../src/audio.js");
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    delete (globalThis as { AudioContext?: unknown }).AudioContext;
+    expect(() => { unlockAudio(); }).not.toThrow();
+    expect(audioReady()).toBe(false);
+    for (const c of ["hit", "hurt", "kill", "level", "cast", "pickup", "descend", "die", "denied"] as const) {
+      expect(() => { play(c); }, `play(${c}) threw with no context`).not.toThrow();
+    }
+    expect(() => { ambient(3); setMuted(true); setMuted(false); }).not.toThrow();
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+
+  it("with a context that throws on every node, every call is still silent", async () => {
+    // A context whose factory methods explode: the worst-behaved browser.
+    const { unlockAudio, play, ambient } = await import("../src/audio.js");
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    class Hostile {
+      currentTime = 0; sampleRate = 44100; destination = {};
+      resume(): Promise<void> { return Promise.reject(new Error("refused")); }
+      createGain(): never { throw new Error("no gain for you"); }
+      createOscillator(): never { throw new Error("no"); }
+      createBuffer(): never { throw new Error("no"); }
+      createBufferSource(): never { throw new Error("no"); }
+      createBiquadFilter(): never { throw new Error("no"); }
+    }
+    (globalThis as { AudioContext?: unknown }).AudioContext = Hostile;
+    expect(() => { unlockAudio(); }).not.toThrow();
+    expect(() => { play("hit"); play("die"); ambient(5); }).not.toThrow();
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+
+  it("garbage depth for the ambient bed is clamped, not a NaN filter", async () => {
+    const { unlockAudio, ambient } = await import("../src/audio.js");
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    const seen: number[] = [];
+    const param = { value: 0, linearRampToValueAtTime: (v: number) => { seen.push(v); },
+                    setValueAtTime: () => undefined, exponentialRampToValueAtTime: () => undefined };
+    const node = () => ({ connect() { return node(); }, start: () => undefined, stop: () => undefined,
+                          gain: param, frequency: param, type: "", loop: false, buffer: null,
+                          getChannelData: () => new Float32Array(8) });
+    class Fake {
+      currentTime = 0; sampleRate = 8; destination = {};
+      resume(): Promise<void> { return Promise.resolve(); }
+      createGain() { return node(); } createOscillator() { return node(); }
+      createBuffer() { return node(); } createBufferSource() { return node(); }
+      createBiquadFilter() { return node(); }
+    }
+    (globalThis as { AudioContext?: unknown }).AudioContext = Fake;
+    unlockAudio();
+    for (const d of [NaN, -5, 99, Infinity]) {
+      seen.length = 0;
+      expect(() => { ambient(d); }).not.toThrow();
+      for (const v of seen) expect(Number.isFinite(v), `ambient(${String(d)}) ramped to ${String(v)}`).toBe(true);
+    }
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+});
+
+describe("a lysed cell feeds the tile, and does not carpet the floor", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("every kill path calls lyse: a kill by bolt drops lysate sometimes", async () => {
+    // The ecology: what dies here feeds what comes next. Roll many kills and
+    // check the drop rate is real but not a vending machine.
+    const { lyse } = await import("../src/cast.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    let fed = 0;
+    const N = 200;
+    for (let i = 0; i < N; i++) {
+      const before = g.drops.length;
+      lyse(g, { x: g.player.x, y: g.player.y, pigment: "#fff", name: "t", uid: i });
+      if (g.drops.length > before) fed++;
+      g.drops.length = 0;                    // clear so the count is per-kill
+    }
+    const rate = fed / N;
+    expect(rate, `lysate rate ${(rate * 100).toFixed(0)}% -- never feeds`).toBeGreaterThan(0.25);
+    expect(rate, `lysate rate ${(rate * 100).toFixed(0)}% -- a vending machine`).toBeLessThan(0.7);
+  });
+
+  it("lysate on rock is not dropped; lyse on garbage never throws", async () => {
+    const { lyse } = await import("../src/cast.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    // a wall tile: a cell cannot die in rock, but the coordinate can be bad
+    const before = g.drops.length;
+    for (let i = 0; i < 40; i++) lyse(g, { x: 0, y: 0, pigment: "#fff", name: "t", uid: i });
+    expect(g.drops.filter((d) => d.x === 0 && d.y === 0).length, "lysate dropped in rock").toBe(0);
+    for (const bad of [{ x: NaN, y: NaN }, { x: -1, y: 1e9 }]) {
+      expect(() => { lyse(g, { ...bad, pigment: "x", name: "t", uid: 1 }); }).not.toThrow();
+    }
+    void before;
+  });
+});

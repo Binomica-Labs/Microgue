@@ -244,6 +244,7 @@ export function t_exploreStep(_g: Game): void {
 }
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 
+import { play } from "./audio.js";
 import { tickSecretions } from "./cast.js";
 import type { Intent } from "./combat.js";
 
@@ -316,6 +317,7 @@ export function hurt(_g: Game, amount: number, cause: string): number {
   if (dmg <= 0) return 0;
   _g.player.hp = Math.max(_g.player.hp - dmg, 0);
   _g.hurtAt = _g.now;                    // the flinch; see life.ts
+  play("hurt");
   _g.lastAttacker = cause;
   return dmg;
 }

@@ -1,3 +1,65 @@
+# v1.29.0 — sound, and the world reacting to you
+
+Five systems, all "the game knew this but never showed it".
+
+## Sound (audio.ts)
+
+There was none. Every sound is synthesised -- an oscillator and an envelope,
+or a burst of filtered noise -- so no files, no loading. Nine cues: hit, hurt,
+kill, level, cast, pickup, descend, die, denied. And an ambient BED: looping
+brown noise through a lowpass, retuned per stratum -- bright and thin at the
+oxic surface, a low thick rumble in the sulfidic deep, silent in the lab.
+Retuned on depth change, not rebuilt, because a bed that restarts on every
+floor would click. That bed is what makes the water a place.
+
+Web Audio needs a gesture: the context is created on the first pointer-down
+and every call before that is a no-op. `muted` is a setting (separate from
+reduce-motion -- different needs) with a row in Settings.
+
+The first module in the codebase touching an API that can be absent, refused
+or half-built. Tested against no AudioContext at all, a context whose every
+factory throws, and garbage depth -- every path is silence, never a throw.
+Two bugs the tests found: `ambient(NaN)` ramped the filter to NaN (NaN
+survives min/max; a NaN ramp throws in real Web Audio and the catch would
+have swallowed it, leaving the bed stuck forever), and a refused `resume()`
+was an unhandled rejection on every phone with an autoplay policy. Both
+fixed.
+
+## The world reacts to your build (phenotype.ts, water.ts)
+
+Two new phenotype traits: `light` (psbA/psaA/cbbL) and `stain` (dsrA/sqr/
+hdrB). A phototroph carries a warm radial glow that reaches farther the more
+it expresses; a sulfide strain leaves a tight yellow-green stain. What you
+ARE, visible in the world and not only on the ring. A repair-only strain gets
+neither, tested.
+
+## The day cycle is visible (water.ts)
+
+Night pulled the water toward deep blue-black -- up to 42% at the surface,
+fading to nothing by D6, because the deep column never sees the sun. It was
+HUD text; now the light-regulated promoter has a world that shows why it
+matters.
+
+## Conditions are weather (water.ts)
+
+Each non-neutral run condition tints the water: bloom green, cold snap
+ice-blue, sulfide upwelling amber, anoxic an oppressive dark red, ferruginous
+rust, oligotrophic pale. A slow pulse unless reduce-motion. Neutral has none,
+so the baseline stays the baseline.
+
+## Kills leave something behind (cast.ts `lyse`)
+
+Every kill path -- melee, aura, bolt, burst, enzyme -- now calls one `lyse`:
+the kill cue, a burst in the cell's own pigment, and ~45% of the time a
+substrate drop where it died. Real ecology: what dies feeds what comes next.
+Not always -- a body that always paid out is a vending machine. Melee keeps
+its own bigger burst (with shake and hitstop) and skips the second. Lysate is
+never dropped in rock, tested.
+
+## render.ts split again
+
+Snow and water passes moved to atmosphere_render.ts. render.ts 874.
+
 # v1.28.0 — idle life, flinch, and marine snow
 
 The sprites already squashed on movement and beat a flagellum; the water was
