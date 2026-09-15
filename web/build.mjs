@@ -16,7 +16,7 @@
 
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync , existsSync } from "node:fs";
 import { join } from "node:path";
 
 const dev = process.argv.includes("--dev");
@@ -26,6 +26,11 @@ const VERSION = `v${pkg.version.split(".").slice(0, 2).join(".")}`;
 
 function walk(dir) {
   const out = [];
+  // A missing directory contributes nothing rather than killing the build.
+  // `public/icons` is generated art that is not in the source tarball, so a
+  // fresh clone or an extracted package could not build at all -- and the
+  // failure was an ENOENT stack trace, not a message saying what was wrong.
+  if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...walk(p));
@@ -71,6 +76,17 @@ if (!sw.includes(BUILD)) {
 if (!js.includes(BUILD) || !js.includes(VERSION)) {
   console.error(`build: ${VERSION}/${BUILD} did not reach public/microgue.js`);
   process.exit(1);
+}
+// The copyright banner must be the FIRST thing in the bundle. Checked here,
+// after esbuild has written it -- not in the test suite, which `npm run
+// build` runs BEFORE the bundle exists. That test read whatever stale
+// public/microgue.js was lying around and failed CI on a file this build had
+// not produced. An artifact assertion belongs where the artifact is made.
+for (const [name, text] of [["microgue.js", js], ["sw.js", sw]]) {
+  if (!text.slice(0, 300).includes("Binomica Labs")) {
+    console.error(`build: public/${name} does not start with the copyright banner`);
+    process.exit(1);
+  }
 }
 
 writeFileSync("public/BUILD", `${VERSION} ${BUILD}\n`);

@@ -2,6 +2,57 @@
 
 Five systems, all "the game knew this but never showed it".
 
+## v1.29.2 — nothing had deployed since v1.28: build.mjs needed a directory that is not in the tarball
+
+Reported: "I don't see any of the movement etc we implemented." The code was
+correct and complete -- I verified the literals that survive minification
+(the phototroph glow 255,240,180, the night tint rgba(4,8,22, the snow colour
+220,240,230) were all in a locally built bundle. It was never a code problem.
+
+`npm run build` -- the exact CI command -- exited 1 on a clean tree with an
+ENOENT stack trace: `walk("public/icons")` threw because the directory does
+not exist. `public/icons` is generated art EXCLUDED from the packaged
+tarball, so a fresh clone or an extracted package could not build at all. I
+had been running `mkdir -p public/icons` by hand for so long that I had
+stopped seeing it, and read it as environment noise rather than the build
+being broken.
+
+So every CI run since v1.28 failed, Pages kept serving the old bundle, and
+each new feature I shipped was real, tested, packaged -- and never reached
+the device. The v1.29.0 banner failure was a SECOND, separate breakage on
+top of this one.
+
+`walk` returns empty for a missing directory now. Build exits 0 from a clean
+tree with the banner intact.
+
+**Two lessons.** A build that only works because of a manual step someone
+forgot they were doing is a broken build. And when the user says a feature is
+missing, check that the feature SHIPPED before checking whether it works --
+I verified the code three times over before running the one command that
+would have found this in ten seconds.
+
+## v1.29.1 — my own copyright test failed CI, and it was the test that was wrong
+
+CI: "the bundle does not start with the copyright banner", received
+`var k={psbA:...`. The banner WAS configured and works locally.
+
+The test was checking the wrong artifact at the wrong time. `npm run build`
+is `verify && node build.mjs` -- the suite runs BEFORE esbuild writes the
+bundle. Locally `public/microgue.js` was a fresh build with the banner;
+in CI it was a stale file from an earlier step, built without it. The
+`existsSync` guard I added only covered "no file at all", not "a file from
+some other build".
+
+Moved into `build.mjs`, immediately after esbuild writes the output, beside
+the existing VERSION/BUILD assertions -- where the artifact demonstrably
+exists and is the one this build made. Covers sw.js too. Proven: removing
+the banner config makes the build exit 1; with it, exit 0.
+
+**An artifact assertion belongs where the artifact is made, not where the
+tests happen to run.** A test that reads a build output is really asking
+"did the build do its job", and the build is the only place that can answer
+honestly.
+
 ## Sound (audio.ts)
 
 There was none. Every sound is synthesised -- an oscillator and an envelope,

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { installGlobalHandlers, on, safe, safeAsync } from "../src/safety.js";
@@ -250,14 +250,10 @@ describe("the copyright is everywhere it needs to be", () => {
     expect(credit, "the main menu shows no version").toMatch(/^v\S+/);
   });
 
-  it("the built bundle carries the banner", () => {
-    // esbuild strips ordinary comments on minify. A `banner` does not, so a
-    // lifted microgue.js still says whose it is. Only checkable when a build
-    // exists; the packaged tarball excludes public/*.js, so CI's build is the
-    // one that proves it.
-    if (!existsSync("public/microgue.js")) return;
-    const js = readFileSync("public/microgue.js", "utf8");
-    expect(js.slice(0, 300), "the bundle does not start with the copyright banner")
-      .toContain("Binomica Labs");
-  });
+  // "the built bundle carries the banner" lived here and was WRONG: `npm run
+  // build` is `verify && node build.mjs`, so the suite runs before the bundle
+  // is written. It read a stale public/microgue.js and failed CI on a file
+  // this build had not produced. The assertion moved into build.mjs, right
+  // after esbuild writes the file. Lesson: an artifact assertion belongs
+  // where the artifact is made, not where the tests happen to run.
 });
