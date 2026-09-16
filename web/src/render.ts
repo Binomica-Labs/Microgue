@@ -44,7 +44,7 @@ import { TOAST_COLOUR, TOAST_EDGE } from "./toast.js";
 import { drawButtons } from "./buttons.js";
 import { drawContainer, ellipsise } from "./screens.js";
 import { drawConfirm } from "./screens.js";
-import { phaseAt, shards, type Phase } from "./lysis.js";
+import { fadeAt, phaseAt, shards, type Phase } from "./lysis.js";
 import { Effects, easeOutQuad }
   from "./fx.js";
 import { Toasts } from "./toast.js";
@@ -536,12 +536,25 @@ export function r_draw(_g: Game): void {
       // into r_drawLysis for ever. The frame guard caught it as a stack
       // overflow, which is the error boundary working but not a fix.
       if (_g.dead) {
-        const p = phaseAt(_g.now - _g.deathAt);
+        const since = _g.now - _g.deathAt;
+        const p = phaseAt(since);
         if (p.beat !== "done") {
           r_drawLysis(_g, W, H, p);
           r_drawToasts(_g, W, H);
           if (p.reveal <= 0) return;
           ctx.globalAlpha = p.reveal;
+        }
+        // After the burst: fade to black, hold there, then bring the report
+        // up. Death needs a beat to land; see lysis.ts.
+        const f = fadeAt(since);
+        if (f.report < 1) {
+          if (f.black > 0) {
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = `rgba(0,0,0,${f.black.toFixed(3)})`;
+            ctx.fillRect(0, 0, W, H);
+          }
+          if (f.report <= 0) { r_drawToasts(_g, W, H); return; }
+          ctx.globalAlpha = f.report;
         }
       }
       const u = Math.max(Math.min(W, H) / 420, 1);

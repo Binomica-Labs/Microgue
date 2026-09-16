@@ -5,6 +5,7 @@
 // crossed the 900-line ceiling `spec` enforces -- these are about the strain
 // and the lab, not about time passing.
 
+import { deathCadence, play } from "./audio.js";
 import * as bio from "./biology.js";
 import { MODIFIERS } from "./parts.js";
 import { TRAITS, atpCeiling, expansionCost, type TraitId }
@@ -35,6 +36,7 @@ export function t_die(_g: Game): void {
     floor: _g.dungeon.floor,
     turns: _g.clock.turn,
     catalogued: _g.run.bestiary.length,
+    killed: _g.run.killed,
     bossesCleared: Math.floor((_g.dungeon.floor - 1) / 3),
     genesCarried: carried.length,
     bestAllele: best,
@@ -69,6 +71,9 @@ export function t_die(_g: Game): void {
 
   _g.dead = true;
   _g.deathAt = _g.now;
+  // The music collapses rather than stopping: see deathCadence.
+  play("die");
+  deathCadence(4200);
   _g.deathRecord = rec;
   // The flow starts at the report. It is three screens now -- what happened,
   // the store, the next strain -- rather than one screen doing all three.

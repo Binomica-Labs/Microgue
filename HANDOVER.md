@@ -1,3 +1,99 @@
+# v1.36.0 — RELEASE: a whole-codebase hardening pass
+
+Audited by coverage rather than by memory: 137 exported functions were named
+in no test. Most are render functions the frame soaks exercise indirectly;
+the real risk is pure logic, which can be wrong silently. Fuzzed all of it.
+
+## Two real bugs
+
+* **`lysateLine(NaN)` printed "NaN things worth taking" to the player.**
+  `String(NaN)` is "NaN", and the count reached the string uncoerced. Every
+  number bound for player-facing text is now clamped at the boundary -- and
+  it pluralises properly while it is there.
+* **`rarityOf` threw on a malformed item.** Loot round-trips through
+  storage; a shape from a corrupt save or an older version arrives untyped
+  and landed inside the draw call showing it. Now grades as common.
+
+The second has a wrinkle worth keeping: TypeScript PROVES `it.rarity` is
+always present, so the obvious `?? "common"` is flagged as an unnecessary
+condition and the strict build refuses it. But the type system only
+describes values that came through the type system. The check is on the
+VALUE, through an `unknown`, which no narrowing can elide.
+
+## Dead code
+
+`descendLine` and `substrateSight` were exported, called by nothing, tested
+by nothing -- and `descendLine` was one of the NaN leaks, so the audit found
+a bug in code that could never run. Removed.
+
+**A method note.** My "dead export" scan compares each export against OTHER
+modules, so it cannot see intra-module calls: `nearestMob`, `promote`,
+`drivers` and `expressionAt` all looked dead and are used by their own
+siblings. Four removals broke the build and were reverted. A dead-code scan
+is a list of CANDIDATES; the compiler is the oracle, and it has to run after
+every single removal.
+
+## State at release
+
+121 modules, 22,439 lines of source, 1191 tests. Zero TODO, FIXME,
+@ts-ignore or eslint-disable anywhere in src. Largest module 887 lines
+against the 900 ceiling. Strict `npm run build` green from a clean tree.
+
+# v1.35.0 — press/release everywhere, and a death that lands
+
+## Buttons commit on RELEASE
+
+The HUD buttons always did, and correctly: press, see what you hit, slide
+off, let go, nothing fires. Every OTHER surface -- menu, naming, aftermath,
+loot -- fired on pointerDOWN. Half the game let you change your mind and
+half did not, and transitions happened under your finger before you had read
+them. That is the "too fast" and most of the "awkward".
+
+`press.ts` is the shared machinery: a press ARMS a target, a release on the
+same target COMMITS, a release anywhere else cancels. One `_g.armed` state
+so no screen can forget to reset it. The menu is converted; a new "menu"
+gesture routes its release through `i_menuTap`. A confirm modal keeps its
+release-outside-cancels behaviour, which is the point of a no-default modal.
+
+## No name prefill
+
+The naming field started with a pool suggestion, so a player had to CLEAR it
+before typing, and an accepted default is not a name anyone chose. Empty
+now; "use suggested" is still one tap.
+
+## Death has a beat
+
+Death was: burst, then instantly a stats page. The run ended and you were
+reading numbers in the same breath.
+
+* **`deathCadence()`** -- the music COLLAPSES rather than stopping. The
+  fifth slides down to the root (a fifth closing to a unison is the oldest
+  "it is over" gesture there is), the swell cuts, the filter shuts to 90 Hz,
+  the bed sinks. The one place a pitch slide is right, because the point IS
+  the collapse.
+* **`fadeAt()`** -- after lysis the screen fades to black over 900ms, HOLDS
+  black for 700, then crosses into the report over 600. The hold is where
+  the death lands, and where the cadence is audible with nothing competing.
+
+## The report is a report card
+
+It was an obituary paragraph and a credit number -- no sense of this run
+against any other. Now:
+
+* a **depth bar** with the stratum gradient, showing F-reached against the
+  full column, with a marked line for your record and "deepest yet" when you
+  beat it. "F7" told you nothing; a bar tells you instantly.
+* **three stat cards** -- turns, lysed, recorded -- because a number with a
+  label under it reads at a glance and a number inside prose does not.
+  Needed `killed` threaded through RunOutcome, RunRecord and the save.
+
+## The build lints stricter than I did
+
+`npm run lint` passed; `npm run build` failed on two errors -- a
+non-exhaustive switch and an unnecessary `??`. The build's lint config is
+the real one. Worth remembering: run the BUILD, not the lint script, before
+believing it is clean.
+
 # v1.34.0 — tempo, rhythm, and a voice that rewards you
 
 ## Faster

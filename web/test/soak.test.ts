@@ -803,7 +803,10 @@ describe("death shows the lysis before the ledger", () => {
     g.frame(1100);
     expect(g.closeBox.w, "the lab drew during the still beat").toBe(0);
     // And by the end it must be.
-    g.frame(1000 + 2100);
+    // Past lysis AND the fade-to-black hold: death now fades down, holds,
+    // and brings the report up (see lysis.ts DEATH_MS), so the old 2100ms
+    // landed in the middle of the black.
+    g.frame(1000 + 4200);
     expect(g.closeBox.w, "the lab never appeared").toBeGreaterThan(0);
   });
 
@@ -1731,6 +1734,7 @@ describe("state that should persist, does", () => {
     menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
     hurtAt: "ms of the last hit, for the flinch animation",
+    armed: "what a press is holding, until release",
     musicAt: "music voicing throttle", musicThreat: "throttled threat for the music",
     biofilm: "territory on the current floor; cleared on descent",
     cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",

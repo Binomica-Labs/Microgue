@@ -350,6 +350,42 @@ export function music(
   } catch { /* silence */ }
 }
 
+/**
+ * The death cadence.
+ *
+ * The music does not just stop. Over `ms` the upper drone voice slides down
+ * to the root -- a fifth collapsing to a unison is the oldest "it is over"
+ * gesture there is -- the swell fades out, the filter closes, and the whole
+ * bed sinks. It is the one place a pitch SLIDE is right, because the point
+ * is the collapse.
+ */
+export function deathCadence(ms = 4000): void {
+  if (!voice || muted) return;
+  try {
+    const { ctx } = voice;
+    const t = ctx.currentTime;
+    const s = Math.max(ms, 500) / 1000;
+    voice.nextNote = Infinity;            // the melody stops at once
+    const d = voice.drone;
+    if (d) {
+      const root = d.osc[0]?.frequency.value ?? 110;
+      // The fifth falls to the root.
+      d.osc[1]?.frequency.setTargetAtTime(root, t, s * 0.35);
+      d.osc[1]?.detune.setTargetAtTime(0, t, s * 0.3);
+      // The swell goes quiet immediately; it is a voice, and the cell is gone.
+      d.gains[2]?.gain.setTargetAtTime(0, t, 0.5);
+      // The filter closes: the light going out of it.
+      d.filter.frequency.setTargetAtTime(90, t, s * 0.4);
+      // And the whole thing sinks away over the full span.
+      d.gain.gain.setTargetAtTime(0, t, s * 0.45);
+    }
+    if (voice.bed) {
+      voice.bed.gain.gain.setTargetAtTime(0, t, s * 0.5);
+      voice.bed.filter.frequency.setTargetAtTime(120, t, s * 0.4);
+    }
+  } catch { /* silence */ }
+}
+
 /** Stop the music and free its nodes. For leaving a run. */
 export function stopMusic(): void {
   if (!voice?.drone) return;

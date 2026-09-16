@@ -14,11 +14,10 @@ import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box } from "./chrome.js";
-import { i_menuTap } from "./menu_input.js";
+import { i_menuPress, i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
 import { castAbility } from "./cast.js";
 import { unlockAudio } from "./audio.js";
-import { NAME_POOL } from "./saves.js";
 import { eatAll, takeAll } from "./bulk_loot.js";
 import { CLASSES } from "./classes.js";
 import { removeDrop } from "./items.js";
@@ -172,8 +171,12 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
           // last thing before inoculation. A prebaked suggestion is offered so
           // an empty field still yields a real strain.
           _g.naming = { slot, cls: hit.id };
+          // No prefill. A suggested name in the field means the player has
+          // to CLEAR it before typing their own, and an accepted default is
+          // not a name they chose. The field starts empty; "use suggested"
+          // is the button for taking one.
           _g.nameField?.open(
-            NAME_POOL[slot % NAME_POOL.length] ?? "strain",
+            "",
             (name) => {
               const n = _g.naming;
               _g.naming = null;
@@ -191,8 +194,9 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       return;
     }
     if (_g.showSplash || !_g.started) {
-      i_menuTap(_g, x, y);
-      _g.gesture = "none";
+      // Arm only. The menu commits on RELEASE; see press.ts.
+      i_menuPress(_g, x, y);
+      _g.gesture = "menu";
       return;
     }
     if (_g.showNotes) {
@@ -286,7 +290,7 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
         _g.tap(t.x, t.y);
         break;
       }
-      case "dismiss": case "none": break;
+      case "dismiss": case "none": case "menu": break;
     }
   }
 
@@ -345,6 +349,13 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
   }
 
 export function i_pointerUp(_g: Game, x: number, y: number): void {
+  // The menu commits here, on RELEASE, not under the finger. See press.ts.
+  if ((_g.showSplash || !_g.started) && _g.naming === null
+      && _g.pickingClassFor === null && !_g.dead) {
+    i_menuTap(_g, x, y);
+    _g.gesture = "none";
+    return;
+  }
   if (_g.dead || _g.showLab) {
     const wasDrag = _g.shopMoved > 10;
     _g.shopFrom = null;
@@ -478,7 +489,7 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
           }
         }
         break;
-      case "none": case "world": break;
+      case "menu": case "none": case "world": break;
     }
     _g.gesture = "none";
     _g.gestureBtn = null;

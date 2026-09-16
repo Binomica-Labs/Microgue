@@ -29,6 +29,8 @@ export interface RunRecord {
   readonly stratum: string;
   readonly turns: number;
   readonly catalogued: number;
+  /** Cells lysed this run. Shown on the report card. */
+  readonly killed: number;
   readonly killedBy: string;
   readonly credit: number;
   /** True if the strain reached the bottom and cleared it. */
@@ -63,6 +65,8 @@ export interface RunOutcome {
   readonly floor: number;
   readonly turns: number;
   readonly catalogued: number;
+  /** Cells lysed this run. Shown on the report card. */
+  readonly killed: number;
   readonly bossesCleared: number;
   readonly genesCarried: number;
   readonly bestAllele: number;
@@ -127,6 +131,7 @@ export function recordRun(
     stratum: stratum(strataOf(floor)).name,
     turns: Math.max(Math.round(finite(o.turns, 0)), 0),
     catalogued: Math.max(Math.round(finite(o.catalogued, 0)), 0),
+    killed: Math.max(Math.round(finite(o.killed, 0)), 0),
     killedBy: o.killedBy,
     credit: Math.max(Math.round(finite(credit, 0)), 0),
     won: o.won,

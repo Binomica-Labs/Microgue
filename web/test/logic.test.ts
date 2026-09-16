@@ -832,7 +832,7 @@ describe("pixel art", () => {
 
 describe("pointer gestures", () => {
   const closeBox = { x: 900, y: 40, w: 46, h: 46 };
-  const base = { closeBox, slot: null, distFromRing: 500, rOuter: 200, onButton: false };
+  const base = { closeBox, slot: null, distFromRing: 500, rOuter: 200, onButton: false , killed: 0 };
 
   it("a button press is a button press, not a dismiss", () => {
     // The exact sequence that broke: button is outside the ring, but the
@@ -5206,7 +5206,7 @@ describe("terminators cost ATP, not just isolation", () => {
 });
 
 describe("synthesis credit", () => {
-  const base = { floor: 1, turns: 0, catalogued: 0, bossesCleared: 0,
+  const base = { floor: 1, turns: 0, catalogued: 0, killed: 0, bossesCleared: 0,
                  genesCarried: 0, bestAllele: 1, killedBy: "x", won: false };
 
   it("ground already covered pays a fraction", () => {
@@ -9519,5 +9519,140 @@ describe("the line has rhythm, and rewards a thriving strain", () => {
       expect(v.wellbeing).toBeGreaterThanOrEqual(0);
       expect(v.wellbeing).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("press arms, release commits", () => {
+  it("a release inside the armed box commits; outside it cancels", async () => {
+    // Sliding off a button and letting go is how a person says "not that
+    // one". Without it the press/release split buys nothing.
+    const { arm, commits, isArmed } = await import("../src/press.js");
+    const box = { x: 10, y: 10, w: 100, h: 40 };
+    const a = arm("play", box, 1000);
+    expect(commits(a, 50, 30), "a release on the button did not commit").toBe(true);
+    expect(commits(a, 50, 200), "a release off the button committed").toBe(false);
+    expect(commits(a, 9, 30), "a release just outside committed").toBe(false);
+    expect(commits(null, 50, 30), "an unarmed release committed").toBe(false);
+    expect(isArmed(a, "play")).toBe(true);
+    expect(isArmed(a, "quit")).toBe(false);
+    expect(isArmed(null, "play")).toBe(false);
+  });
+
+  it("a garbage clock does not break the armed state", async () => {
+    const { arm, commits } = await import("../src/press.js");
+    const box = { x: 0, y: 0, w: 10, h: 10 };
+    for (const now of [NaN, Infinity, -Infinity]) {
+      const a = arm("k", box, now);
+      expect(Number.isFinite(a.at), `arm(${String(now)}) kept a bad clock`).toBe(true);
+      expect(commits(a, 5, 5)).toBe(true);
+    }
+  });
+});
+
+describe("the death sequence has a beat", () => {
+  it("lysis, then black, then the report -- in that order", async () => {
+    // Death was: burst, and instantly a stats page. The hold is where it
+    // lands, and where the music's collapse is audible alone.
+    const { fadeAt, LYSIS_MS, DEATH_MS } = await import("../src/lysis.js");
+    expect(fadeAt(0), "black during the burst").toEqual({ black: 0, report: 0 });
+    expect(fadeAt(LYSIS_MS - 1).black, "black before the burst finished").toBe(0);
+    // it goes fully black before the report starts
+    const mid = fadeAt(LYSIS_MS + 1100);
+    expect(mid.black, "never reached black").toBe(1);
+    expect(mid.report, "the report showed during the black").toBe(0);
+    // and ends fully on the report
+    expect(fadeAt(DEATH_MS), "the report never arrived").toEqual({ black: 0, report: 1 });
+    expect(fadeAt(DEATH_MS + 9999).report).toBe(1);
+  });
+
+  it("the fade is monotonic and never leaves a gap where nothing is drawn", async () => {
+    const { fadeAt, DEATH_MS } = await import("../src/lysis.js");
+    let peak = 0;
+    for (let t = 0; t <= DEATH_MS + 500; t += 17) {
+      const f = fadeAt(t);
+      expect(Number.isFinite(f.black) && Number.isFinite(f.report)).toBe(true);
+      expect(f.black).toBeGreaterThanOrEqual(0);
+      expect(f.black).toBeLessThanOrEqual(1);
+      expect(f.report).toBeGreaterThanOrEqual(0);
+      expect(f.report).toBeLessThanOrEqual(1);
+      // Once the black has fully arrived, the screen is never left
+      // uncovered: black hands over to the report, they cross rather than
+      // cutting. (Early in the fade the world is still visible underneath,
+      // which is the fade working.)
+      if (t > 2900 && t < 3900) {
+        expect(f.black + f.report, `t=${String(t)}: a transparent gap`)
+          .toBeGreaterThanOrEqual(0.99);
+      }
+      peak = Math.max(peak, f.black);
+    }
+    expect(peak, "the screen never went fully black").toBe(1);
+    for (const bad of [NaN, -1000, Infinity]) {
+      const f = fadeAt(bad);
+      expect(Number.isFinite(f.black) && Number.isFinite(f.report),
+             `fadeAt(${String(bad)})`).toBe(true);
+    }
+  });
+});
+
+describe("nothing malformed reaches the player or the renderer", () => {
+  it("no number in player-facing text can print as NaN", async () => {
+    // "The remains of the Cell settle: NaN things worth taking" was
+    // reachable from any count that arrived non-finite. Every number bound
+    // for a string the player reads is coerced at the boundary.
+    const say = await import("../src/flavour.js");
+    for (const n of [NaN, Infinity, -Infinity, -5, 1e9, 0.5]) {
+      const t = say.lysateLine(n, "Chlorella");
+      expect(/NaN|Infinity|undefined/.test(t), `lysateLine(${String(n)}): ${t}`)
+        .toBe(false);
+      expect(t.length).toBeGreaterThan(0);
+    }
+    // and it still reads correctly for real counts
+    expect(say.lysateLine(1, "X")).toContain("1 thing worth");
+    expect(say.lysateLine(3, "X")).toContain("3 things worth");
+  });
+
+  it("every flavour line survives hostile strings without breaking", async () => {
+    const say = await import("../src/flavour.js");
+    for (const s of ["", "x".repeat(400), "\u0000", "undefined", "%s"]) {
+      for (const t of [say.starveLine(s, s), say.lysateLine(2, s)]) {
+        expect(typeof t, "a flavour line stopped being a string").toBe("string");
+        expect(t.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("rarityOf grades a malformed item instead of crashing the screen", async () => {
+    // Loot round-trips through storage and back into a render. A shape that
+    // predates a field, or a corrupt save, must grade as common -- not throw
+    // inside the draw call that is showing it.
+    const { rarityOf } = await import("../src/items.js");
+    const { RARITY } = await import("../src/parts.js");
+    for (const junk of [null, undefined, 0, "", [], {}, { kind: "bogus" },
+                        { kind: "part" }] as never[]) {
+      let r: string;
+      expect(() => { r = rarityOf(junk); }, `rarityOf(${JSON.stringify(junk)}) threw`)
+        .not.toThrow();
+      r = rarityOf(junk);
+      expect(r in RARITY, `rarityOf gave "${r}", not a real rarity`).toBe(true);
+    }
+  });
+
+  it("every real generated part has a gradeable rarity", async () => {
+    // The positive case, so the guard above cannot hide a real regression:
+    // loot the game actually makes must always grade.
+    const { rollPart, rarityOf } = await import("../src/items.js");
+    const { RARITY } = await import("../src/parts.js");
+    let n = 0;
+    for (let d = 1; d <= 8; d++) {
+      for (let s = 0; s < 60; s++) {
+        const rng = makeRng(s);
+        const p = rollPart(rng.next(), rng.next(), d);
+        if (!p) continue;
+        expect(rarityOf(p) in RARITY, `D${String(d)} part did not grade`).toBe(true);
+        n++;
+      }
+    }
+    expect(n, "no parts were generated -- the test proved nothing")
+      .toBeGreaterThan(100);
   });
 });

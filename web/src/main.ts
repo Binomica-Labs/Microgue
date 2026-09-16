@@ -14,6 +14,7 @@ import type { Cooldowns } from "./abilities.js";
 import type { AbilitySlot } from "./ability_bar.js";
 import { makeNameField, type NameField } from "./name_entry.js";
 import type { NameBoxes } from "./name_render.js";
+import type { Armed } from "./press.js";
 import type { ContainerBoxes } from "./screens.js";
 import type { Secretion, Surge } from "./cast.js";
 import { newAftermath, type Aftermath } from "./aftermath.js";
@@ -139,6 +140,8 @@ class Game {
   hurtAt = -Infinity;
   /** Throttle for the music voicing: counting visible hostiles walks the
    *  mob list, and it cannot change meaningfully between frames. */
+  /** What a press is holding, across every non-world screen. See press.ts. */
+  armed: Armed | null = null;
   musicAt = -Infinity;
   musicThreat = 0;
   /** Territory claimed this floor -- see biofilm.ts. */

@@ -5,6 +5,7 @@
 // button at the bottom that says what it does. The store keeps the credit
 // balance in a fixed strip so you never lose track of what you can afford.
 
+import { MAX_FLOOR } from "./dungeon.js";
 import { drawClose, type Box, type Insets } from "./chrome.js";
 import { ellipsise, type ShopRow } from "./screens.js";
 import { offers, type Lab, type RunRecord } from "./lab.js";
@@ -73,6 +74,8 @@ export function drawAftermath(
   stage: AftermathStage, lab: Lab, last: RunRecord | null,
   seen: readonly GeneId[], wrap: (s: string, w: number) => string[],
   scrollTop = 0,
+  /** The deepest floor ever reached, for the record mark on the depth bar. */
+  deepest = 0,
 ): AftermathBoxes {
   ctx.fillStyle = "rgba(4,7,6,0.98)";
   ctx.fillRect(0, 0, W, H);
@@ -100,7 +103,81 @@ export function drawAftermath(
         ctx.fillText(line, left, y);
         y += 17 * u;
       }
-      y += 6 * u;
+      y += 10 * u;
+
+      // A DEPTH BAR: this run against the column, and against your best.
+      // The obituary said "F7" and left you to imagine what that meant. A
+      // bar says it instantly -- how far down, how much was left, and where
+      // your record sits. That comparison is the thing a run wants to know.
+      const barH = 16 * u, barY = y;
+      const frac = Math.min(Math.max(last.floor / MAX_FLOOR, 0), 1);
+      const bestFrac = Math.min(Math.max(deepest / MAX_FLOOR, 0), 1);
+      ctx.fillStyle = "rgba(255,255,255,0.07)";
+      ctx.beginPath();
+      ctx.roundRect(left, barY, wide, barH, barH / 2);
+      ctx.fill();
+      const grad = ctx.createLinearGradient(left, 0, left + wide, 0);
+      grad.addColorStop(0, "#3fd27a");
+      grad.addColorStop(0.5, "#f2b830");
+      grad.addColorStop(1, "#8e6cf0");
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(left, barY, Math.max(wide * frac, barH), barH, barH / 2);
+      ctx.clip();
+      ctx.fillStyle = grad;
+      ctx.fillRect(left, barY, wide, barH);
+      ctx.restore();
+      // The record mark, when this run did not beat it.
+      if (bestFrac > frac + 0.01) {
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.lineWidth = Math.max(1.5 * u, 1.2);
+        ctx.beginPath();
+        ctx.moveTo(left + wide * bestFrac, barY - 3 * u);
+        ctx.lineTo(left + wide * bestFrac, barY + barH + 3 * u);
+        ctx.stroke();
+        ctx.fillStyle = DIM;
+        ctx.font = `${8 * u}px ui-monospace,monospace`;
+        ctx.textAlign = "center";
+        ctx.fillText("best", left + wide * bestFrac, barY + barH + 12 * u);
+        ctx.textAlign = "left";
+      }
+      ctx.fillStyle = "#d8ffe8";
+      ctx.font = `${9 * u}px ui-monospace,monospace`;
+      ctx.fillText(`F${String(last.floor)} of ${String(MAX_FLOOR)}`, left, barY - 5 * u);
+      if (last.floor >= deepest && !won) {
+        ctx.fillStyle = GOLD;
+        ctx.textAlign = "right";
+        ctx.fillText("deepest yet", left + wide, barY - 5 * u);
+        ctx.textAlign = "left";
+      }
+      y = barY + barH + (bestFrac > frac + 0.01 ? 26 : 16) * u;
+
+      // Three figures, as a row of cards rather than a sentence. A number
+      // with a label under it reads at a glance; a number inside prose does
+      // not.
+      const stats: [string, string, string][] = [
+        [String(last.turns), "turns", "#9ec9e8"],
+        [String(last.killed), "lysed", "#e8552e"],
+        [String(last.catalogued), "recorded", "#3fd27a"],
+      ];
+      const cw = (wide - 16 * u) / 3;
+      stats.forEach(([n, label, colour], i) => {
+        const cx = left + i * (cw + 8 * u);
+        ctx.fillStyle = "rgba(255,255,255,0.045)";
+        ctx.beginPath();
+        ctx.roundRect(cx, y, cw, 42 * u, 6 * u);
+        ctx.fill();
+        ctx.fillStyle = colour;
+        ctx.font = `${18 * u}px ui-monospace,monospace`;
+        ctx.textAlign = "center";
+        ctx.fillText(n, cx + cw / 2, y + 22 * u);
+        ctx.fillStyle = DIM;
+        ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+        ctx.fillText(label, cx + cw / 2, y + 34 * u);
+      });
+      ctx.textAlign = "left";
+      y += 54 * u;
+
       // The credit, as the headline number it is.
       ctx.fillStyle = GOLD;
       ctx.font = `${22 * u}px ui-monospace,monospace`;
@@ -108,7 +185,7 @@ export function drawAftermath(
       ctx.fillStyle = DIM;
       ctx.font = `${10 * u}px ui-monospace,monospace`;
       ctx.fillText("synthesis credit earned", left + 62 * u, y + 12 * u);
-      y += 36 * u;
+      y += 34 * u;
 
       // Final moments, labelled so it reads as a log and not stray debug text.
       if (last.epitaph.length > 0) {

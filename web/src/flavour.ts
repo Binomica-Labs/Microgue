@@ -8,7 +8,7 @@
 
 import { SYMBIONTS } from "./symbiont.js";
 import { GENES, type GeneId } from "./biology.js";
-import { SUBSTRATES, type Item, type SubstrateId } from "./items.js";
+import { SUBSTRATES, type Item } from "./items.js";
 import { MODIFIERS, PROMOTERS, RARITY, TERMINATORS } from "./parts.js";
 import type { WeaponKind } from "./weapons.js";
 
@@ -95,16 +95,7 @@ export function pickupLine(it: Item, atp: number, blocked: GeneId | null): strin
   return `You metabolise ${s.name} (${s.formula}). +${String(atp)} ATP.`;
 }
 
-export function substrateSight(id: SubstrateId): string {
-  const s = SUBSTRATES[id];
-  return `${s.name} (${s.formula}) has settled here.`;
-}
 
-export function descendLine(from: number, to: number, name: string, teap: string): string {
-  const dir = to > from ? "down" : "up";
-  return `You work your way ${dir} into the ${name}. ` +
-         `The terminal acceptor here is ${teap}.`;
-}
 
 export function starveLine(donor: string, teap: string): string {
   return pick([
@@ -115,5 +106,10 @@ export function starveLine(donor: string, teap: string): string {
 }
 
 export function lysateLine(n: number, name: string): string {
-  return `The remains of the ${name} settle: ${String(n)} things worth taking.`;
+  // `String(NaN)` is "NaN", and this goes straight to the player -- "NaN
+  // things worth taking" was reachable from any count that arrived
+  // non-finite. Every number bound for player-facing text is coerced.
+  const k = Number.isFinite(n) ? Math.max(Math.round(n), 0) : 0;
+  return `The remains of the ${name} settle: ${String(k)} `
+    + `thing${k === 1 ? "" : "s"} worth taking.`;
 }

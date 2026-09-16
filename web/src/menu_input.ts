@@ -7,6 +7,7 @@
 // modal that is up swallows every tap but its own two buttons.
 
 import { setMuted } from "./audio.js";
+import { arm, commits } from "./press.js";
 import { loadSlot, deleteSlot } from "./saves.js";
 import { labEnabled } from "./lab_level.js";
 import { mainRows, type MenuMode } from "./menu.js";
@@ -18,10 +19,46 @@ function inside(box: { x: number; y: number; w: number; h: number } | null,
   return box !== null && inBox(box, x, y);
 }
 
+/**
+ * A press on the menu ARMS a target; `i_menuTap` (on release) commits it.
+ * Sliding off before letting go cancels, which is how a person says "not
+ * that one".
+ */
+export function i_menuPress(_g: Game, x: number, y: number): void {
+  const b = _g.menuBoxes;
+  if (!b) { _g.armed = null; return; }
+  const m = _g.menu;
+  if (m.confirm && b.confirm) {
+    if (inside(b.confirm.yes, x, y)) { _g.armed = arm("yes", b.confirm.yes, _g.now); return; }
+    if (inside(b.confirm.no, x, y)) { _g.armed = arm("no", b.confirm.no, _g.now); return; }
+    _g.armed = null;                    // a tap outside cancels on RELEASE
+    return;
+  }
+  const hit = b.rows.find((r) => inside(r.box, x, y));
+  if (hit) {
+    const key = hit.mode ?? `${hit.del ? "del" : "slot"}:${String(hit.slot)}`
+      + (hit.toggle ?? "");
+    _g.armed = arm(key, hit.box, _g.now);
+    return;
+  }
+  if (b.back && inside(b.back, x, y)) { _g.armed = arm("back", b.back, _g.now); return; }
+  _g.armed = null;
+}
+
 export function i_menuTap(_g: Game, x: number, y: number): void {
   const b = _g.menuBoxes;
+  const held = _g.armed;
+  _g.armed = null;
   if (!b) return;
   const m = _g.menu;
+  // A release only acts if it lands on what the press armed.
+  if (!commits(held, x, y)) {
+    // Except a confirm modal, where a release OUTSIDE it is the cancel --
+    // that is the whole point of a no-default modal.
+    if (m.confirm && b.confirm && !inside(b.confirm.yes, x, y)
+        && !inside(b.confirm.no, x, y)) m.confirm = null;
+    return;
+  }
 
   // A confirm modal is modal: only its two buttons respond, and NO is the
   // safe default, so a tap anywhere but yes cancels.

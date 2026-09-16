@@ -66,12 +66,23 @@ export type Item =
 /** Rarity of an item, for colouring and for messages. `common` for anything
  *  that has no tier of its own. */
 export function rarityOf(it: Item): Rarity {
+  // A malformed item -- from a corrupt save, or a shape that predates a
+  // field -- must grade as common, not crash the screen drawing it. Loot is
+  // the one thing that round-trips through storage and back into a render.
+  // TypeScript proves `it.rarity` is always present, so a `??` fallback is
+  // flagged as unnecessary -- but the type system only describes values that
+  // came through the type system. Loot round-trips through storage, and a
+  // shape from a corrupt save or an older version arrives untyped. The check
+  // is on the VALUE, which no narrowing can elide.
+  const raw: unknown = it;
+  if (raw === null || typeof raw !== "object") return "common";
   // A cassette's rarity is its ROLL, not its base. Same gene, different find.
   if (it.kind === "cassette") return alleleRarity(it.gene, it.allele);
   if (it.kind === "substrate") return "common";
   // A symbiont is always a landmark find.
   if (it.kind === "symbiont") return "legendary";
-  return it.rarity;
+  const r: unknown = (raw as { rarity?: unknown }).rarity;
+  return typeof r === "string" && r in RARITY ? r as Rarity : "common";
 }
 
 /**

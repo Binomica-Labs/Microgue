@@ -29,6 +29,7 @@ function parseRecord(v: unknown, i: number): RunRecord | null {
     stratum: typeof v["stratum"] === "string" ? v["stratum"].slice(0, 40) : "?",
     turns: Math.max(Math.round(num(v["turns"], 0)), 0),
     catalogued: Math.max(Math.round(num(v["catalogued"], 0)), 0),
+    killed: Math.max(Math.round(num(v["killed"], 0)), 0),
     killedBy: typeof v["killedBy"] === "string" ? v["killedBy"].slice(0, 60) : "?",
     credit: Math.max(Math.round(num(v["credit"], 0)), 0),
     won: v["won"] === true,

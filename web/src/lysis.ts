@@ -17,6 +17,38 @@
 
 export const LYSIS_MS = 1900;
 
+/**
+ * After the cell bursts, the screen goes to black and HOLDS there before the
+ * report appears.
+ *
+ * Without it, death was: burst, and instantly a stats page. The run ended
+ * and you were reading numbers in the same breath. The hold is the beat
+ * where it lands -- and it is where the music's collapse (deathCadence) is
+ * audible with nothing else on screen competing for attention.
+ *
+ * 900ms to fade down, 700ms of black, then the report fades up over 600.
+ */
+export const FADE_MS = 900;
+export const HOLD_MS = 700;
+export const RISE_MS = 600;
+export const DEATH_MS = LYSIS_MS + FADE_MS + HOLD_MS + RISE_MS;
+
+/**
+ * The death sequence after lysis: how black the screen is (0..1) and how far
+ * up the report has come (0..1).
+ */
+export function fadeAt(ms: number): { black: number; report: number } {
+  const e = Number.isFinite(ms) ? Math.max(ms, 0) : DEATH_MS;
+  const since = e - LYSIS_MS;
+  if (since <= 0) return { black: 0, report: 0 };
+  if (since < FADE_MS) return { black: since / FADE_MS, report: 0 };
+  if (since < FADE_MS + HOLD_MS) return { black: 1, report: 0 };
+  const up = (since - FADE_MS - HOLD_MS) / RISE_MS;
+  if (up >= 1) return { black: 0, report: 1 };
+  // The black lifts as the report rises, so they cross rather than cutting.
+  return { black: 1 - up, report: up };
+}
+
 export type Beat = "still" | "rupture" | "wash" | "done";
 
 export interface Phase {
