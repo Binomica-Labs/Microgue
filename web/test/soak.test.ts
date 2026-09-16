@@ -4222,7 +4222,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     const { Fake, count } = fakeCtx(log);
     (globalThis as { AudioContext?: unknown }).AudioContext = Fake;
     unlockAudio();
-    const v = voicing({ depth: 3, threat: 0, health: 1, light: 1 });
+    const v = voicing({ depth: 3, threat: 0, health: 1, light: 1, energy: 0.5 });
     music(v, pentatonicOf(3), 3);                       // builds the drone
     const afterBuild = count();
     log.length = 0;
@@ -4242,7 +4242,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     delete (globalThis as { AudioContext?: unknown }).AudioContext;
     expect(() => {
       for (let d = 0; d <= 8; d++) {
-        music(voicing({ depth: d, threat: 0.5, health: 0.5, light: 0.5 }), pentatonicOf(d), d);
+        music(voicing({ depth: d, threat: 0.5, health: 0.5, light: 0.5, energy: 0.5 }), pentatonicOf(d), d);
       }
       stopMusic(); stopMusic();
     }).not.toThrow();
@@ -4266,7 +4266,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     (globalThis as { AudioContext?: unknown }).AudioContext = Hostile;
     unlockAudio();
     expect(() => {
-      music(voicing({ depth: 4, threat: 1, health: 0.2, light: 0 }), pentatonicOf(4), 4);
+      music(voicing({ depth: 4, threat: 1, health: 0.2, light: 0, energy: 0.5 }), pentatonicOf(4), 4);
       stopMusic();
     }).not.toThrow();
     (globalThis as { AudioContext?: unknown }).AudioContext = saved;
@@ -4285,7 +4285,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     unlockAudio();
     for (const root of [NaN, 0, -100, Infinity, 1e9]) {
       expect(() => {
-        music({ root, interval: 5, detune: 4, cutoff: 500, level: 0.05 }, pentatonicOf(3), 3);
+        music({ root, interval: 5, detune: 4, cutoff: 500, level: 0.05, wellbeing: 0.8 }, pentatonicOf(3), 3);
       }, `root ${String(root)} threw`).not.toThrow();
     }
     (globalThis as { AudioContext?: unknown }).AudioContext = saved;
@@ -4353,7 +4353,7 @@ describe("release soak: everything running together, for a long time", () => {
       const d = g.dungeon.depth;
       expect(() => { g.frame(1000 + f * 100); }, `F${String(f)} threw`).not.toThrow();
       // the music is defined and sane at every depth
-      const v = voicing({ depth: d, threat: 0.5, health: 0.6, light: 0.5 });
+      const v = voicing({ depth: d, threat: 0.5, health: 0.6, light: 0.5, energy: 0.5 });
       expect(Number.isFinite(v.root) && v.root > 80, `F${String(f)} bad root`).toBe(true);
       expect(modeOf(d).length, `F${String(f)} empty mode`).toBeGreaterThan(1);
       expect(pentatonicOf(d).length, `F${String(f)} empty pentatonic`).toBeGreaterThan(2);

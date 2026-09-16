@@ -127,6 +127,8 @@ export interface MusicState {
   readonly health: number;
   /** 0..1 daylight. */
   readonly light: number;
+  /** 0..1 ATP against the pool. */
+  readonly energy: number;
 }
 
 export interface MusicVoicing {
@@ -140,6 +142,10 @@ export interface MusicVoicing {
   cutoff: number;
   /** Drone level, 0..1. */
   level: number;
+  /** 0..1. How well the strain is doing -- health and energy together. The
+   *  harmony voice joins above 0.65, which is the one musical event that is
+   *  pure reward. */
+  wellbeing: number;
 }
 
 export function voicing(s: MusicState): MusicVoicing {
@@ -148,17 +154,21 @@ export function voicing(s: MusicState): MusicVoicing {
   const threat = Math.min(Math.max(num(s.threat, 0), 0), 1);
   const health = Math.min(Math.max(num(s.health, 1), 0), 1);
   const light = Math.min(Math.max(num(s.light, 1), 0), 1);
+  const energy = Math.min(Math.max(num(s.energy, 0.5), 0), 1);
 
   return {
     root: rootOf(depth),
-    // 11s when nothing is happening, down to ~3.5s with something on you.
-    interval: 11 - threat * 7.5,
+    // 7s when nothing is happening, down to ~2.4s with something on you.
+    // 11s was a note every two breaths -- too sparse to hear as a line at
+    // all, so the phrasing and the harmonic pull were both inaudible.
+    interval: 7 - threat * 4.6,
     // 4 cents at full health -- a slow beat -- widening to 28, which sours.
     detune: 4 + (1 - health) * 24,
     // Daylight opens the filter; the deep closes it regardless.
     cutoff: (300 + light * 900) * (1 - depth / 12),
     // The lab is nearly silent; the column settles at a steady level.
     level: depth === 0 ? 0.02 : 0.05 + Math.min(depth, 6) * 0.005,
+    wellbeing: health * 0.6 + energy * 0.4,
   };
 }
 
@@ -306,4 +316,56 @@ export function phraseOctave(n: number): number {
   const k = Number.isFinite(n) ? Math.floor(n / 9) : 0;
   const h = Math.abs(Math.sin(k * 41.7) * 9371.3) % 1;
   return h < 0.18 ? 2 : h < 0.78 ? 1 : 0.5;
+}
+
+/**
+ * The rhythmic value of step `n`, as a multiple of the base interval.
+ *
+ * A line whose notes are all the same length is a metronome. Real phrasing
+ * has long notes and short ones, and WHERE they fall is what gives a phrase
+ * its shape: it should settle on a long note at a phrase end and hurry in
+ * the middle.
+ *
+ * Returns a multiplier on the interval: 0.5 is a quick note, 1 is the
+ * pulse, 1.75 lets the phrase breathe. Deterministic in `n`.
+ */
+export function rhythmAt(n: number): number {
+  const k = Number.isFinite(n) ? Math.floor(n) : 0;
+  // Where in its phrase this note sits -- the same 9-step frame `sounds`
+  // and `phraseOctave` use, so rhythm, register and rests agree rather than
+  // cutting across each other.
+  const at = ((k % 9) + 9) % 9;
+  if (at === 8) return 1.75;                 // the phrase settles
+  if (at === 0) return 1.25;                 // and starts deliberately
+  const h = Math.abs(Math.sin(k * 5.71) * 1471.3) % 1;
+  return h < 0.3 ? 0.5 : h < 0.72 ? 0.75 : 1;
+}
+
+/**
+ * A second voice, a sixth above, that joins only when the strain is
+ * thriving: high health and a live ATP surplus. It is the one musical event
+ * that is pure reward -- the game telling you, in the only channel that is
+ * not a number, that the build is working.
+ *
+ * Returns the semitone offset, or null for silence.
+ */
+export function harmonyAt(
+  scale: readonly number[], note: number, wellbeing: number, n = 0,
+): number | null {
+  if (scale.length < 3) return null;
+  const w = Number.isFinite(wellbeing) ? wellbeing : 0;
+  if (w < 0.65) return null;
+  // Not on every note. A second voice under every note is a second melody
+  // and it thickens the line into mush; it should be a shimmer that catches
+  // occasional notes. How often scales with how well you are doing, from
+  // about one note in six at the threshold to one in two when thriving.
+  const k = Number.isFinite(n) ? Math.floor(n) : 0;
+  const h = Math.abs(Math.sin(k * 17.13) * 3571.7) % 1;
+  if (h > 0.15 + (w - 0.65) * 1.1) return null;
+  const i = scale.indexOf(note);
+  if (i < 0) return null;
+  // Two scale degrees up: in a pentatonic that is always a consonant
+  // interval, whichever degree you start from. The scale does the work.
+  const j = i + 2;
+  return j < scale.length ? (scale[j] ?? null) : (scale[j - scale.length] ?? 0) + 12;
 }

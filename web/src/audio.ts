@@ -14,8 +14,8 @@
 // Nothing here throws. A phone with no AudioContext, a browser that refuses
 // to resume, a call before the first gesture -- all silent, never a crash.
 
-import { chordOf, DRONE_VOICES, melodyStep, newWalk, phraseOctave, semi,
-  sounds, swellAt, type MusicVoicing, type Walk } from "./music.js";
+import { chordOf, DRONE_VOICES, harmonyAt, melodyStep, newWalk, phraseOctave,
+  rhythmAt, semi, sounds, swellAt, type MusicVoicing, type Walk } from "./music.js";
 
 export type Cue = "hit" | "hurt" | "kill" | "level" | "cast" | "pickup"
   | "descend" | "die" | "denied";
@@ -80,6 +80,31 @@ export function setMuted(m: boolean): void {
   if (voice) voice.master.gain.value = m ? 0 : 0.35;
 }
 export function isMuted(): boolean { return muted; }
+
+/**
+ * One struck note: an oscillator and an envelope, auto-stopped.
+ *
+ * Shared by the melody and its harmony voice so both have identical shape --
+ * and so there is exactly ONE place that decides a note's attack and decay.
+ * A frequency outside the audible band plays nothing rather than a click.
+ */
+function strike(
+  ctx: AudioContext, out: GainNode, f: number, at: number, dur: number,
+  peak: number,
+): void {
+  if (!Number.isFinite(f) || f <= 20 || f >= 8000) return;
+  if (!Number.isFinite(dur) || dur <= 0.05) return;
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = "triangle";
+  o.frequency.value = f;
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(peak, at + 0.04);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.connect(g).connect(out);
+  o.start(at);
+  o.stop(at + dur + 0.05);
+}
 
 /** A short tone: frequency sweep, gain envelope, done. */
 function tone(
@@ -303,22 +328,24 @@ export function music(
       // silence in a continuing line rather than a pause that freezes it.
       const note = melodyStep(voice.walk, scale,
                               sw.level > 0.15 ? sw.semitone : undefined);
-      const f = sounds(n, density) ? v.root * semi(note) * phraseOctave(n) : 0;
-      if (Number.isFinite(f) && f > 20 && f < 8000) {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = "triangle";
-        o.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.07, t + 0.04);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 4.5);
-        o.connect(g).connect(master);
-        o.start(t);
-        o.stop(t + 4.6);
+      const oct = phraseOctave(n);
+      const f = sounds(n, density) ? v.root * semi(note) * oct : 0;
+      // The note's own length sets its decay, so a quick note is short and a
+      // phrase-ending one rings. A fixed 4.5s tail on every note smears the
+      // line into a chord, which is what a slow pulse was hiding.
+      const beat = rhythmAt(n);
+      strike(ctx, master, f, t, Math.min(beat * v.interval * 0.9, 5), 0.07);
+      // A second voice a sixth up, only when the strain is thriving. Quieter
+      // and shorter, so it reads as a shimmer on the line rather than a
+      // second melody.
+      const h = harmonyAt(scale, note, v.wellbeing, n);
+      if (h !== null && f > 0) {
+        strike(ctx, master, v.root * semi(h) * oct, t + 0.06,
+               Math.min(beat * v.interval * 0.6, 3.5), 0.03);
       }
-      // Jitter the interval so the pulse never becomes a metronome.
-      const jitter = 0.7 + (Math.abs(Math.sin(n * 3.7)) % 1) * 0.6;
-      voice.nextNote = t + Math.max(v.interval * jitter, 1.5);
+      // Jitter, so the pulse is never a metronome even at a fixed rhythm.
+      const jitter = 0.86 + (Math.abs(Math.sin(n * 3.7)) % 1) * 0.28;
+      voice.nextNote = t + Math.max(v.interval * beat * jitter, 0.9);
     }
   } catch { /* silence */ }
 }

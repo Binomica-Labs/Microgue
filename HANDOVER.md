@@ -1,3 +1,51 @@
+# v1.34.0 — tempo, rhythm, and a voice that rewards you
+
+## Faster
+
+11s calm was a note every two breaths -- too sparse to hear as a LINE at
+all, which meant the phrasing and the harmonic pull were both inaudible. Now
+7s calm, 2.4s hunted. Measured in the unit a listener perceives: 10 notes a
+minute calm, 35 hunted. `spec` fails below 8/min (not a line) and above
+20/min (too busy for ambient).
+
+## Rhythm, from the phrase
+
+`rhythmAt(n)` gives each note a length as a multiple of the interval: 0.5,
+0.75, 1, 1.25, 1.75. A line whose notes are all one length is a metronome.
+WHERE the long ones fall is what shapes a phrase -- it starts deliberately
+(1.25) and settles on a long note (1.75) -- and it uses the same 9-step
+frame as `sounds` and `phraseOctave`, so rhythm, register and rests agree
+rather than cutting across each other.
+
+The note's own length now sets its decay. A fixed 4.5s tail on every note
+smears the line into a chord, which a slow pulse was hiding.
+
+## A voice that is pure reward
+
+`harmonyAt` adds a second note two scale degrees up, but ONLY when the
+strain is thriving -- `wellbeing` is health and ATP together, threshold
+0.65. It is the one musical event that is not information but reward: the
+game telling you, in the only channel that is not a number, that the build
+is working.
+
+**Found by measuring:** the first version fired on 300/300 notes. That is
+not a shimmer, it is a second melody, and it thickens the line into mush.
+Gated so it catches ~20% of notes at the threshold rising to ~47% when
+thriving. Consonance is guaranteed by construction and proven across all
+eight strata: two degrees up in a pentatonic is never a clash, whichever
+degree you start from.
+
+## Optimisation and tidiness
+
+One `strike()` helper now owns every struck note, so there is exactly one
+place deciding a note's attack and decay, and the melody and its harmony
+have identical shape by construction.
+
+Measured: 0.077 us per frame, 0.583 us per note -- 0.0005% of a 16.6ms
+budget. No node is created per frame; per note it is one oscillator (two
+when the harmony catches), auto-stopped. music.ts 371 lines, audio.ts 363,
+both far under the 900 ceiling with room for the mechanics to come.
+
 # v1.33.0 — the melody and the drone listen to each other
 
 The two layers were independent generators sharing a speaker: the melody

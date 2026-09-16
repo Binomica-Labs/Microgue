@@ -269,6 +269,7 @@ export function t_step_(_g: Game, t: number): void {
       threat: _g.musicThreat,
       health: _g.player.maxhp > 0 ? _g.player.hp / _g.player.maxhp : 1,
       light: daylight(_g.clock),
+      energy: _g.player.atpMax > 0 ? _g.player.atp / _g.player.atpMax : 0.5,
     }), pentatonicOf(d), d);
     // Hitstop freezes the animation clock only. Turn state already resolved,
     // so nothing desyncs -- the world just holds still for a beat.

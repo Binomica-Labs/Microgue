@@ -9061,25 +9061,25 @@ describe("the music mirrors the column", () => {
 
   it("the voicing reacts: threat quickens, damage sours, daylight opens", async () => {
     const { voicing } = await import("../src/music.js");
-    const calm = voicing({ depth: 3, threat: 0, health: 1, light: 1 });
-    const hunted = voicing({ depth: 3, threat: 1, health: 1, light: 1 });
+    const calm = voicing({ depth: 3, threat: 0, health: 1, light: 1, energy: 0.5 });
+    const hunted = voicing({ depth: 3, threat: 1, health: 1, light: 1, energy: 0.5 });
     expect(hunted.interval, "threat did not quicken the notes")
       .toBeLessThan(calm.interval);
-    const hurt = voicing({ depth: 3, threat: 0, health: 0.1, light: 1 });
+    const hurt = voicing({ depth: 3, threat: 0, health: 0.1, light: 1, energy: 0.5 });
     expect(hurt.detune, "damage did not sour the drone").toBeGreaterThan(calm.detune);
-    const night = voicing({ depth: 3, threat: 0, health: 1, light: 0 });
+    const night = voicing({ depth: 3, threat: 0, health: 1, light: 0, energy: 0.5 });
     expect(night.cutoff, "night did not close the filter").toBeLessThan(calm.cutoff);
     // the lab is near-silent
-    expect(voicing({ depth: 0, threat: 0, health: 1, light: 1 }).level)
+    expect(voicing({ depth: 0, threat: 0, health: 1, light: 1, energy: 0.5 }).level)
       .toBeLessThan(calm.level);
   });
 
   it("garbage state yields a sane, audible voicing", async () => {
     const { voicing } = await import("../src/music.js");
     for (const s of [
-      { depth: NaN, threat: NaN, health: NaN, light: NaN },
-      { depth: Infinity, threat: -5, health: 99, light: -1 },
-      { depth: -3, threat: 2, health: -1, light: 2 },
+      { depth: NaN, threat: NaN, health: NaN, light: NaN, energy: 0.5 },
+      { depth: Infinity, threat: -5, health: 99, light: -1, energy: 0.5 },
+      { depth: -3, threat: 2, health: -1, light: 2, energy: 0.5 },
     ]) {
       const v = voicing(s);
       for (const [k, n] of Object.entries(v)) {
@@ -9137,7 +9137,7 @@ describe("no reachable state produces an inaudible or wild note", () => {
       for (const th of [0, 0.5, 1, NaN, -1, 2, Infinity]) {
         for (const hp of [0, 0.5, 1, NaN, -1, 2]) {
           for (const li of [0, 1, NaN, -1, 2]) {
-            const v = voicing({ depth: d, threat: th, health: hp, light: li });
+            const v = voicing({ depth: d, threat: th, health: hp, light: li, energy: 0.5 });
             expect(v.interval, "notes would stack").toBeGreaterThan(1);
             expect(v.root).toBeGreaterThan(20);
             expect(v.root).toBeLessThan(1000);
@@ -9412,6 +9412,112 @@ describe("the melody and the drone are one piece, not two generators", () => {
     }
     for (const d of [NaN, -1, 2, Infinity]) {
       expect(typeof sounds(10, d), `sounds density ${String(d)}`).toBe("boolean");
+    }
+  });
+});
+
+describe("the line has rhythm, and rewards a thriving strain", () => {
+  it("the pulse is quick enough to hear as a line", async () => {
+    // 11s calm was a note every two breaths -- too sparse for the phrasing
+    // or the harmonic pull to be audible at all. Measured in notes/minute,
+    // which is the thing a listener actually perceives.
+    const { voicing, rhythmAt, sounds } = await import("../src/music.js");
+    const perMinute = (threat: number): number => {
+      const v = voicing({ depth: 3, threat, health: 1, light: 1, energy: 0.8 });
+      const density = Math.min(Math.max(1 - (v.interval - 3.5) / 7.5, 0), 1);
+      let t = 0, notes = 0;
+      for (let n = 0; n < 500 && t < 60; n++) {
+        if (sounds(n, density)) notes++;
+        t += Math.max(v.interval * rhythmAt(n) * 0.86, 0.9);
+      }
+      return notes;
+    };
+    const calm = perMinute(0), hunted = perMinute(1);
+    expect(calm, `only ${String(calm)} notes/min when calm -- not a line`)
+      .toBeGreaterThanOrEqual(8);
+    expect(calm, `${String(calm)} notes/min when calm -- too busy for ambient`)
+      .toBeLessThan(20);
+    expect(hunted, "threat did not quicken the line").toBeGreaterThan(calm * 1.5);
+  });
+
+  it("notes have different lengths, and phrases settle on a long one", async () => {
+    // A line whose notes are all one length is a metronome. And where the
+    // long notes fall is what gives a phrase its shape.
+    const { rhythmAt } = await import("../src/music.js");
+    const vals = new Set<number>();
+    for (let n = 0; n < 200; n++) {
+      const r = rhythmAt(n);
+      expect(Number.isFinite(r) && r > 0.2 && r < 3, `rhythm ${String(r)}`).toBe(true);
+      vals.add(r);
+    }
+    expect(vals.size, "every note is the same length").toBeGreaterThanOrEqual(3);
+    // the 9-step phrase frame: last step is the longest, first is deliberate
+    for (let base = 0; base < 180; base += 9) {
+      expect(rhythmAt(base + 8), "the phrase does not settle")
+        .toBeGreaterThan(rhythmAt(base + 4));
+    }
+  });
+
+  it("the harmony voice is a shimmer, not a second melody", async () => {
+    // Under every note it thickens the line into mush. It should catch some
+    // notes, more often the better the strain is doing.
+    const { harmonyAt, pentatonicOf, newWalk, melodyStep } = await import("../src/music.js");
+    const p = pentatonicOf(3);
+    const rate = (w: number): number => {
+      const walk = newWalk();
+      let hit = 0;
+      for (let n = 0; n < 400; n++) {
+        if (harmonyAt(p, melodyStep(walk, p), w, n) !== null) hit++;
+      }
+      return hit / 400;
+    };
+    expect(rate(0.3), "the harmony plays for a dying strain").toBe(0);
+    expect(rate(0.6), "the harmony plays below the threshold").toBe(0);
+    const ok = rate(0.7), great = rate(0.98);
+    expect(ok, "no harmony at all when doing well").toBeGreaterThan(0.05);
+    expect(ok, "the harmony is on every note at the threshold").toBeLessThan(0.45);
+    expect(great, "thriving does not bring more harmony").toBeGreaterThan(ok);
+    expect(great, "the harmony is on every note when thriving").toBeLessThan(0.7);
+  });
+
+  it("the harmony is always consonant: a pentatonic cannot clash", async () => {
+    // Two scale degrees up in a pentatonic is a consonant interval whatever
+    // degree you start from. That is why the scale does the work.
+    const { harmonyAt, pentatonicOf } = await import("../src/music.js");
+    for (let d = 1; d <= 8; d++) {
+      const p = pentatonicOf(d);
+      for (const note of p) {
+        for (let n = 0; n < 40; n++) {
+          const h = harmonyAt(p, note, 0.95, n);
+          if (h === null) continue;
+          const gap = ((h - note) % 12 + 12) % 12;
+          expect(gap === 0 || gap >= 3,
+                 `D${String(d)}: ${String(note)} + ${String(h)} is a ${String(gap)}-semitone clash`)
+            .toBe(true);
+        }
+      }
+    }
+  });
+
+  it("rhythm, harmony and wellbeing survive garbage", async () => {
+    const { rhythmAt, harmonyAt, pentatonicOf, voicing } = await import("../src/music.js");
+    const p = pentatonicOf(4);
+    for (const n of [NaN, Infinity, -Infinity, -1e9, 1e9]) {
+      const r = rhythmAt(n);
+      expect(Number.isFinite(r) && r > 0, `rhythmAt(${String(n)}) = ${String(r)}`).toBe(true);
+      for (const w of [NaN, -5, 5, Infinity]) {
+        const h = harmonyAt(p, p[1] ?? 0, w, n);
+        if (h !== null) expect(Number.isFinite(h)).toBe(true);
+      }
+    }
+    expect(harmonyAt([], 0, 1, 0)).toBeNull();
+    expect(harmonyAt([0, 5], 0, 1, 0)).toBeNull();        // too few degrees
+    expect(harmonyAt(p, 99, 1, 0), "a note outside the scale").toBeNull();
+    for (const e of [NaN, -1, 2, Infinity]) {
+      const v = voicing({ depth: 3, threat: 0, health: 1, light: 1, energy: e });
+      expect(Number.isFinite(v.wellbeing), `energy ${String(e)}`).toBe(true);
+      expect(v.wellbeing).toBeGreaterThanOrEqual(0);
+      expect(v.wellbeing).toBeLessThanOrEqual(1);
     }
   });
 });
