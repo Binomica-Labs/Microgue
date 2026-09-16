@@ -56,6 +56,48 @@ export function modeOf(depth: number): readonly number[] {
 export const semi = (n: number): number => Math.pow(2, n / 12);
 
 /**
+ * The chord the drone arpeggiates, per stratum: semitone offsets from the
+ * root. Built from the mode's own degrees, so the harmony is the stratum's
+ * -- a Phrygian floor gets its flat second, a whole-tone floor gets an
+ * unresolvable stack.
+ *
+ * Root, third, fifth, seventh where the mode has them; the deep modes end up
+ * with the sour intervals that make them sound like the deep.
+ */
+export function chordOf(depth: number): readonly number[] {
+  const mode = modeOf(depth);
+  if (mode.length <= 2) return [0, 7];                  // the lab: a bare fifth
+  const at = (i: number): number => mode[Math.min(i, mode.length - 1)] ?? 0;
+  // scale degrees 1, 3, 5, 7 -- indices 0, 2, 4, 6
+  return [at(0), at(2), at(4), at(6)];
+}
+
+/**
+ * Where drone voice `v` sits at step `n` of the arpeggio.
+ *
+ * Each voice walks the chord at its OWN rate and offset, so the three of
+ * them re-voice against each other endlessly without ever restarting. That
+ * is the difference between a drone that breathes and a held chord that
+ * wears out: nothing is static, but nothing is fast enough to be a melody
+ * either.
+ *
+ * Voice 0 is the bass and moves least -- an arpeggio whose bottom wanders is
+ * a chord progression, which is more music than this wants to be.
+ */
+export function droneStep(chord: readonly number[], v: number, n: number): number {
+  if (chord.length === 0) return 0;
+  const k = Number.isFinite(n) ? Math.floor(n) : 0;
+  // Rates chosen coprime-ish so the pattern takes a long time to repeat:
+  // voice 0 every 4 steps, voice 1 every 3, voice 2 every 5.
+  const rate = [4, 3, 5][v % 3] ?? 4;
+  const idx = Math.floor(k / rate) + v * 2;
+  // The bass stays low; the upper voices may take the octave.
+  const pick = chord[((idx % chord.length) + chord.length) % chord.length] ?? 0;
+  if (v === 0) return chord[0] ?? 0;                    // bass holds the root
+  return pick + (v === 2 && (idx % 3 === 0) ? 12 : 0);
+}
+
+/**
  * How the music should sound right now, from the game state. Pure, so it is
  * testable without any audio at all -- which is the only way to test music.
  */
@@ -110,14 +152,62 @@ export function voicing(s: MusicState): MusicVoicing {
  * Weighted toward the tonic and fifth, which is what keeps a random walk
  * through a mode sounding like music rather than like a scale exercise.
  */
-export function noteAt(mode: readonly number[], n: number): number {
-  if (mode.length === 0) return 0;
-  const h = Math.abs(Math.sin(n * 12.9898) * 43758.5453) % 1;
-  // 45% tonic or fifth, 55% anywhere in the mode.
-  if (h < 0.28) return mode[0] ?? 0;
-  if (h < 0.45) return mode[Math.min(4, mode.length - 1)] ?? 0;
-  const i = Math.floor(((h - 0.45) / 0.55) * mode.length);
-  return mode[Math.min(i, mode.length - 1)] ?? 0;
+/**
+ * The melodic scale: the mode's own major-pentatonic subset.
+ *
+ * A pentatonic has no semitone steps, so ANY two notes in it sound
+ * consonant together and a random walk through it cannot produce a wrong
+ * note. That is exactly what a procedural melody needs -- the walk can be
+ * dumb because the scale is doing the work. Taken from the mode's degrees
+ * 1-2-3-5-6, so a Phrygian floor's pentatonic is still Phrygian-coloured.
+ */
+export function pentatonicOf(depth: number): readonly number[] {
+  const mode = modeOf(depth);
+  if (mode.length <= 2) return mode;
+  const at = (i: number): number => mode[Math.min(i, mode.length - 1)] ?? 0;
+  // Degrees 1-2-3-5-6, then any that sit a semitone above their neighbour
+  // are RAISED to the next scale degree rather than dropped. Dropping left
+  // the darker modes with three notes -- Aeolian and Phrygian collapsed,
+  // and a three-note melody is a bugle call. Raising keeps five notes and
+  // keeps the no-semitone property, which is the whole point: any two notes
+  // in the result are consonant, so the walk cannot play a wrong note.
+  const wanted = [at(0), at(1), at(2), at(4), at(5)];
+  const out: number[] = [];
+  for (const n of wanted) {
+    const prev = out[out.length - 1];
+    if (prev === undefined) { out.push(n); continue; }
+    if (n - prev >= 2) { out.push(n); continue; }
+    // too close: take the next mode degree that is far enough
+    const lift = mode.find((x) => x - prev >= 2 && !out.includes(x));
+    if (lift !== undefined) out.push(lift);
+  }
+  return out.length >= 4 ? out : [at(0), at(2), at(4), at(4) + 3];
+}
+
+/**
+ * The melody: a random WALK, not a random pick. Steps to a neighbour in the
+ * scale most of the time, leaps occasionally, and turns around at the ends.
+ * A walk sounds like a line; independent picks sound like a scale exercise,
+ * which is what this used to be.
+ */
+export function noteAt(scale: readonly number[], n: number): number {
+  if (scale.length === 0) return 0;
+  const k = Number.isFinite(n) ? Math.floor(n) : 0;
+  // Walk deterministically from a fixed start, so a given run plays the
+  // same line and the whole thing stays testable.
+  let i = 0;
+  for (let s = 0; s <= k; s++) {
+    const h = Math.abs(Math.sin(s * 12.9898) * 43758.5453) % 1;
+    if (h < 0.42) i += 1;
+    else if (h < 0.84) i -= 1;
+    else i += h < 0.92 ? 2 : -2;              // an occasional leap
+    // Reflect at the ends rather than wrapping: a wrap is an octave jump
+    // every time the line reaches the top, which is a tell.
+    if (i < 0) i = -i;
+    if (i >= scale.length) i = scale.length - 1 - (i - scale.length + 1);
+    if (i < 0) i = 0;
+  }
+  return scale[Math.min(Math.max(i, 0), scale.length - 1)] ?? 0;
 }
 
 /** Octave for the struck note: mostly the middle, sometimes an octave up. */

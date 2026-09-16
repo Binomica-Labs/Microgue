@@ -9,7 +9,7 @@
 // stairs, pickup, world-building, repath.
 
 import { music, play, stopMusic } from "./audio.js";
-import { modeOf, voicing } from "./music.js";
+import { pentatonicOf, voicing } from "./music.js";
 import { lyse } from "./cast.js";
 import { daylight, isNight } from "./cycle.js";
 import { CONDITIONS } from "./conditions.js";
@@ -269,7 +269,7 @@ export function t_step_(_g: Game, t: number): void {
       threat: _g.musicThreat,
       health: _g.player.maxhp > 0 ? _g.player.hp / _g.player.maxhp : 1,
       light: daylight(_g.clock),
-    }), modeOf(d));
+    }), pentatonicOf(d), d);
     // Hitstop freezes the animation clock only. Turn state already resolved,
     // so nothing desyncs -- the world just holds still for a beat.
     if (_g.fx.frozen(t)) dt = 0;

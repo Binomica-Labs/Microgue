@@ -1,3 +1,50 @@
+# v1.32.0 — the drone arpeggiates, the melody walks a pentatonic
+
+The drone was three oscillators pinned to root/root/fifth forever: a held
+chord, and held chords wear out.
+
+## The drone
+
+`chordOf(depth)` builds a four-note chord from the stratum's OWN mode
+degrees (1-3-5-7), so the harmony is the floor's -- Phrygian keeps its flat
+second, whole-tone stays unresolvable. `droneStep(chord, voice, n)` walks
+each voice through that chord at its own rate (4, 3 and 5 steps), so the
+three re-voice against each other endlessly: 24 distinct voicings measured
+over 400 steps, where it used to be one. The bass HOLDS the root -- an
+arpeggio whose bottom wanders is a chord progression, which is more music
+than this wants to be.
+
+The arpeggio steps on its own slow clock (~2.6-4.2s) and the frequencies
+ramp toward the current step with a 1.8s time constant, so a re-voice is a
+swell, never a click. No node is created: it is the same three oscillators.
+
+## The melody
+
+Now a major-pentatonic WALK. `pentatonicOf(depth)` takes the mode's degrees
+1-2-3-5-6; a pentatonic has no semitone steps, so ANY two of its notes are
+consonant and a dumb walk cannot play a wrong note -- the scale does the
+work. `noteAt` steps to a neighbour 84% of the time, leaps occasionally, and
+REFLECTS at the ends rather than wrapping (a wrap is an octave jump every
+time the line tops out, which is a tell).
+
+**A bug found by measuring rather than assuming.** The first version DROPPED
+degrees that sat a semitone from their neighbour, which collapsed Aeolian to
+three notes and Phrygian to three -- a three-note melody is a bugle call. It
+RAISES them to the next available degree instead: all eight strata now have
+a five-note scale with no semitone steps, still mode-coloured.
+
+## A test that was asserting the wrong property
+
+The old "favours the tonic" test failed -- the walk visits the tonic 10% of
+the time. That assertion was correct for the old random PICK and wrong for a
+walk: a walk should be tonic-CENTRED, not tonic-weighted. Replaced with what
+actually matters for a walk -- it uses every degree, and none dominates
+(<55%), which is what catches a bad reflection that parks the line at one
+end.
+
+Both new properties are guarded: a static drone is three failures, allowing
+semitones is four.
+
 # v1.31.0 — RELEASE
 
 The first release since v1.27 that can actually deploy. Everything from

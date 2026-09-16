@@ -4216,18 +4216,18 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     // be both a click and a leak; per NOTE is one oscillator, unavoidable.
     const { unlockAudio, music, stopMusic, resetAudioForTests } = await import("../src/audio.js");
     resetAudioForTests();               // the context is a module global
-    const { voicing, modeOf } = await import("../src/music.js");
+    const { voicing, pentatonicOf } = await import("../src/music.js");
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     const log: string[] = [];
     const { Fake, count } = fakeCtx(log);
     (globalThis as { AudioContext?: unknown }).AudioContext = Fake;
     unlockAudio();
     const v = voicing({ depth: 3, threat: 0, health: 1, light: 1 });
-    music(v, modeOf(3));                       // builds the drone
+    music(v, pentatonicOf(3), 3);                       // builds the drone
     const afterBuild = count();
     log.length = 0;
     // currentTime stays 0, so no note is ever due: 60 steady frames
-    for (let i = 0; i < 60; i++) music(v, modeOf(3));
+    for (let i = 0; i < 60; i++) music(v, pentatonicOf(3), 3);
     expect(count() - afterBuild, "nodes created on steady frames").toBe(0);
     expect(log.filter((l) => l === "osc").length, "an oscillator per frame").toBe(0);
     expect(log.length, "no retuning happened at all").toBeGreaterThan(0);
@@ -4237,12 +4237,12 @@ describe("music: cheap per frame, silent when it cannot play", () => {
 
   it("with no AudioContext, music and stopMusic are silent no-ops", async () => {
     const { music, stopMusic } = await import("../src/audio.js");
-    const { voicing, modeOf } = await import("../src/music.js");
+    const { voicing, pentatonicOf } = await import("../src/music.js");
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     delete (globalThis as { AudioContext?: unknown }).AudioContext;
     expect(() => {
       for (let d = 0; d <= 8; d++) {
-        music(voicing({ depth: d, threat: 0.5, health: 0.5, light: 0.5 }), modeOf(d));
+        music(voicing({ depth: d, threat: 0.5, health: 0.5, light: 0.5 }), pentatonicOf(d), d);
       }
       stopMusic(); stopMusic();
     }).not.toThrow();
@@ -4251,7 +4251,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
 
   it("a hostile context never escapes as a throw", async () => {
     const { unlockAudio, music, stopMusic, resetAudioForTests } = await import("../src/audio.js");
-    const { voicing, modeOf } = await import("../src/music.js");
+    const { voicing, pentatonicOf } = await import("../src/music.js");
     resetAudioForTests();
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     class Hostile {
@@ -4266,7 +4266,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     (globalThis as { AudioContext?: unknown }).AudioContext = Hostile;
     unlockAudio();
     expect(() => {
-      music(voicing({ depth: 4, threat: 1, health: 0.2, light: 0 }), modeOf(4));
+      music(voicing({ depth: 4, threat: 1, health: 0.2, light: 0 }), pentatonicOf(4), 4);
       stopMusic();
     }).not.toThrow();
     (globalThis as { AudioContext?: unknown }).AudioContext = saved;
@@ -4276,7 +4276,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     // A NaN or absurd root must not reach an oscillator. Frequencies are
     // bounded 20..8000 Hz at the call site.
     const { unlockAudio, music, resetAudioForTests } = await import("../src/audio.js");
-    const { modeOf } = await import("../src/music.js");
+    const { pentatonicOf } = await import("../src/music.js");
     resetAudioForTests();
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     const log: string[] = [];
@@ -4285,7 +4285,7 @@ describe("music: cheap per frame, silent when it cannot play", () => {
     unlockAudio();
     for (const root of [NaN, 0, -100, Infinity, 1e9]) {
       expect(() => {
-        music({ root, interval: 5, detune: 4, cutoff: 500, level: 0.05 }, modeOf(3));
+        music({ root, interval: 5, detune: 4, cutoff: 500, level: 0.05 }, pentatonicOf(3), 3);
       }, `root ${String(root)} threw`).not.toThrow();
     }
     (globalThis as { AudioContext?: unknown }).AudioContext = saved;
@@ -4337,7 +4337,7 @@ describe("release soak: everything running together, for a long time", () => {
     // Walk all eight strata and confirm none of them throws or blanks.
     const { Game } = await import("../src/main.js");
     const { resetAudioForTests } = await import("../src/audio.js");
-    const { voicing, modeOf } = await import("../src/music.js");
+    const { voicing, modeOf, pentatonicOf, chordOf } = await import("../src/music.js");
     const { dayTint } = await import("../src/water.js");
     resetAudioForTests();
     const g = new Game({
@@ -4356,6 +4356,8 @@ describe("release soak: everything running together, for a long time", () => {
       const v = voicing({ depth: d, threat: 0.5, health: 0.6, light: 0.5 });
       expect(Number.isFinite(v.root) && v.root > 80, `F${String(f)} bad root`).toBe(true);
       expect(modeOf(d).length, `F${String(f)} empty mode`).toBeGreaterThan(1);
+      expect(pentatonicOf(d).length, `F${String(f)} empty pentatonic`).toBeGreaterThan(2);
+      expect(chordOf(d).length, `F${String(f)} empty chord`).toBeGreaterThan(1);
       // the night tint is either a colour or honestly absent
       const t = dayTint(0, d);
       if (t !== null) expect(t).toMatch(/^rgba\(/);

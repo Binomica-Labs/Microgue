@@ -9094,25 +9094,30 @@ describe("the music mirrors the column", () => {
     }
   });
 
-  it("the note walk stays in the mode and favours the tonic", async () => {
-    // A random walk through a scale sounds like an exercise; weighting the
-    // tonic and fifth is what makes it sound like music.
-    const { noteAt, modeOf, octaveAt } = await import("../src/music.js");
+  it("the melody stays in the scale and is CENTRED, not weighted", async () => {
+    // This test used to assert the tonic appeared >20% of the time, which
+    // was right for the old random PICK. A walk is a different thing: it
+    // should wander around the middle of the scale and come back, not
+    // repeat the tonic. The property that matters is that it does not park
+    // at one end -- which a walk with a bad reflection does.
+    const { noteAt, pentatonicOf, octaveAt } = await import("../src/music.js");
     for (const d of [1, 5, 8]) {
-      const mode = modeOf(d);
+      const scale = pentatonicOf(d);
       const counts = new Map<number, number>();
       for (let n = 0; n < 2000; n++) {
-        const v = noteAt(mode, n);
-        expect(mode.includes(v), `D${String(d)} note ${String(v)} is outside the mode`).toBe(true);
+        const v = noteAt(scale, n);
+        expect(scale.includes(v), `D${String(d)} note ${String(v)} left the scale`).toBe(true);
         counts.set(v, (counts.get(v) ?? 0) + 1);
-        const o = octaveAt(n);
-        expect([0.5, 1, 2]).toContain(o);
+        expect([0.5, 1, 2]).toContain(octaveAt(n));
       }
-      const tonic = (counts.get(mode[0] ?? 0) ?? 0) / 2000;
-      expect(tonic, `D${String(d)}: tonic is only ${(tonic * 100).toFixed(0)}%`)
-        .toBeGreaterThan(0.2);
+      // every degree gets used: a walk that parks is a drone with extra steps
+      expect(counts.size, `D${String(d)} melody used only ${String(counts.size)} notes`)
+        .toBeGreaterThanOrEqual(Math.min(4, scale.length));
+      // and none dominates
+      const most = Math.max(...counts.values()) / 2000;
+      expect(most, `D${String(d)} melody sat on one note ${(most * 100).toFixed(0)}%`)
+        .toBeLessThan(0.55);
     }
-    // an empty mode is silence, not a crash
     expect(noteAt([], 5)).toBe(0);
   });
 });
@@ -9142,5 +9147,102 @@ describe("no reachable state produces an inaudible or wild note", () => {
         }
       }
     }
+  });
+});
+
+describe("the drone arpeggiates and the melody walks a pentatonic", () => {
+  it("the drone re-voices: many distinct voicings, none static", async () => {
+    // A held chord wears out. Each voice walks the chord at its own rate, so
+    // the three re-voice against each other endlessly.
+    const { chordOf, droneStep } = await import("../src/music.js");
+    for (const d of [1, 5, 8]) {
+      const c = chordOf(d);
+      const seen = new Set<string>();
+      for (let n = 0; n < 400; n++) {
+        seen.add([0, 1, 2].map((i) => droneStep(c, i, n)).join(","));
+      }
+      expect(seen.size, `D${String(d)} drone has only ${String(seen.size)} voicings`)
+        .toBeGreaterThan(8);
+    }
+  });
+
+  it("the bass holds the root: an arpeggio, not a chord progression", async () => {
+    const { chordOf, droneStep } = await import("../src/music.js");
+    const c = chordOf(4);
+    for (let n = 0; n < 200; n++) {
+      expect(droneStep(c, 0, n), "the bass wandered off the root").toBe(c[0]);
+    }
+  });
+
+  it("every stratum's pentatonic has five notes and NO semitone steps", async () => {
+    // The no-semitone property is the whole point: any two notes are
+    // consonant, so a dumb walk cannot produce a wrong note. An earlier
+    // version DROPPED crowded degrees and collapsed Aeolian and Phrygian to
+    // three notes -- a three-note melody is a bugle call. It raises them now.
+    const { pentatonicOf } = await import("../src/music.js");
+    for (let d = 1; d <= 8; d++) {
+      const p = pentatonicOf(d);
+      expect(p.length, `D${String(d)} pentatonic has ${String(p.length)} notes`)
+        .toBeGreaterThanOrEqual(4);
+      expect(p[0], `D${String(d)} has no tonic`).toBe(0);
+      for (let i = 1; i < p.length; i++) {
+        const step = (p[i] ?? 0) - (p[i - 1] ?? 0);
+        expect(step, `D${String(d)} has a ${String(step)}-semitone step`)
+          .toBeGreaterThanOrEqual(2);
+      }
+      // still inside an octave, still ascending
+      expect(p[p.length - 1] ?? 0).toBeLessThan(12);
+    }
+  });
+
+  it("the melody walks rather than jumping", async () => {
+    // A walk sounds like a line; independent picks sound like an exercise.
+    const { pentatonicOf, noteAt } = await import("../src/music.js");
+    for (const d of [1, 5, 8]) {
+      const p = pentatonicOf(d);
+      let stepwise = 0, leaps = 0;
+      let prev = noteAt(p, 0);
+      for (let n = 1; n < 400; n++) {
+        const cur = noteAt(p, n);
+        const gap = Math.abs(p.indexOf(cur) - p.indexOf(prev));
+        if (gap <= 1) stepwise++; else leaps++;
+        prev = cur;
+      }
+      expect(stepwise / (stepwise + leaps), `D${String(d)} melody leaps too much`)
+        .toBeGreaterThan(0.8);
+      expect(leaps, `D${String(d)} melody never leaps -- it is a scale`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("the walk stays in the scale and never runs off either end", async () => {
+    const { pentatonicOf, noteAt } = await import("../src/music.js");
+    for (const d of [1, 6, 8]) {
+      const p = pentatonicOf(d);
+      for (let n = 0; n < 3000; n++) {
+        const v = noteAt(p, n);
+        expect(p.includes(v), `D${String(d)} step ${String(n)} left the scale`).toBe(true);
+      }
+    }
+    // degenerate scales
+    expect(noteAt([], 7)).toBe(0);
+    expect(noteAt([5], 7)).toBe(5);
+    expect(Number.isFinite(noteAt([0, 4], NaN))).toBe(true);
+  });
+
+  it("droneStep and chordOf survive garbage", async () => {
+    const { chordOf, droneStep } = await import("../src/music.js");
+    for (const d of [NaN, -9, 99, Infinity]) {
+      const c = chordOf(d);
+      expect(c.length, `chordOf(${String(d)}) is empty`).toBeGreaterThan(1);
+      for (const v of [0, 1, 2, 7, -1]) {
+        for (const n of [0, 5, NaN, -3, 1e9]) {
+          const s = droneStep(c, v, n);
+          expect(Number.isFinite(s), `droneStep(v=${String(v)},n=${String(n)})`).toBe(true);
+          expect(Math.abs(s), "a drone voice left a sane range").toBeLessThan(30);
+        }
+      }
+    }
+    expect(droneStep([], 0, 0)).toBe(0);
   });
 });

@@ -14,7 +14,8 @@
 // Nothing here throws. A phone with no AudioContext, a browser that refuses
 // to resume, a call before the first gesture -- all silent, never a crash.
 
-import { noteAt, octaveAt, semi, type MusicVoicing } from "./music.js";
+import { chordOf, droneStep, noteAt, octaveAt, semi,
+  type MusicVoicing } from "./music.js";
 
 export type Cue = "hit" | "hurt" | "kill" | "level" | "cast" | "pickup"
   | "descend" | "die" | "denied";
@@ -38,6 +39,11 @@ interface Voice {
   nextNote: number;
   /** Counter for the deterministic note walk. */
   noteN: number;
+  /** When the drone next re-voices, and which step it is on. The arpeggio is
+   *  SLOW -- about a move every three seconds -- so it reads as the chord
+   *  breathing rather than as a second melody. */
+  nextArp: number;
+  arpN: number;
 }
 
 let voice: Voice | null = null;
@@ -54,7 +60,8 @@ export function unlockAudio(): void {
     const master = ctx.createGain();
     master.gain.value = muted ? 0 : 0.35;
     master.connect(ctx.destination);
-    voice = { ctx, master, bed: null, drone: null, nextNote: 0, noteN: 0 };
+    voice = { ctx, master, bed: null, drone: null, nextNote: 0, noteN: 0,
+              nextArp: 0, arpN: 0 };
     // A refused resume (autoplay policy) is a rejected promise. Unhandled,
     // that is a console error on every phone that refuses; handled, it is
     // just silence until the next gesture.
@@ -202,7 +209,9 @@ export function resetAudioForTests(): void {
  * Cost per frame with nothing due: four `setTargetAtTime` calls. Per note:
  * one oscillator and one gain, both auto-stopped.
  */
-export function music(v: MusicVoicing, mode: readonly number[]): void {
+export function music(
+  v: MusicVoicing, scale: readonly number[], depth: number,
+): void {
   if (!voice || muted) return;
   try {
     const { ctx, master } = voice;
@@ -217,12 +226,13 @@ export function music(v: MusicVoicing, mode: readonly number[]): void {
       gain.gain.value = 0;
       filter.connect(gain).connect(master);
       const osc: OscillatorNode[] = [];
-      // Root, root again (detuned), and a fifth. The fifth is what makes it
-      // read as a chord rather than a hum.
-      for (const mult of [1, 1, 1.5]) {
+      // Three voices on the stratum's chord. They re-voice independently
+      // from here; see droneStep.
+      const c0 = chordOf(depth);
+      for (let i = 0; i < 3; i++) {
         const o = ctx.createOscillator();
         o.type = "sine";
-        o.frequency.value = v.root * mult;
+        o.frequency.value = v.root * semi(droneStep(c0, i, 0));
         o.connect(filter);
         o.start(t);
         osc.push(o);
@@ -231,11 +241,23 @@ export function music(v: MusicVoicing, mode: readonly number[]): void {
       voice.nextNote = t + 2;
     }
     const d = voice.drone;
-    // Ramp rather than set: a jump in frequency is an audible click.
-    const mults = [1, 1, 1.5];
+    // The arpeggio: each voice walks the chord at its own rate, slowly. The
+    // step only advances on its own clock -- the frequencies are ramped
+    // toward the current step every frame, so a re-voice is a glide, never a
+    // click.
+    if (t >= voice.nextArp) {
+      voice.arpN++;
+      voice.nextArp = t + 2.6 + (Math.abs(Math.sin(voice.arpN * 5.1)) % 1) * 1.6;
+    }
+    const chord = chordOf(depth);
     d.osc.forEach((o, i) => {
       const cents = i === 1 ? v.detune : i === 2 ? -v.detune * 0.5 : 0;
-      o.frequency.setTargetAtTime(v.root * (mults[i] ?? 1), t, 1.2);
+      const f = v.root * semi(droneStep(chord, i, voice?.arpN ?? 0));
+      if (Number.isFinite(f) && f > 20 && f < 4000) {
+        // A long time-constant: a voice takes about two seconds to arrive,
+        // which is what makes it a swell rather than a note.
+        o.frequency.setTargetAtTime(f, t, 1.8);
+      }
       o.detune.setTargetAtTime(cents, t, 1.2);
     });
     d.filter.frequency.setTargetAtTime(Math.max(v.cutoff, 80), t, 1.5);
@@ -244,7 +266,7 @@ export function music(v: MusicVoicing, mode: readonly number[]): void {
     // A struck note, when one is due.
     if (t >= voice.nextNote) {
       const n = voice.noteN++;
-      const f = v.root * semi(noteAt(mode, n)) * octaveAt(n);
+      const f = v.root * semi(noteAt(scale, n)) * octaveAt(n);
       if (Number.isFinite(f) && f > 20 && f < 8000) {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
