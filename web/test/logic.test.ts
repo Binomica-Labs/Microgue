@@ -9100,15 +9100,20 @@ describe("the music mirrors the column", () => {
     // should wander around the middle of the scale and come back, not
     // repeat the tonic. The property that matters is that it does not park
     // at one end -- which a walk with a bad reflection does.
-    const { noteAt, pentatonicOf, octaveAt } = await import("../src/music.js");
+    const { noteAt, pentatonicOf, phraseOctave, melodyStep, newWalk } =
+      await import("../src/music.js");
     for (const d of [1, 5, 8]) {
       const scale = pentatonicOf(d);
       const counts = new Map<number, number>();
+      // The stateful walk, which is what the engine plays. Looping the pure
+      // `noteAt` here read the same capped note 2000 times and reported the
+      // melody as stuck -- measuring the cap, not the music.
+      const w = newWalk();
       for (let n = 0; n < 2000; n++) {
-        const v = noteAt(scale, n);
+        const v = melodyStep(w, scale);
         expect(scale.includes(v), `D${String(d)} note ${String(v)} left the scale`).toBe(true);
         counts.set(v, (counts.get(v) ?? 0) + 1);
-        expect([0.5, 1, 2]).toContain(octaveAt(n));
+        expect([0.5, 1, 2]).toContain(phraseOctave(n));
       }
       // every degree gets used: a walk that parks is a drone with extra steps
       expect(counts.size, `D${String(d)} melody used only ${String(counts.size)} notes`)
@@ -9127,7 +9132,7 @@ describe("no reachable state produces an inaudible or wild note", () => {
     // The end-to-end musical claim: whatever the game state, the frequency
     // that reaches an oscillator is between 20 Hz and 8 kHz and finite. A
     // NaN there is silence; a 40 kHz one is a shriek on some hardware.
-    const { voicing, modeOf, noteAt, octaveAt, semi } = await import("../src/music.js");
+    const { voicing, modeOf, melodyStep, newWalk, phraseOctave, semi } = await import("../src/music.js");
     for (let d = -5; d <= 15; d++) {
       for (const th of [0, 0.5, 1, NaN, -1, 2, Infinity]) {
         for (const hp of [0, 0.5, 1, NaN, -1, 2]) {
@@ -9137,9 +9142,12 @@ describe("no reachable state produces an inaudible or wild note", () => {
             expect(v.root).toBeGreaterThan(20);
             expect(v.root).toBeLessThan(1000);
             expect(v.cutoff).toBeGreaterThan(0);
+            // Walk once, cheaply: melodyStep is O(1), noteAt is O(n) and
+            // replays the whole walk -- calling it in a loop is quadratic.
             const mode = modeOf(d);
-            for (let n = 0; n < 50; n += 7) {
-              const f = v.root * semi(noteAt(mode, n)) * octaveAt(n);
+            const w = newWalk();
+            for (let n = 0; n < 50; n++) {
+              const f = v.root * semi(melodyStep(w, mode)) * phraseOctave(n);
               expect(Number.isFinite(f) && f > 20 && f < 8000,
                      `d=${String(d)} n=${String(n)} f=${String(f)}`).toBe(true);
             }
@@ -9266,11 +9274,12 @@ describe("the drone arpeggiates and the melody walks a pentatonic", () => {
   });
 
   it("the walk stays in the scale and never runs off either end", async () => {
-    const { pentatonicOf, noteAt } = await import("../src/music.js");
+    const { pentatonicOf, melodyStep, newWalk, noteAt } = await import("../src/music.js");
     for (const d of [1, 6, 8]) {
       const p = pentatonicOf(d);
+      const w = newWalk();
       for (let n = 0; n < 3000; n++) {
-        const v = noteAt(p, n);
+        const v = melodyStep(w, p);
         expect(p.includes(v), `D${String(d)} step ${String(n)} left the scale`).toBe(true);
       }
     }
@@ -9295,5 +9304,114 @@ describe("the drone arpeggiates and the melody walks a pentatonic", () => {
       }
     }
     expect(swellAt([], 0)).toEqual({ semitone: 0, level: 0 });
+  });
+});
+
+describe("the melody and the drone are one piece, not two generators", () => {
+  it("the melody is PULLED toward the chord tone the swell is holding", async () => {
+    // The relationship. Measured, because "musically interesting" is not
+    // assertable: mean distance from the melody to the sounding chord tone,
+    // with the harmony passed versus withheld. If passing it changes
+    // nothing, the two layers are independent and it is not a relationship.
+    const { chordOf, pentatonicOf, melodyStep, newWalk, swellAt } = await import("../src/music.js");
+    for (const d of [1, 5, 8]) {
+      const c = chordOf(d), p = pentatonicOf(d);
+      let pulled = 0, free = 0, n = 0;
+      const wp = newWalk(), wf = newWalk();
+      for (let k = 0; k < 1200; k++) {
+        const sw = swellAt(c, Math.floor(k / 4));
+        const a = melodyStep(wp, p, sw.level > 0.15 ? sw.semitone : undefined);
+        const b = melodyStep(wf, p);
+        if (sw.level < 0.15) continue;           // nothing sounding to pull to
+        const dist = (x: number): number => Math.min(
+          Math.abs(x - sw.semitone), Math.abs(x - sw.semitone + 12),
+          Math.abs(x - sw.semitone - 12));
+        pulled += dist(a);
+        free += dist(b);
+        n++;
+      }
+      expect(n, `D${String(d)}: the swell never sounded`).toBeGreaterThan(100);
+      expect(pulled / n, `D${String(d)}: the pull changed nothing `
+        + `(${(pulled / n).toFixed(2)} vs ${(free / n).toFixed(2)})`)
+        .toBeLessThan(free / n);
+    }
+  });
+
+  it("but the melody is not GLUED to the chord: it still leaves and returns", async () => {
+    // A line that only ever approaches the harmony is an arpeggio. The
+    // tension of pulling away and resolving back is the point, so the
+    // melody must still visit notes far from the chord tone.
+    const { chordOf, pentatonicOf, melodyStep, newWalk, swellAt } = await import("../src/music.js");
+    const c = chordOf(3), p = pentatonicOf(3);
+    let away = 0, n = 0;
+    const w = newWalk();
+    for (let k = 0; k < 1200; k++) {
+      const sw = swellAt(c, Math.floor(k / 4));
+      const v = melodyStep(w, p, sw.level > 0.15 ? sw.semitone : undefined);
+      if (sw.level < 0.15) continue;
+      if (Math.min(Math.abs(v - sw.semitone), Math.abs(v - sw.semitone + 12)) >= 3) away++;
+      n++;
+    }
+    expect(away / n, "the melody never leaves the chord -- it is an arpeggio")
+      .toBeGreaterThan(0.15);
+  });
+
+  it("the melody phrases: it rests, and rests less under pressure", async () => {
+    // A line that plays on every beat is a sequence. Rests are also where
+    // the drone gets heard alone, which is what joins the layers.
+    const { sounds } = await import("../src/music.js");
+    const rate = (dens: number): number => {
+      let on = 0;
+      for (let k = 0; k < 900; k++) if (sounds(k, dens)) on++;
+      return on / 900;
+    };
+    const calm = rate(0), busy = rate(1);
+    expect(calm, `calm plays ${(calm * 100).toFixed(0)}% of steps -- no rests`)
+      .toBeLessThan(0.75);
+    expect(calm, "calm never plays at all").toBeGreaterThan(0.3);
+    expect(busy, "threat did not make the line busier").toBeGreaterThan(calm);
+    // the phrase length varies: not a fixed on/off pattern
+    const runs: number[] = [];
+    let run = 0;
+    for (let k = 0; k < 900; k++) {
+      if (sounds(k, 0.4)) run++;
+      else if (run > 0) { runs.push(run); run = 0; }
+    }
+    expect(new Set(runs).size, "every phrase is the same length").toBeGreaterThan(1);
+  });
+
+  it("phrases move register, and every register is reachable", async () => {
+    const { phraseOctave } = await import("../src/music.js");
+    const seen = new Set<number>();
+    for (let k = 0; k < 2000; k++) {
+      const o = phraseOctave(k);
+      expect([0.5, 1, 2], `octave ${String(o)} is not a real register`).toContain(o);
+      seen.add(o);
+    }
+    expect(seen.size, "every phrase sits in the same register").toBe(3);
+    // and a phrase holds ONE register: it does not jump mid-phrase
+    for (let base = 0; base < 900; base += 9) {
+      const o = phraseOctave(base);
+      for (let k = base; k < base + 9; k++) {
+        expect(phraseOctave(k), "the register changed mid-phrase").toBe(o);
+      }
+    }
+  });
+
+  it("sounds, phraseOctave and the pull survive garbage", async () => {
+    const { sounds, phraseOctave, noteAt, pentatonicOf } = await import("../src/music.js");
+    const p = pentatonicOf(4);
+    for (const n of [NaN, Infinity, -Infinity, -1e9, 1e9, -3]) {
+      expect(typeof sounds(n, 0.5), `sounds(${String(n)})`).toBe("boolean");
+      expect([0.5, 1, 2]).toContain(phraseOctave(n));
+      for (const toward of [NaN, Infinity, -99, 99, undefined]) {
+        const v = noteAt(p, n, toward);
+        expect(p.includes(v), `noteAt(${String(n)}, ${String(toward)}) left the scale`)
+          .toBe(true);
+      }
+    }
+    for (const d of [NaN, -1, 2, Infinity]) {
+      expect(typeof sounds(10, d), `sounds density ${String(d)}`).toBe("boolean");
+    }
   });
 });

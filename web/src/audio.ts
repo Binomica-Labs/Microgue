@@ -14,8 +14,8 @@
 // Nothing here throws. A phone with no AudioContext, a browser that refuses
 // to resume, a call before the first gesture -- all silent, never a crash.
 
-import { chordOf, DRONE_VOICES, noteAt, octaveAt, semi, swellAt,
-  type MusicVoicing } from "./music.js";
+import { chordOf, DRONE_VOICES, melodyStep, newWalk, phraseOctave, semi,
+  sounds, swellAt, type MusicVoicing, type Walk } from "./music.js";
 
 export type Cue = "hit" | "hurt" | "kill" | "level" | "cast" | "pickup"
   | "descend" | "die" | "denied";
@@ -41,6 +41,8 @@ interface Voice {
   nextNote: number;
   /** Counter for the deterministic note walk. */
   noteN: number;
+  /** The melody's position. Stateful: see melodyStep. */
+  walk: Walk;
   /** When the drone next re-voices, and which step it is on. The arpeggio is
    *  SLOW -- about a move every three seconds -- so it reads as the chord
    *  breathing rather than as a second melody. */
@@ -63,7 +65,7 @@ export function unlockAudio(): void {
     master.gain.value = muted ? 0 : 0.35;
     master.connect(ctx.destination);
     voice = { ctx, master, bed: null, drone: null, nextNote: 0, noteN: 0,
-              nextArp: 0, arpN: 0 };
+              nextArp: 0, arpN: 0, walk: newWalk() };
     // A refused resume (autoplay policy) is a rejected promise. Unhandled,
     // that is a console error on every phone that refuses; handled, it is
     // just silence until the next gesture.
@@ -291,10 +293,17 @@ export function music(
     d.filter.frequency.setTargetAtTime(Math.max(v.cutoff, 80), t, 1.5);
     d.gain.gain.setTargetAtTime(v.level, t, 2);
 
-    // A struck note, when one is due.
+    // A struck note, when one is due -- and when the phrase is sounding
+    // rather than resting. The melody is pulled toward whatever chord tone
+    // the swell is holding, so the two layers are one piece; see noteAt.
     if (t >= voice.nextNote) {
       const n = voice.noteN++;
-      const f = v.root * semi(noteAt(scale, n)) * octaveAt(n);
+      const density = Math.min(Math.max(1 - (v.interval - 3.5) / 7.5, 0), 1);
+      // The walk advances every step, sounding or resting, so a rest is a
+      // silence in a continuing line rather than a pause that freezes it.
+      const note = melodyStep(voice.walk, scale,
+                              sw.level > 0.15 ? sw.semitone : undefined);
+      const f = sounds(n, density) ? v.root * semi(note) * phraseOctave(n) : 0;
       if (Number.isFinite(f) && f > 20 && f < 8000) {
         const o = ctx.createOscillator();
         const g = ctx.createGain();

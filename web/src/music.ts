@@ -204,31 +204,106 @@ export function pentatonicOf(depth: number): readonly number[] {
 /**
  * The melody: a random WALK, not a random pick. Steps to a neighbour in the
  * scale most of the time, leaps occasionally, and turns around at the ends.
- * A walk sounds like a line; independent picks sound like a scale exercise,
- * which is what this used to be.
+ * A walk sounds like a line; independent picks sound like a scale exercise.
+ *
+ * STATEFUL by design. An earlier version replayed the walk from step 0 on
+ * every call so it could stay pure -- which made it O(n) in the step number
+ * and 135 us per call by step 5000, climbing without bound for as long as
+ * the session lasted. A walk is a walk: it has a position. `melodyStep`
+ * advances it one step and returns the note.
+ *
+ * `toward` is the semitone the swell is holding; the line drifts to the
+ * nearest scale degree to it. That is the relationship between the two
+ * layers -- the melody hears the chord. Not always, though: a line that only
+ * approaches the harmony is an arpeggio, and pulling away and resolving back
+ * is the point.
  */
-export function noteAt(scale: readonly number[], n: number): number {
+export interface Walk { i: number; n: number }
+
+export function newWalk(): Walk { return { i: 0, n: 0 }; }
+
+export function melodyStep(
+  w: Walk, scale: readonly number[], toward?: number,
+): number {
   if (scale.length === 0) return 0;
-  const k = Number.isFinite(n) ? Math.floor(n) : 0;
-  // Walk deterministically from a fixed start, so a given run plays the
-  // same line and the whole thing stays testable.
-  let i = 0;
-  for (let s = 0; s <= k; s++) {
-    const h = Math.abs(Math.sin(s * 12.9898) * 43758.5453) % 1;
-    if (h < 0.42) i += 1;
-    else if (h < 0.84) i -= 1;
-    else i += h < 0.92 ? 2 : -2;              // an occasional leap
-    // Reflect at the ends rather than wrapping: a wrap is an octave jump
-    // every time the line reaches the top, which is a tell.
-    if (i < 0) i = -i;
-    if (i >= scale.length) i = scale.length - 1 - (i - scale.length + 1);
-    if (i < 0) i = 0;
+  let target = -1;
+  if (toward !== undefined && Number.isFinite(toward)) {
+    let best = Infinity;
+    scale.forEach((v, idx) => {
+      const gap = Math.min(Math.abs(v - toward), Math.abs(v - toward + 12),
+                           Math.abs(v - toward - 12));
+      if (gap < best) { best = gap; target = idx; }
+    });
   }
-  return scale[Math.min(Math.max(i, 0), scale.length - 1)] ?? 0;
+  const s = w.n++;
+  const h = Math.abs(Math.sin(s * 12.9898) * 43758.5453) % 1;
+  let i = Number.isFinite(w.i) ? w.i : 0;
+  if (target >= 0 && h < 0.62 && i !== target) {
+    i += i < target ? 1 : -1;
+  } else if (h < 0.55) i += 1;
+  else if (h < 0.88) i -= 1;
+  else i += h < 0.94 ? 2 : -2;
+  // Reflect at the ends rather than wrapping: a wrap is an octave jump every
+  // time the line tops out, which is a tell.
+  if (i < 0) i = -i;
+  if (i >= scale.length) i = scale.length - 1 - (i - scale.length + 1);
+  if (i < 0) i = 0;
+  w.i = Math.min(Math.max(i, 0), scale.length - 1);
+  return scale[w.i] ?? 0;
 }
 
-/** Octave for the struck note: mostly the middle, sometimes an octave up. */
-export function octaveAt(n: number): number {
-  const h = Math.abs(Math.sin(n * 78.233) * 22578.1459) % 1;
-  return h < 0.22 ? 2 : h < 0.75 ? 1 : 0.5;
+/**
+ * The pure form, for tests and anything needing a note at an arbitrary step
+ * without carrying state. O(n) in `n`, so it is CAPPED: a walk is ergodic --
+ * after a few hundred steps its position says nothing about the step number
+ * -- and replaying a billion steps to learn that is a hang, not an answer.
+ * The engine uses `melodyStep`, which is O(1); this exists for callers that
+ * have no walk to carry.
+ */
+const REPLAY_CAP = 512;
+
+export function noteAt(
+  scale: readonly number[], n: number, toward?: number,
+): number {
+  const w = newWalk();
+  const raw = Number.isFinite(n) ? Math.max(Math.floor(n), 0) : 0;
+  const k = Math.min(raw, REPLAY_CAP);
+  let v = scale[0] ?? 0;
+  for (let s = 0; s <= k; s++) v = melodyStep(w, scale, toward);
+  return v;
+}
+
+
+/**
+ * Whether a note should sound at all on step `n`.
+ *
+ * A melody that plays on every beat is a sequence; one that RESTS is a
+ * phrase. This gives the line a shape: bursts of three to five notes with
+ * silence between, the length of each phrase varying so the pattern never
+ * settles. The rests are also where the drone gets to be heard alone, which
+ * is what makes the two layers feel like one piece rather than two.
+ *
+ * `density` 0..1 raises the note count under threat -- the line gets busier
+ * when something is hunting you, and sparse again when it is not.
+ */
+export function sounds(n: number, density: number): boolean {
+  const k = Number.isFinite(n) ? Math.floor(n) : 0;
+  const d = Math.min(Math.max(Number.isFinite(density) ? density : 0.5, 0), 1);
+  // Phrases of 3-5 notes, then a rest of 2-4. The cycle length itself varies
+  // with the phrase index, so the pattern does not repeat on a fixed period.
+  const phrase = 3 + (Math.abs(Math.floor(Math.sin(Math.floor(k / 9) * 7.3) * 3)) % 3);
+  const cycle = phrase + 2 + (Math.abs(Math.floor(Math.sin(Math.floor(k / 9) * 2.1) * 3)) % 3);
+  const at = ((k % cycle) + cycle) % cycle;
+  // Under pressure the rests shorten: at density 1 almost everything sounds.
+  return at < phrase + Math.round(d * (cycle - phrase));
+}
+
+/**
+ * The octave a phrase sits in, drifting slowly so successive phrases are not
+ * all in the same register. Returns a multiplier.
+ */
+export function phraseOctave(n: number): number {
+  const k = Number.isFinite(n) ? Math.floor(n / 9) : 0;
+  const h = Math.abs(Math.sin(k * 41.7) * 9371.3) % 1;
+  return h < 0.18 ? 2 : h < 0.78 ? 1 : 0.5;
 }

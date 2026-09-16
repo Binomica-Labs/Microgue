@@ -1,3 +1,51 @@
+# v1.33.0 — the melody and the drone listen to each other
+
+The two layers were independent generators sharing a speaker: the melody
+walked whenever its timer fired, regardless of what the harmony was doing.
+That is what "not musically interesting" means.
+
+## The relationship
+
+`melodyStep(walk, scale, toward)` takes the chord tone the SWELL is
+currently holding and pulls the line toward the nearest scale degree to it.
+Measured rather than asserted -- mean distance from melody to sounding chord
+tone, with the harmony passed versus withheld: 2.79 -> 2.12 at D1. If passing
+it changed nothing there would be no relationship, and `spec` fails if the
+pulled distance is not strictly lower.
+
+It is a pull, not a leash: the line still sits 3+ semitones from the chord
+tone ~15% of the time, because leaving and resolving back is the point. A
+melody that only approaches the harmony is an arpeggio.
+
+## Phrasing
+
+`sounds(n, density)` gives the line a shape: bursts of 3-5 notes with rests
+between, phrase lengths varying so the pattern never settles, rests
+shortening under threat. The rests are where the drone is heard alone, which
+is most of what joins the layers. `phraseOctave` holds one register per
+phrase and drifts between them.
+
+## An unbounded cost, found by my own test timing out
+
+`noteAt` replayed the walk from step 0 on every call -- O(n) in the step
+number. 135 us per call by step 5000 and CLIMBING for as long as a session
+lasted. A walk has a position; replaying it to find that position is the
+bug. `melodyStep` is stateful and O(1): 0.050 us, constant. 2700x, and no
+longer a leak.
+
+The pure `noteAt` survives for callers with no walk to carry, now CAPPED at
+512 replay steps -- a walk is ergodic, so after a few hundred steps its
+position says nothing about the step number, and replaying a billion to
+learn that is a hang. `noteAt(scale, 1e9)` hung the suite before the cap.
+
+## A test that measured the cap instead of the music
+
+"The melody is CENTRED" failed after the cap: it looped `noteAt` to 2000 and
+read the same capped note every time, reporting the line as stuck on one
+note 79% of the time. It measures `melodyStep` now -- the walk the engine
+actually plays. When a test and the shipped code take different paths, the
+test is measuring something else.
+
 # v1.32.0 — the drone arpeggiates, the melody walks a pentatonic
 
 The drone was three oscillators pinned to root/root/fifth forever: a held
