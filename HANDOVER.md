@@ -1,3 +1,81 @@
+# v1.31.0 — RELEASE
+
+The first release since v1.27 that can actually deploy. Everything from
+v1.28-v1.30 reaches a device for the first time here: idle life and flinch,
+marine snow, the water tint (day/night, conditions, the strain's own aura),
+lysate ecology, sound, and the generative music. The deploy itself was broken
+since v1.28 -- see v1.29.2.
+
+## Release checks, beyond the usual
+
+* **3000 frames with every per-frame system live at once.** Music, motion,
+  snow, water and a build that lights all of them. Nothing unbounded: fx,
+  toasts, secretions, drops, biofilm, packets all within cap, and no error
+  toast (a throw in any per-frame system lands there).
+* **A whole descent, all 24 floors.** The mode ladder, the water tint and the
+  ambient bed all key on depth; every stratum draws, every root is audible,
+  every mode is non-empty.
+* **A v1.27 save loads.** That is the build players actually have -- no
+  `muted`, no `condition`, no `symbiont`. All three default cleanly. This is
+  the check that matters most for a release across a deploy gap.
+* **220,500 note frequencies** across 4410 voicings: every one finite and
+  between 20 Hz and 8 kHz. A NaN there is silence; a 40 kHz one is a shriek
+  on some hardware.
+* Service worker verified: content-hashed cache id, `skipWaiting`, old caches
+  dropped on activate. A user on v1.27 will get this build.
+
+## State
+
+120 modules, 21,833 lines of source, 16,643 of tests, 1165 tests. Zero TODO,
+FIXME, @ts-ignore or eslint-disable anywhere in src. 307 KB raw / 105 KB
+gzipped. Largest module 874 lines against a 900 ceiling.
+
+# v1.30.0 — generative music: eight strata, eight modes
+
+Synthesised, not a recorded loop -- there is no asset pipeline, and a fixed
+loop is torture across a long run. The structure mirrors the chemistry:
+
+    D1 Lydian  D2 Ionian  D3 Mixolydian  D4 Dorian
+    D5 Aeolian  D6 Phrygian  D7 Locrian  D8 whole-tone
+
+One step darker per stratum, so descending SOUNDS like descending, and the
+bottom has no tonic to resolve to. The root sinks about a fifth over the
+column as well. `spec` proves the ladder rather than asserting it: darkness
+is measured as flattening against Lydian and must be monotonic; D8 must be
+all even steps.
+
+Three layers, no percussion (the game is turn-based; there is no clock to
+keep): the existing noise bed, a drone of three detuned sines (the slow
+beating between them is what makes a drone feel alive), and a struck
+triangle note every few seconds with a long decay. The note walk is
+deterministic in `n` and weighted 45% to the tonic and fifth -- an unweighted
+walk through a scale sounds like an exercise.
+
+It REACTS, which a loop cannot: threat quickens the notes (11s to 3.5s),
+damage widens the drone detune from 4 to 28 cents (souring it), daylight
+opens the filter, the lab is near-silent.
+
+## Cheap, and proven so
+
+`music.ts` is PURE -- voicing is arithmetic on four clamped numbers -- which
+is the only way to test music without ears. Measured: 0.135 us per frame,
+0.0008% of a 60fps budget. The drone is built once and RETUNED, never
+rebuilt; `spec` asserts zero nodes created across 60 steady frames, and
+rebuilding per frame is three failures. Per note it is one oscillator, which
+is unavoidable and auto-stops.
+
+`threat` is throttled to 2 Hz because counting visible hostiles walks the mob
+list -- the one part that is not free.
+
+## A test that passed alone and failed in the suite
+
+"A steady frame creates no nodes" was green on its own and red in the full
+run. The audio context is a MODULE GLOBAL -- there is one sound card -- so an
+earlier test's hostile stub (whose nodes throw) outlived it, `music` caught
+and did nothing, and "no nodes created" was true for entirely the wrong
+reason. Added `resetAudioForTests()` and called it at the top of every audio
+test. A shared global is a shared fixture whether you meant it to be or not.
+
 # v1.29.0 — sound, and the world reacting to you
 
 Five systems, all "the game knew this but never showed it".

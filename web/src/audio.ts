@@ -14,8 +14,18 @@
 // Nothing here throws. A phone with no AudioContext, a browser that refuses
 // to resume, a call before the first gesture -- all silent, never a crash.
 
+import { noteAt, octaveAt, semi, type MusicVoicing } from "./music.js";
+
 export type Cue = "hit" | "hurt" | "kill" | "level" | "cast" | "pickup"
   | "descend" | "die" | "denied";
+
+interface Drone {
+  /** Three sines on the root, detuned against each other. Created once and
+   *  retuned; rebuilding them per floor would click. */
+  osc: OscillatorNode[];
+  gain: GainNode;
+  filter: BiquadFilterNode;
+}
 
 interface Voice {
   ctx: AudioContext;
@@ -23,6 +33,11 @@ interface Voice {
   /** The ambient bed: a filtered noise source and its gain, retuned per
    *  stratum rather than rebuilt. */
   bed: { gain: GainNode; filter: BiquadFilterNode } | null;
+  drone: Drone | null;
+  /** When the next struck note is due, in ctx time. */
+  nextNote: number;
+  /** Counter for the deterministic note walk. */
+  noteN: number;
 }
 
 let voice: Voice | null = null;
@@ -39,7 +54,7 @@ export function unlockAudio(): void {
     const master = ctx.createGain();
     master.gain.value = muted ? 0 : 0.35;
     master.connect(ctx.destination);
-    voice = { ctx, master, bed: null };
+    voice = { ctx, master, bed: null, drone: null, nextNote: 0, noteN: 0 };
     // A refused resume (autoplay policy) is a rejected promise. Unhandled,
     // that is a console error on every phone that refuses; handled, it is
     // just silence until the next gesture.
@@ -162,3 +177,101 @@ export function ambient(depth: number): void {
 
 /** For tests: is there a live context? */
 export function audioReady(): boolean { return voice !== null; }
+
+/**
+ * Drop the context entirely, so the next `unlockAudio` builds a fresh one.
+ *
+ * For tests only. The context is a module global -- there is one sound card
+ * -- which means one test's stubbed AudioContext outlives it and the next
+ * test gets whatever the last one left. That is exactly how "a steady frame
+ * creates no nodes" passed alone and failed in the suite: an earlier test
+ * left a HOSTILE context whose nodes throw, so `music` caught and did
+ * nothing, and "no nodes created" was true for the wrong reason.
+ */
+export function resetAudioForTests(): void {
+  voice = null;
+  bedDepth = -1;
+}
+
+/**
+ * The music. Called once per frame with the current voicing; it builds the
+ * drone on first use, retunes it, and schedules a struck note when one is
+ * due. Everything is a ramp -- no node is created per note except the brief
+ * oscillator that IS the note, which is unavoidable and cheap.
+ *
+ * Cost per frame with nothing due: four `setTargetAtTime` calls. Per note:
+ * one oscillator and one gain, both auto-stopped.
+ */
+export function music(v: MusicVoicing, mode: readonly number[]): void {
+  if (!voice || muted) return;
+  try {
+    const { ctx, master } = voice;
+    const t = ctx.currentTime;
+    if (!Number.isFinite(v.root) || v.root <= 0) return;
+
+    if (!voice.drone) {
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 600;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      filter.connect(gain).connect(master);
+      const osc: OscillatorNode[] = [];
+      // Root, root again (detuned), and a fifth. The fifth is what makes it
+      // read as a chord rather than a hum.
+      for (const mult of [1, 1, 1.5]) {
+        const o = ctx.createOscillator();
+        o.type = "sine";
+        o.frequency.value = v.root * mult;
+        o.connect(filter);
+        o.start(t);
+        osc.push(o);
+      }
+      voice.drone = { osc, gain, filter };
+      voice.nextNote = t + 2;
+    }
+    const d = voice.drone;
+    // Ramp rather than set: a jump in frequency is an audible click.
+    const mults = [1, 1, 1.5];
+    d.osc.forEach((o, i) => {
+      const cents = i === 1 ? v.detune : i === 2 ? -v.detune * 0.5 : 0;
+      o.frequency.setTargetAtTime(v.root * (mults[i] ?? 1), t, 1.2);
+      o.detune.setTargetAtTime(cents, t, 1.2);
+    });
+    d.filter.frequency.setTargetAtTime(Math.max(v.cutoff, 80), t, 1.5);
+    d.gain.gain.setTargetAtTime(v.level, t, 2);
+
+    // A struck note, when one is due.
+    if (t >= voice.nextNote) {
+      const n = voice.noteN++;
+      const f = v.root * semi(noteAt(mode, n)) * octaveAt(n);
+      if (Number.isFinite(f) && f > 20 && f < 8000) {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "triangle";
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.07, t + 0.04);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 4.5);
+        o.connect(g).connect(master);
+        o.start(t);
+        o.stop(t + 4.6);
+      }
+      // Jitter the interval so the pulse never becomes a metronome.
+      const jitter = 0.7 + (Math.abs(Math.sin(n * 3.7)) % 1) * 0.6;
+      voice.nextNote = t + Math.max(v.interval * jitter, 1.5);
+    }
+  } catch { /* silence */ }
+}
+
+/** Stop the music and free its nodes. For leaving a run. */
+export function stopMusic(): void {
+  if (!voice?.drone) return;
+  try {
+    const { ctx } = voice;
+    const t = ctx.currentTime;
+    voice.drone.gain.gain.setTargetAtTime(0, t, 0.4);
+    for (const o of voice.drone.osc) o.stop(t + 2);
+    voice.drone = null;
+  } catch { voice.drone = null; }
+}

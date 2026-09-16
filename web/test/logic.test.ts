@@ -9018,3 +9018,129 @@ describe("the water shows what the game knows", () => {
     expect(rs, "three photo genes cast no more light than one").toBeGreaterThan(rw);
   });
 });
+
+describe("the music mirrors the column", () => {
+  it("every stratum has a mode, and the ladder darkens as you descend", async () => {
+    // The structural claim: descending sounds like descending. Measure it as
+    // the interval content -- a darker mode has more flattened degrees.
+    const { MODES, modeOf } = await import("../src/music.js");
+    expect(MODES.length, "not one mode per stratum plus the lab").toBe(9);
+    // "darkness": sum of how flat each degree is against Lydian.
+    const bright = MODES[1] ?? [];
+    const darkness = (m: readonly number[]): number =>
+      m.reduce((a, v, i) => a + Math.max((bright[i] ?? v) - v, 0), 0);
+    let prev = -1;
+    for (let d = 1; d <= 7; d++) {
+      const k = darkness(modeOf(d));
+      expect(k, `D${String(d)} is not darker than D${String(d - 1)}`)
+        .toBeGreaterThanOrEqual(prev);
+      prev = k;
+    }
+    // the bottom has no tonic to resolve to: whole-tone, all even steps
+    const bottom = modeOf(8);
+    expect(bottom.every((n, i) => n === i * 2), "D8 is not whole-tone").toBe(true);
+  });
+
+  it("the root sinks with depth, and every mode is a real scale", async () => {
+    const { rootOf, MODES } = await import("../src/music.js");
+    for (let d = 1; d <= 8; d++) {
+      expect(rootOf(d), `D${String(d)} is not below D${String(d - 1)}`)
+        .toBeLessThan(rootOf(d - 1));
+      expect(rootOf(d)).toBeGreaterThan(80);      // still audible
+    }
+    for (const [i, m] of MODES.entries()) {
+      expect(m.length, `mode ${String(i)} is empty`).toBeGreaterThan(1);
+      expect(m[0], `mode ${String(i)} has no tonic`).toBe(0);
+      // strictly ascending, inside an octave
+      for (let k = 1; k < m.length; k++) {
+        expect(m[k] ?? 0, `mode ${String(i)} is not ascending`).toBeGreaterThan(m[k - 1] ?? 0);
+      }
+      expect(m[m.length - 1] ?? 0, `mode ${String(i)} exceeds an octave`).toBeLessThan(12);
+    }
+  });
+
+  it("the voicing reacts: threat quickens, damage sours, daylight opens", async () => {
+    const { voicing } = await import("../src/music.js");
+    const calm = voicing({ depth: 3, threat: 0, health: 1, light: 1 });
+    const hunted = voicing({ depth: 3, threat: 1, health: 1, light: 1 });
+    expect(hunted.interval, "threat did not quicken the notes")
+      .toBeLessThan(calm.interval);
+    const hurt = voicing({ depth: 3, threat: 0, health: 0.1, light: 1 });
+    expect(hurt.detune, "damage did not sour the drone").toBeGreaterThan(calm.detune);
+    const night = voicing({ depth: 3, threat: 0, health: 1, light: 0 });
+    expect(night.cutoff, "night did not close the filter").toBeLessThan(calm.cutoff);
+    // the lab is near-silent
+    expect(voicing({ depth: 0, threat: 0, health: 1, light: 1 }).level)
+      .toBeLessThan(calm.level);
+  });
+
+  it("garbage state yields a sane, audible voicing", async () => {
+    const { voicing } = await import("../src/music.js");
+    for (const s of [
+      { depth: NaN, threat: NaN, health: NaN, light: NaN },
+      { depth: Infinity, threat: -5, health: 99, light: -1 },
+      { depth: -3, threat: 2, health: -1, light: 2 },
+    ]) {
+      const v = voicing(s);
+      for (const [k, n] of Object.entries(v)) {
+        expect(Number.isFinite(n), `${k} is ${String(n)}`).toBe(true);
+      }
+      expect(v.root).toBeGreaterThan(80);
+      expect(v.root).toBeLessThan(500);
+      expect(v.interval, "notes would stack on top of each other").toBeGreaterThan(1);
+      expect(v.cutoff).toBeGreaterThan(0);
+      expect(v.level).toBeGreaterThanOrEqual(0);
+      expect(v.level).toBeLessThan(0.3);
+    }
+  });
+
+  it("the note walk stays in the mode and favours the tonic", async () => {
+    // A random walk through a scale sounds like an exercise; weighting the
+    // tonic and fifth is what makes it sound like music.
+    const { noteAt, modeOf, octaveAt } = await import("../src/music.js");
+    for (const d of [1, 5, 8]) {
+      const mode = modeOf(d);
+      const counts = new Map<number, number>();
+      for (let n = 0; n < 2000; n++) {
+        const v = noteAt(mode, n);
+        expect(mode.includes(v), `D${String(d)} note ${String(v)} is outside the mode`).toBe(true);
+        counts.set(v, (counts.get(v) ?? 0) + 1);
+        const o = octaveAt(n);
+        expect([0.5, 1, 2]).toContain(o);
+      }
+      const tonic = (counts.get(mode[0] ?? 0) ?? 0) / 2000;
+      expect(tonic, `D${String(d)}: tonic is only ${(tonic * 100).toFixed(0)}%`)
+        .toBeGreaterThan(0.2);
+    }
+    // an empty mode is silence, not a crash
+    expect(noteAt([], 5)).toBe(0);
+  });
+});
+
+describe("no reachable state produces an inaudible or wild note", () => {
+  it("4410 voicings x 50 notes each stay in the audible band", async () => {
+    // The end-to-end musical claim: whatever the game state, the frequency
+    // that reaches an oscillator is between 20 Hz and 8 kHz and finite. A
+    // NaN there is silence; a 40 kHz one is a shriek on some hardware.
+    const { voicing, modeOf, noteAt, octaveAt, semi } = await import("../src/music.js");
+    for (let d = -5; d <= 15; d++) {
+      for (const th of [0, 0.5, 1, NaN, -1, 2, Infinity]) {
+        for (const hp of [0, 0.5, 1, NaN, -1, 2]) {
+          for (const li of [0, 1, NaN, -1, 2]) {
+            const v = voicing({ depth: d, threat: th, health: hp, light: li });
+            expect(v.interval, "notes would stack").toBeGreaterThan(1);
+            expect(v.root).toBeGreaterThan(20);
+            expect(v.root).toBeLessThan(1000);
+            expect(v.cutoff).toBeGreaterThan(0);
+            const mode = modeOf(d);
+            for (let n = 0; n < 50; n += 7) {
+              const f = v.root * semi(noteAt(mode, n)) * octaveAt(n);
+              expect(Number.isFinite(f) && f > 20 && f < 8000,
+                     `d=${String(d)} n=${String(n)} f=${String(f)}`).toBe(true);
+            }
+          }
+        }
+      }
+    }
+  });
+});

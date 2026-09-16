@@ -137,6 +137,10 @@ class Game {
   facingAt: { x: number; y: number } | null = null;
   /** ms of the last hit YOU took, for the flinch. */
   hurtAt = -Infinity;
+  /** Throttle for the music voicing: counting visible hostiles walks the
+   *  mob list, and it cannot change meaningfully between frames. */
+  musicAt = -Infinity;
+  musicThreat = 0;
   /** Territory claimed this floor -- see biofilm.ts. */
   biofilm: Biofilm = newBiofilm();
   /** Active abilities: per-ability cooldown, lingering secretions, a timed

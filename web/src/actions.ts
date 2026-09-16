@@ -8,9 +8,10 @@
 // and `t_explore`. What is left in turn.ts is the bookkeeping around an action:
 // stairs, pickup, world-building, repath.
 
-import { play } from "./audio.js";
+import { music, play, stopMusic } from "./audio.js";
+import { modeOf, voicing } from "./music.js";
 import { lyse } from "./cast.js";
-import { isNight } from "./cycle.js";
+import { daylight, isNight } from "./cycle.js";
 import { CONDITIONS } from "./conditions.js";
 import type { Game } from "./main.js";
 import * as bio from "./biology.js";
@@ -245,9 +246,30 @@ export function t_step_(_g: Game, t: number): void {
 
     // No world exists until a slot is chosen, so nothing below may run.
     if (_g.showSplash || !_g.started) {
+      stopMusic();                       // the menu is silent
       _g.draw();
       return;
     }
+
+    // The music follows the state: mode and root by stratum, note density by
+    // how much is hunting you, drone detune by how hurt you are, filter by
+    // the daylight. Recomputed per frame -- it is four clamps and a few
+    // ramp calls, and a stale voicing is a bed that lies about the room.
+    //
+    // `threat` is throttled: counting visible hostiles walks the mob list,
+    // which is the one part of this that is not free, and it cannot change
+    // meaningfully between frames.
+    if (_g.now - _g.musicAt > 500) {
+      _g.musicAt = _g.now;
+      _g.musicThreat = t_visibleHostile(_g) ? 1 : 0;
+    }
+    const d = _g.dungeon.depth;
+    music(voicing({
+      depth: d,
+      threat: _g.musicThreat,
+      health: _g.player.maxhp > 0 ? _g.player.hp / _g.player.maxhp : 1,
+      light: daylight(_g.clock),
+    }), modeOf(d));
     // Hitstop freezes the animation clock only. Turn state already resolved,
     // so nothing desyncs -- the world just holds still for a beat.
     if (_g.fx.frozen(t)) dt = 0;

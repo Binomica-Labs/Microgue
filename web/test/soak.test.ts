@@ -1731,6 +1731,7 @@ describe("state that should persist, does", () => {
     menuBoxes: "hit boxes, per frame",
     facingAt: "which way the last blow pointed; recomputed on the next action",
     hurtAt: "ms of the last hit, for the flinch animation",
+    musicAt: "music voicing throttle", musicThreat: "throttled threat for the music",
     biofilm: "territory on the current floor; cleared on descent",
     cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",
     surge: "a timed self-effect", aiming: "which ability is armed",
@@ -4072,7 +4073,8 @@ describe("audio never crashes, whatever the browser gives it", () => {
   // real phone.
 
   it("with no AudioContext at all, every call is a no-op", async () => {
-    const { unlockAudio, play, ambient, setMuted, audioReady } = await import("../src/audio.js");
+    const { unlockAudio, play, ambient, setMuted, audioReady, resetAudioForTests } = await import("../src/audio.js");
+    resetAudioForTests();
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     delete (globalThis as { AudioContext?: unknown }).AudioContext;
     expect(() => { unlockAudio(); }).not.toThrow();
@@ -4086,7 +4088,8 @@ describe("audio never crashes, whatever the browser gives it", () => {
 
   it("with a context that throws on every node, every call is still silent", async () => {
     // A context whose factory methods explode: the worst-behaved browser.
-    const { unlockAudio, play, ambient } = await import("../src/audio.js");
+    const { unlockAudio, play, ambient, resetAudioForTests } = await import("../src/audio.js");
+    resetAudioForTests();
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     class Hostile {
       currentTime = 0; sampleRate = 44100; destination = {};
@@ -4104,7 +4107,8 @@ describe("audio never crashes, whatever the browser gives it", () => {
   });
 
   it("garbage depth for the ambient bed is clamped, not a NaN filter", async () => {
-    const { unlockAudio, ambient } = await import("../src/audio.js");
+    const { unlockAudio, ambient, resetAudioForTests } = await import("../src/audio.js");
+    resetAudioForTests();
     const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
     const seen: number[] = [];
     const param = { value: 0, linearRampToValueAtTime: (v: number) => { seen.push(v); },
@@ -4176,5 +4180,203 @@ describe("a lysed cell feeds the tile, and does not carpet the floor", () => {
       expect(() => { lyse(g, { ...bad, pigment: "x", name: "t", uid: 1 }); }).not.toThrow();
     }
     void before;
+  });
+});
+
+describe("music: cheap per frame, silent when it cannot play", () => {
+  const fakeCtx = (log: string[]) => {
+    const param = () => ({
+      value: 0,
+      setTargetAtTime: (v: number) => { log.push(`target:${String(v)}`); },
+      setValueAtTime: () => undefined,
+      exponentialRampToValueAtTime: () => undefined,
+      linearRampToValueAtTime: () => undefined,
+    });
+    const node = () => ({
+      connect() { return node(); }, start: () => undefined, stop: () => undefined,
+      gain: param(), frequency: param(), detune: param(),
+      type: "", loop: false, buffer: null,
+      getChannelData: () => new Float32Array(8),
+    });
+    let made = 0;
+    class Fake {
+      currentTime = 0; sampleRate = 8; destination = {};
+      resume(): Promise<void> { return Promise.resolve(); }
+      createGain() { made++; return node(); }
+      createOscillator() { made++; log.push("osc"); return node(); }
+      createBuffer() { made++; return node(); }
+      createBufferSource() { made++; return node(); }
+      createBiquadFilter() { made++; return node(); }
+    }
+    return { Fake, count: () => made };
+  };
+
+  it("a steady frame creates no nodes: the drone is retuned, not rebuilt", async () => {
+    // The optimisation that matters. Rebuilding oscillators per frame would
+    // be both a click and a leak; per NOTE is one oscillator, unavoidable.
+    const { unlockAudio, music, stopMusic, resetAudioForTests } = await import("../src/audio.js");
+    resetAudioForTests();               // the context is a module global
+    const { voicing, modeOf } = await import("../src/music.js");
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    const log: string[] = [];
+    const { Fake, count } = fakeCtx(log);
+    (globalThis as { AudioContext?: unknown }).AudioContext = Fake;
+    unlockAudio();
+    const v = voicing({ depth: 3, threat: 0, health: 1, light: 1 });
+    music(v, modeOf(3));                       // builds the drone
+    const afterBuild = count();
+    log.length = 0;
+    // currentTime stays 0, so no note is ever due: 60 steady frames
+    for (let i = 0; i < 60; i++) music(v, modeOf(3));
+    expect(count() - afterBuild, "nodes created on steady frames").toBe(0);
+    expect(log.filter((l) => l === "osc").length, "an oscillator per frame").toBe(0);
+    expect(log.length, "no retuning happened at all").toBeGreaterThan(0);
+    stopMusic();
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+
+  it("with no AudioContext, music and stopMusic are silent no-ops", async () => {
+    const { music, stopMusic } = await import("../src/audio.js");
+    const { voicing, modeOf } = await import("../src/music.js");
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    delete (globalThis as { AudioContext?: unknown }).AudioContext;
+    expect(() => {
+      for (let d = 0; d <= 8; d++) {
+        music(voicing({ depth: d, threat: 0.5, health: 0.5, light: 0.5 }), modeOf(d));
+      }
+      stopMusic(); stopMusic();
+    }).not.toThrow();
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+
+  it("a hostile context never escapes as a throw", async () => {
+    const { unlockAudio, music, stopMusic, resetAudioForTests } = await import("../src/audio.js");
+    const { voicing, modeOf } = await import("../src/music.js");
+    resetAudioForTests();
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    class Hostile {
+      currentTime = 0; sampleRate = 44100; destination = {};
+      resume(): Promise<void> { return Promise.reject(new Error("no")); }
+      createGain(): never { throw new Error("no"); }
+      createOscillator(): never { throw new Error("no"); }
+      createBuffer(): never { throw new Error("no"); }
+      createBufferSource(): never { throw new Error("no"); }
+      createBiquadFilter(): never { throw new Error("no"); }
+    }
+    (globalThis as { AudioContext?: unknown }).AudioContext = Hostile;
+    unlockAudio();
+    expect(() => {
+      music(voicing({ depth: 4, threat: 1, health: 0.2, light: 0 }), modeOf(4));
+      stopMusic();
+    }).not.toThrow();
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+
+  it("a garbage voicing plays nothing rather than a 40kHz shriek", async () => {
+    // A NaN or absurd root must not reach an oscillator. Frequencies are
+    // bounded 20..8000 Hz at the call site.
+    const { unlockAudio, music, resetAudioForTests } = await import("../src/audio.js");
+    const { modeOf } = await import("../src/music.js");
+    resetAudioForTests();
+    const saved = (globalThis as { AudioContext?: unknown }).AudioContext;
+    const log: string[] = [];
+    const { Fake } = fakeCtx(log);
+    (globalThis as { AudioContext?: unknown }).AudioContext = Fake;
+    unlockAudio();
+    for (const root of [NaN, 0, -100, Infinity, 1e9]) {
+      expect(() => {
+        music({ root, interval: 5, detune: 4, cutoff: 500, level: 0.05 }, modeOf(3));
+      }, `root ${String(root)} threw`).not.toThrow();
+    }
+    (globalThis as { AudioContext?: unknown }).AudioContext = saved;
+  });
+});
+
+describe("release soak: everything running together, for a long time", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("3000 frames with music, motion, snow and water leaks nothing", async () => {
+    // Every v1.28-v1.30 system runs per frame. Four of them are new since
+    // the last release that actually deployed, and they have never run
+    // together for long. This is the check that they do not accumulate.
+    const { Game } = await import("../src/main.js");
+    const { resetAudioForTests } = await import("../src/audio.js");
+    resetAudioForTests();
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "phototroph");
+    // a build that lights up every visual system at once
+    for (const id of ["psbA", "psaA", "cbbL", "celA", "epsA"] as const) {
+      g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.genome.assemble(["psbA", "psaA", "cbbL", "celA", "epsA"]);
+    g.press("wait");
+
+    for (let i = 0; i < 3000; i++) {
+      g.frame(100 + i * 33);
+      if (i % 25 === 0 && !g.dead) g.press("wait");
+    }
+    // Nothing unbounded. These are the queues the new systems could feed.
+    expect(g.fx.count(), "effect queue grew unbounded").toBeLessThanOrEqual(160);
+    expect(g.toasts.count(), "toasts").toBeLessThanOrEqual(4);
+    expect(g.secretions.length, "secretions").toBeLessThan(80);
+    expect(g.drops.length, "floor drops (lysate feeds this)").toBeLessThanOrEqual(80);
+    expect(g.biofilm.tiles.size, "biofilm past cap").toBeLessThanOrEqual(12);
+    expect(g.packets.length, "packets").toBeLessThan(200);
+    // and no error toast: a throw anywhere in a per-frame system lands here
+    const errs = g.toasts.all().filter((x) => x.level === "error").map((x) => x.text);
+    expect(errs, "a per-frame system threw during the soak").toEqual([]);
+  });
+
+  it("a whole descent with every system live draws every stratum", async () => {
+    // The mode ladder, the water tint and the ambient bed all key on depth.
+    // Walk all eight strata and confirm none of them throws or blanks.
+    const { Game } = await import("../src/main.js");
+    const { resetAudioForTests } = await import("../src/audio.js");
+    const { voicing, modeOf } = await import("../src/music.js");
+    const { dayTint } = await import("../src/water.js");
+    resetAudioForTests();
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "chemolithotroph");
+    for (let f = 1; f <= 24; f++) {
+      g.dungeon.floor = f;
+      g.enter(g.dungeon.current(), g.dungeon.current().up);
+      const d = g.dungeon.depth;
+      expect(() => { g.frame(1000 + f * 100); }, `F${String(f)} threw`).not.toThrow();
+      // the music is defined and sane at every depth
+      const v = voicing({ depth: d, threat: 0.5, health: 0.6, light: 0.5 });
+      expect(Number.isFinite(v.root) && v.root > 80, `F${String(f)} bad root`).toBe(true);
+      expect(modeOf(d).length, `F${String(f)} empty mode`).toBeGreaterThan(1);
+      // the night tint is either a colour or honestly absent
+      const t = dayTint(0, d);
+      if (t !== null) expect(t).toMatch(/^rgba\(/);
+    }
+  });
+
+  it("a save from before any of this loads and plays", async () => {
+    // Players have saves from the last build that deployed -- v1.27. Those
+    // have no muted setting, no condition, no symbiont. They must load.
+    const { parseSave, SCHEMA } = await import("../src/save.js");
+    const old = parseSave({
+      version: SCHEMA, depth: 3, floor: 7, seed: 42, px: 20, py: 20,
+      hp: 18, atp: 40, ring: [], bin: [], heldMods: [], turn: 300,
+      stocked: [], integrated: 6, traits: [], strainClass: "heterotroph",
+      settings: { autoAttack: true, minimap: true, zoom: 1, uiScale: 1,
+                  highContrast: false, reduceMotion: false, diagonal: true },
+      run: { deepest: 7, deaths: 2, killed: 9, bestiary: [], library: [] },
+    });
+    expect(old, "a v1.27 save no longer parses").not.toBeNull();
+    expect(old?.settings.muted, "muted did not default").toBe(false);
+    expect(old?.run.condition, "condition did not default").toBe("none");
+    expect(old?.symbiont, "symbiont did not default").toBeNull();
   });
 });
