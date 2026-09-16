@@ -3,6 +3,36 @@
 The drone was three oscillators pinned to root/root/fifth forever: a held
 chord, and held chords wear out.
 
+## v1.32.1 — it sounded like an ambulance, because it was one
+
+Reported: "sounds more like an ambulance than anything musical." Exactly
+right, and it named the bug. Two sine voices gliding between different
+pitches with a ~2s ramp IS a siren -- that is the mechanism. A drone that
+slides is not a drone.
+
+Rebuilt on the principle the report suggested: the bass holds.
+
+* **The drone is fixed.** Two voices at -12 and -5 semitones (root and the
+  fifth below), 74-105 Hz depending on stratum. They never change pitch
+  except when the stratum's root changes, and then over three seconds
+  because that is a real harmonic move. Only the fifth is detuned; the
+  beating between a pure root and a slightly-off fifth is the whole texture.
+* **Movement comes from a SWELL voice.** One tone from the chord's upper
+  degrees, faded in and out on a raised cosine, silent between. A note that
+  appears and disappears is musical; a note that slides is a portamento.
+* **The rule that kills the siren, enforced:** the swell's pitch is set
+  ONLY while its gain is below 0.02. `spec` checks the model-level property
+  -- whenever the tone changes, the level at that step is under 0.05 -- and
+  tightening the swell period so it changes while audible is one failure.
+
+Also pinned: the swell never doubles the root the drone already holds, its
+envelope has no corner (no click), and it genuinely rests (>20% of steps
+silent) rather than being a second drone.
+
+The lesson is about diagnosis, not audio: "it sounds like an ambulance" was
+a more precise bug report than it looked. A siren is two tones sweeping past
+each other, and that is a description of the code.
+
 ## The drone
 
 `chordOf(depth)` builds a four-note chord from the stratum's OWN mode

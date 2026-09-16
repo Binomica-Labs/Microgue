@@ -73,28 +73,45 @@ export function chordOf(depth: number): readonly number[] {
 }
 
 /**
- * Where drone voice `v` sits at step `n` of the arpeggio.
+ * The drone's two fixed voices: root and fifth, an octave down.
  *
- * Each voice walks the chord at its OWN rate and offset, so the three of
- * them re-voice against each other endlessly without ever restarting. That
- * is the difference between a drone that breathes and a held chord that
- * wears out: nothing is static, but nothing is fast enough to be a melody
- * either.
+ * They NEVER change pitch. The previous version swept all three voices
+ * between chord tones with a ~2s glide, which is precisely how a siren
+ * works -- it sounded like an ambulance, because it was one. A drone that
+ * slides is not a drone.
  *
- * Voice 0 is the bass and moves least -- an arpeggio whose bottom wanders is
- * a chord progression, which is more music than this wants to be.
+ * Movement comes from `swellAt` instead: a separate voice that FADES a chord
+ * tone in and out at a fixed pitch. A note that appears and disappears is
+ * musical; a note that slides between pitches is a portamento, and two of
+ * them at once is an emergency vehicle.
  */
-export function droneStep(chord: readonly number[], v: number, n: number): number {
-  if (chord.length === 0) return 0;
-  const k = Number.isFinite(n) ? Math.floor(n) : 0;
-  // Rates chosen coprime-ish so the pattern takes a long time to repeat:
-  // voice 0 every 4 steps, voice 1 every 3, voice 2 every 5.
-  const rate = [4, 3, 5][v % 3] ?? 4;
-  const idx = Math.floor(k / rate) + v * 2;
-  // The bass stays low; the upper voices may take the octave.
-  const pick = chord[((idx % chord.length) + chord.length) % chord.length] ?? 0;
-  if (v === 0) return chord[0] ?? 0;                    // bass holds the root
-  return pick + (v === 2 && (idx % 3 === 0) ? 12 : 0);
+export const DRONE_VOICES: readonly number[] = [-12, -5];   // root, fifth below
+
+/**
+ * The swell voice: which chord tone is sounding at step `n`, and how loud.
+ *
+ * It holds a tone for a few steps, fades out, and comes back on a different
+ * one -- so the harmony moves without anything gliding. The gain envelope is
+ * a raised cosine, which has no corners and so no click.
+ *
+ * Returns the semitone offset and a 0..1 level.
+ */
+export function swellAt(
+  chord: readonly number[], n: number,
+): { semitone: number; level: number } {
+  if (chord.length === 0) return { semitone: 0, level: 0 };
+  const k = Number.isFinite(n) ? n : 0;
+  // One swell every 8 steps, of which it sounds for about 5.
+  const period = 8;
+  const phase = ((k % period) + period) % period;
+  const which = Math.floor(k / period);
+  // Pick from the chord's upper tones -- never the root, which the drone
+  // already holds. Third, fifth, seventh.
+  const upper = chord.slice(1);
+  const semitone = (upper[((which % upper.length) + upper.length) % upper.length] ?? 7);
+  // Raised cosine over the first 5 of 8 steps, silent for the rest.
+  const level = phase < 5 ? (1 - Math.cos((phase / 5) * Math.PI * 2)) / 2 : 0;
+  return { semitone, level };
 }
 
 /**

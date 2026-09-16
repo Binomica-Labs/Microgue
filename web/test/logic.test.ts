@@ -9151,27 +9151,77 @@ describe("no reachable state produces an inaudible or wild note", () => {
 });
 
 describe("the drone arpeggiates and the melody walks a pentatonic", () => {
-  it("the drone re-voices: many distinct voicings, none static", async () => {
-    // A held chord wears out. Each voice walks the chord at its own rate, so
-    // the three re-voice against each other endlessly.
-    const { chordOf, droneStep } = await import("../src/music.js");
+  it("the drone is BASS and never moves: root and fifth, an octave down", async () => {
+    // Reported as "sounds like an ambulance". It was: two sine voices
+    // gliding between pitches with a ~2s ramp is how a siren works. A drone
+    // that slides is not a drone. The bass voices are fixed offsets now.
+    const { DRONE_VOICES } = await import("../src/music.js");
+    expect(DRONE_VOICES.length, "not two bass voices").toBe(2);
+    for (const off of DRONE_VOICES) {
+      expect(off, "a drone voice is not in the bass").toBeLessThanOrEqual(-5);
+      expect(off, "a drone voice is absurdly low").toBeGreaterThan(-24);
+    }
+    // root and a fifth below it: the interval with no third, so it colours
+    // nothing and sits under any chord tone the swell plays
+    expect(DRONE_VOICES[0], "the lower voice is not the root").toBe(-12);
+    expect((DRONE_VOICES[1] ?? 0) - (DRONE_VOICES[0] ?? 0), "not a fifth apart").toBe(7);
+  });
+
+  it("the swell moves the harmony WITHOUT sliding: it fades out, then changes", async () => {
+    // The fix for the siren. A note that appears and disappears is musical;
+    // a note that slides between pitches is a portamento. The property that
+    // guarantees it: whenever the tone CHANGES, the level at that step is
+    // low enough that the change is inaudible.
+    const { chordOf, swellAt } = await import("../src/music.js");
     for (const d of [1, 5, 8]) {
       const c = chordOf(d);
-      const seen = new Set<string>();
-      for (let n = 0; n < 400; n++) {
-        seen.add([0, 1, 2].map((i) => droneStep(c, i, n)).join(","));
+      let prev = swellAt(c, 0);
+      let changes = 0;
+      for (let n = 1; n < 400; n++) {
+        const cur = swellAt(c, n);
+        if (cur.semitone !== prev.semitone) {
+          changes++;
+          expect(cur.level, `D${String(d)} step ${String(n)}: pitch changed at level `
+            + `${cur.level.toFixed(2)} -- audible slide`).toBeLessThan(0.05);
+          expect(prev.level, "the previous tone had not faded").toBeLessThan(0.05);
+        }
+        prev = cur;
       }
-      expect(seen.size, `D${String(d)} drone has only ${String(seen.size)} voicings`)
-        .toBeGreaterThan(8);
+      expect(changes, `D${String(d)} swell never changes tone`).toBeGreaterThan(5);
     }
   });
 
-  it("the bass holds the root: an arpeggio, not a chord progression", async () => {
-    const { chordOf, droneStep } = await import("../src/music.js");
-    const c = chordOf(4);
-    for (let n = 0; n < 200; n++) {
-      expect(droneStep(c, 0, n), "the bass wandered off the root").toBe(c[0]);
+  it("the swell never plays the root the drone is already holding", async () => {
+    const { chordOf, swellAt } = await import("../src/music.js");
+    for (const d of [1, 4, 8]) {
+      const c = chordOf(d);
+      for (let n = 0; n < 200; n++) {
+        const s = swellAt(c, n);
+        if (s.level > 0.02) {
+          expect(s.semitone, `D${String(d)} swell doubled the drone root`).not.toBe(c[0]);
+          expect(c.includes(s.semitone), "the swell left the chord").toBe(true);
+        }
+      }
     }
+  });
+
+  it("the swell envelope has no corners, and rests", async () => {
+    // A raised cosine: no discontinuity, so no click. And it must actually
+    // go silent between tones, or it is just a second drone.
+    const { chordOf, swellAt } = await import("../src/music.js");
+    const c = chordOf(3);
+    let silent = 0, loudest = 0, maxJump = 0;
+    let prev = swellAt(c, 0).level;
+    for (let n = 1; n < 200; n++) {
+      const l = swellAt(c, n).level;
+      if (l < 0.02) silent++;
+      loudest = Math.max(loudest, l);
+      maxJump = Math.max(maxJump, Math.abs(l - prev));
+      prev = l;
+    }
+    expect(silent / 200, "the swell never rests").toBeGreaterThan(0.2);
+    expect(loudest, "the swell is inaudible").toBeGreaterThan(0.8);
+    expect(maxJump, "the envelope has a corner -- that is a click").toBeLessThan(0.7);
   });
 
   it("every stratum's pentatonic has five notes and NO semitone steps", async () => {
@@ -9230,19 +9280,20 @@ describe("the drone arpeggiates and the melody walks a pentatonic", () => {
     expect(Number.isFinite(noteAt([0, 4], NaN))).toBe(true);
   });
 
-  it("droneStep and chordOf survive garbage", async () => {
-    const { chordOf, droneStep } = await import("../src/music.js");
+  it("swellAt and chordOf survive garbage", async () => {
+    const { chordOf, swellAt } = await import("../src/music.js");
     for (const d of [NaN, -9, 99, Infinity]) {
       const c = chordOf(d);
       expect(c.length, `chordOf(${String(d)}) is empty`).toBeGreaterThan(1);
-      for (const v of [0, 1, 2, 7, -1]) {
-        for (const n of [0, 5, NaN, -3, 1e9]) {
-          const s = droneStep(c, v, n);
-          expect(Number.isFinite(s), `droneStep(v=${String(v)},n=${String(n)})`).toBe(true);
-          expect(Math.abs(s), "a drone voice left a sane range").toBeLessThan(30);
-        }
+      for (const n of [0, 5, NaN, -3, 1e9, -1e9]) {
+        const s = swellAt(c, n);
+        expect(Number.isFinite(s.semitone), `swellAt(${String(n)}).semitone`).toBe(true);
+        expect(Number.isFinite(s.level), `swellAt(${String(n)}).level`).toBe(true);
+        expect(Math.abs(s.semitone), "the swell left a sane range").toBeLessThan(30);
+        expect(s.level).toBeGreaterThanOrEqual(0);
+        expect(s.level).toBeLessThanOrEqual(1);
       }
     }
-    expect(droneStep([], 0, 0)).toBe(0);
+    expect(swellAt([], 0)).toEqual({ semitone: 0, level: 0 });
   });
 });

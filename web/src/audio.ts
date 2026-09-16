@@ -14,16 +14,18 @@
 // Nothing here throws. A phone with no AudioContext, a browser that refuses
 // to resume, a call before the first gesture -- all silent, never a crash.
 
-import { chordOf, droneStep, noteAt, octaveAt, semi,
+import { chordOf, DRONE_VOICES, noteAt, octaveAt, semi, swellAt,
   type MusicVoicing } from "./music.js";
 
 export type Cue = "hit" | "hurt" | "kill" | "level" | "cast" | "pickup"
   | "descend" | "die" | "denied";
 
 interface Drone {
-  /** Three sines on the root, detuned against each other. Created once and
-   *  retuned; rebuilding them per floor would click. */
+  /** Two fixed bass sines plus one swell voice. Created once; the bass
+   *  never changes pitch, which is what stops it sounding like a siren. */
   osc: OscillatorNode[];
+  /** Per-voice gain, so the swell fades without touching the drone. */
+  gains: GainNode[];
   gain: GainNode;
   filter: BiquadFilterNode;
 }
@@ -226,40 +228,66 @@ export function music(
       gain.gain.value = 0;
       filter.connect(gain).connect(master);
       const osc: OscillatorNode[] = [];
-      // Three voices on the stratum's chord. They re-voice independently
-      // from here; see droneStep.
-      const c0 = chordOf(depth);
-      for (let i = 0; i < 3; i++) {
+      const gains: GainNode[] = [];
+      // Two FIXED bass voices -- root and fifth, an octave down -- and one
+      // swell voice above them. The bass never changes pitch; see
+      // DRONE_VOICES. Each voice gets its own gain so the swell can fade
+      // without touching the drone.
+      for (const off of DRONE_VOICES) {
         const o = ctx.createOscillator();
         o.type = "sine";
-        o.frequency.value = v.root * semi(droneStep(c0, i, 0));
-        o.connect(filter);
+        o.frequency.value = v.root * semi(off);
+        const vg = ctx.createGain();
+        vg.gain.value = 1;
+        o.connect(vg).connect(filter);
         o.start(t);
         osc.push(o);
+        gains.push(vg);
       }
-      voice.drone = { osc, gain, filter };
+      const sw = ctx.createOscillator();
+      sw.type = "sine";
+      sw.frequency.value = v.root;
+      const swg = ctx.createGain();
+      swg.gain.value = 0;
+      sw.connect(swg).connect(filter);
+      sw.start(t);
+      osc.push(sw);
+      gains.push(swg);
+      voice.drone = { osc, gains, gain, filter };
       voice.nextNote = t + 2;
     }
     const d = voice.drone;
-    // The arpeggio: each voice walks the chord at its own rate, slowly. The
-    // step only advances on its own clock -- the frequencies are ramped
-    // toward the current step every frame, so a re-voice is a glide, never a
-    // click.
+    // The bass HOLDS. It only moves when the stratum's root moves, and then
+    // slowly, because that is a real harmonic change and not a sweep.
+    const chord = chordOf(depth);
+    DRONE_VOICES.forEach((off, i) => {
+      const o = d.osc[i];
+      if (!o) return;
+      const f = v.root * semi(off);
+      if (Number.isFinite(f) && f > 20 && f < 4000) o.frequency.setTargetAtTime(f, t, 3);
+      // Only the fifth is detuned, and gently: the beating between a pure
+      // root and a slightly-off fifth is the whole texture.
+      o.detune.setTargetAtTime(i === 1 ? v.detune : 0, t, 1.2);
+    });
+
+    // The swell: a chord tone fading in and out at a FIXED pitch. Its step
+    // advances on a slow clock; within a step the level is ramped, and the
+    // pitch is only set while it is silent, so it never glides.
     if (t >= voice.nextArp) {
       voice.arpN++;
-      voice.nextArp = t + 2.6 + (Math.abs(Math.sin(voice.arpN * 5.1)) % 1) * 1.6;
+      voice.nextArp = t + 2.2;
     }
-    const chord = chordOf(depth);
-    d.osc.forEach((o, i) => {
-      const cents = i === 1 ? v.detune : i === 2 ? -v.detune * 0.5 : 0;
-      const f = v.root * semi(droneStep(chord, i, voice?.arpN ?? 0));
-      if (Number.isFinite(f) && f > 20 && f < 4000) {
-        // A long time-constant: a voice takes about two seconds to arrive,
-        // which is what makes it a swell rather than a note.
-        o.frequency.setTargetAtTime(f, t, 1.8);
+    const sw = swellAt(chord, voice.arpN);
+    const swOsc = d.osc[2], swGain = d.gains[2];
+    if (swOsc && swGain) {
+      const f = v.root * semi(sw.semitone);
+      // Retune ONLY while inaudible: a pitch change under a live gain is a
+      // portamento, which is exactly what made this sound like an ambulance.
+      if (sw.level < 0.02 && Number.isFinite(f) && f > 20 && f < 4000) {
+        swOsc.frequency.setValueAtTime(f, t);
       }
-      o.detune.setTargetAtTime(cents, t, 1.2);
-    });
+      swGain.gain.setTargetAtTime(sw.level * 0.55, t, 0.8);
+    }
     d.filter.frequency.setTargetAtTime(Math.max(v.cutoff, 80), t, 1.5);
     d.gain.gain.setTargetAtTime(v.level, t, 2);
 
