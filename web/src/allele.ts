@@ -273,3 +273,33 @@ export function alleleReadout(a: Allele): string[] {
   if (out.length === 0) out.push("an ordinary copy \u2014 nothing to distinguish it");
   return out;
 }
+
+/**
+ * Copy an allele imperfectly: the mutational load of one generation.
+ *
+ * Multipliers slide a few percent, usually down -- a random mutation in an
+ * enzyme is far more likely to break it than to improve it, which is the
+ * whole reason selection exists. An affix can be lost entirely; one is never
+ * gained, because gaining one is what finding a good copy is FOR.
+ *
+ * Deliberately gentle. A lineage should erode over several generations, not
+ * collapse in one -- the mechanic is a slope, and a cliff is just a reset
+ * with extra steps.
+ */
+export function degrade(a: Allele, rng: Rng): Allele {
+  const slide = (v: number): number => {
+    // -6%..+2%: the asymmetry IS the entropy.
+    const d = 1 + (rng.next() * 0.08 - 0.06);
+    return Math.min(Math.max(v * d, 0.4), 2.5);
+  };
+  const dropped = rng.next() < 0.22;
+  const which = rng.next() < 0.5;
+  return {
+    ...a,
+    kcat: slide(a.kcat),
+    km: slide(a.km),
+    stability: slide(a.stability),
+    prefix: dropped && which ? null : a.prefix,
+    suffix: dropped && !which ? null : a.suffix,
+  };
+}

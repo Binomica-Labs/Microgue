@@ -5,6 +5,9 @@
 // crossed the 900-line ceiling `spec` enforces -- these are about the strain
 // and the lab, not about time passing.
 
+import { decay, leaveTrace } from "./succession.js";
+import { makeRng } from "./rng.js";
+import { inherit } from "./lineage.js";
 import { deathCadence, play } from "./audio.js";
 import * as bio from "./biology.js";
 import { MODIFIERS } from "./parts.js";
@@ -67,7 +70,34 @@ export function t_die(_g: Game): void {
 
   const credit = creditFor(outcome, _g.lab.deepestEver);
   const rec = recordRun(_g.lab, outcome, credit, _g.trace.epitaph(8));
+
+  // The lineage. What this strain built passes to the next one, degraded --
+  // see lineage.ts. This is the meta-loop: death is a partial loss, not a
+  // reset, and the ceiling is whatever you already achieved.
+  const h = inherit(_g.genome.slots, _g.genome.bin, _g.dungeon.floor,
+                    _g.lab.generation + 1, makeRng(_g.turnSeed ^ 0x11ce));
+  _g.lab.heirloom = [...h.parts];
+  _g.lab.generation = h.generation;
+
+  // What this run did to the column stays in it. The layout rerolls; the
+  // enrichment does not. See succession.ts.
+  leaveTrace(_g.lab.succession, _g.dungeon.floor, {
+    grazed: _g.run.killed,
+    fouled: _g.biofilm.tiles.size,
+    settled: Math.round(_g.run.killed * 0.45),
+  });
+  decay(_g.lab.succession);
+
+  // Persist LAST. This ran before the lineage was banked, so the generation
+  // and the heirloom were computed, held in memory, and then thrown away by
+  // the next `startRun`'s `readLab()` -- the whole mechanic silently did
+  // nothing on a real device. Anything a death produces must be written
+  // after it is produced.
   writeLab(_g.lab);
+  if (h.parts.length > 0) {
+    _g.note(`${String(h.parts.length)} constructs pass to generation `
+      + `${String(h.generation)}. ${String(h.lost.length)} lost.`);
+  }
 
   _g.dead = true;
   _g.deathAt = _g.now;

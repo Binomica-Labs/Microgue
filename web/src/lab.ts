@@ -21,6 +21,8 @@ import { MAX_FLOOR, strataOf } from "./dungeon.js";
 import { BASE_SLOTS, MAX_SLOTS, capacityFor, slotsFor } from "./chromosome.js";
 import { BIN_CAP, STARTING_PARTS } from "./plasmid.js";
 import { MAX_STRAIN } from "./strain.js";
+import type { Part } from "./plasmid.js";
+import { newSuccession, type Succession } from "./succession.js";
 
 export interface RunRecord {
   /** Which attempt this was, counting from one. */
@@ -47,6 +49,12 @@ export interface Lab {
   ledger: RunRecord[];
   /** Genes ordered from synthesis, present on every future strain. */
   stock: GeneId[];
+  /** What the last strain passed down, and which generation the next one
+   *  is. A lineage, not a shop: see lineage.ts. */
+  heirloom: Part[];
+  generation: number;
+  /** What past lineages left on each floor. See succession.ts. */
+  succession: Succession;
   /** Cassette sites every future strain starts with. */
   startSites: number;
   /** Head start on strain level. */
@@ -56,6 +64,7 @@ export interface Lab {
 export const newLab = (): Lab => ({
   credit: 0, deepestEver: 0, ledger: [], stock: [],
   startSites: 0, startStrain: 1,
+  heirloom: [], generation: 1, succession: newSuccession(),
 });
 
 /** Ledger entries kept. Enough to see a trend, not enough to bloat a save. */

@@ -8,6 +8,7 @@
 // a reason on refusal, because a silent no on a deliberate action is the
 // worst UI.
 
+import { yieldsCofactor } from "./crossfeed.js";
 import { play } from "./audio.js";
 import { makeRng } from "./rng.js";
 import { addDrop, substratesAt } from "./items.js";
@@ -154,6 +155,13 @@ export function lyse(
   burst = true,
 ): void {
   play("kill");
+  // Cross-feeding: some organisms are the only source of a cofactor a deep
+  // gene needs. Lysing one hands it over -- the bestiary as a supply chain.
+  const cf = yieldsCofactor(m.name);
+  if (cf && _g.genome.addCofactor(cf.id)) {
+    _g.note(`${cf.name} recovered from the lysate. Genes that need it can `
+      + `express now.`);
+  }
   // Melee draws its own bigger burst (with shake and hitstop); the ability
   // and aura kills had none. `burst` false skips it to avoid a double.
   if (burst) {

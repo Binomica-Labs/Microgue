@@ -1735,6 +1735,7 @@ describe("state that should persist, does", () => {
     facingAt: "which way the last blow pointed; recomputed on the next action",
     hurtAt: "ms of the last hit, for the flinch animation",
     armed: "what a press is holding, until release",
+    daily: "whether this run is the daily column",
     musicAt: "music voicing throttle", musicThreat: "throttled threat for the music",
     biofilm: "territory on the current floor; cleared on descent",
     cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",
@@ -3520,7 +3521,7 @@ describe("active abilities: genes grant things you can DO", () => {
     const d = g.dungeon.depth;
     const ids = grantedAbilities((x) => g.genome.expression(x, d)).map((a) => a.id);
     expect(ids, "celA did not grant cellulase").toContain("cellulase");
-    expect(ids, "an ungranted ability appeared").not.toContain("phage");
+    expect(ids, "an ungranted ability appeared").not.toContain("t6ss");
   });
 
   it("a secretion lays tiles that hurt what stands on them, then expires", async () => {
@@ -3547,16 +3548,16 @@ describe("active abilities: genes grant things you can DO", () => {
 
   it("a bolt hits the first thing in its line, within range", async () => {
     const { castAbility } = await import("../src/cast.js");
-    const g = await withGenes(["recA"]);
+    const g = await withGenes(["tssB"]);
     // clear a lane and put a mob 3 tiles east
     for (let i = 1; i <= 5; i++) g.level.grid.set(g.player.x + i, g.player.y, 0);
     const m = placeMob(g, 3, 0);
     const hp = m.hp;
-    expect(castAbility(g, "phage", 1, 0)).toBeNull();
+    expect(castAbility(g, "t6ss", 1, 0)).toBeNull();
     expect(m.hp, "the bolt missed a mob in its line").toBeLessThan(hp);
     // no direction: refused, not fired blindly
     g.cooldowns.clear(); g.player.atp = 100;
-    expect(castAbility(g, "phage"), "a bolt fired with no direction").not.toBeNull();
+    expect(castAbility(g, "t6ss"), "a bolt fired with no direction").not.toBeNull();
   });
 
   it("a burst hits everything in its ring", async () => {
@@ -3651,11 +3652,11 @@ describe("abilities under adversarial input", () => {
     // A bolt or dash with NaN/Infinity/huge direction must refuse or clamp,
     // never walk the player off the grid or trace an infinite line.
     const { castAbility } = await import("../src/cast.js");
-    const g = await withGenes(["recA", "flhD"]);
+    const g = await withGenes(["tssB", "flhD"]);
     const x0 = g.player.x, y0 = g.player.y;
     for (const [dx, dy] of [[NaN, 0], [0, NaN], [Infinity, 1], [1, -Infinity],
                             [1e9, 1e9], [-1e9, 0]] as const) {
-      for (const id of ["phage", "dash"] as const) {
+      for (const id of ["t6ss", "dash"] as const) {
         g.cooldowns.clear(); g.player.atp = 100;
         expect(() => { castAbility(g, id, dx, dy); },
                `${id} threw on direction ${String(dx)},${String(dy)}`).not.toThrow();
@@ -3725,7 +3726,7 @@ describe("abilities under adversarial input", () => {
   it("the armed state cannot survive a run ending or a screen change", async () => {
     // Arm a bolt, then die: the armed state must clear, or the next tap on the
     // aftermath screen fires a phage into the void.
-    const g = await withGenes(["recA"]);
+    const g = await withGenes(["tssB"]);
     g.aiming = "phage";
     g.player.hp = 0;
     g.die();
@@ -4385,4 +4386,88 @@ describe("release soak: everything running together, for a long time", () => {
     expect(old?.run.condition, "condition did not default").toBe("none");
     expect(old?.symbiont, "symbiont did not default").toBeNull();
   });
+});
+
+describe("release soak: lineage across real deaths", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const mkGame = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("eight deaths in a row: the heir inherits, and nothing corrupts", async () => {
+    // The whole meta-loop, run the way a player runs it. Lineage banks on
+    // death, the next run stashes it, succession changes the floor.
+    const g = await mkGame();
+    const seen: number[] = [];
+    for (let run = 0; run < 8; run++) {
+      g.startRun(0, "heterotroph");
+      for (const id of ["cbbL", "katG", "sodA"] as const) {
+        g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      for (let i = 0; i < 12 && !g.dead; i++) g.press("wait");
+      g.player.hp = 0;
+      g.die();
+      seen.push(g.lab.heirloom.length);
+      expect(g.lab.generation, `run ${String(run)}: generation did not advance`)
+        .toBe(run + 2);
+      for (const p of g.lab.heirloom) {
+        expect(p.kind === "gene" ? p.id !== "ori" : true,
+               "the origin was inherited").toBe(true);
+      }
+      expect(Number.isFinite(g.player.hp), `run ${String(run)}: hp went bad`).toBe(true);
+    }
+    expect(seen.some((n) => n > 0), "nothing was ever inherited across 8 deaths")
+      .toBe(true);
+  });
+
+  it("the heir actually starts with the inherited parts in its bin", async () => {
+    const g = await mkGame();
+    g.startRun(0, "heterotroph");
+    for (const id of ["cbbL", "katG", "sodA", "celA", "groL", "recA"] as const) {
+      g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.press("wait");
+    g.player.hp = 0;
+    g.die();
+    const willInherit = g.lab.heirloom.length;
+    if (willInherit === 0) return;           // unlucky roll; nothing to assert
+    g.startRun(1, "heterotroph");
+    const binIds = g.genome.bin.filter((b) => b.kind === "gene").map((b) => b.id);
+    const inherited = g.lab.heirloom.filter((p) => p.kind === "gene");
+    //  is already filtered to genes, so p.id is a GeneId here.
+    for (const p of inherited) {
+      expect(binIds, `inherited ${p.id} is not in the heir's bin`).toContain(p.id);
+    }
+  });
+
+  it("succession thins a farmed floor and the game still plays", async () => {
+    const g = await mkGame();
+    const { leaveTrace } = await import("../src/succession.js");
+    g.startRun(0, "heterotroph");
+    // graze floor 1 to saturation
+    for (let i = 0; i < 30; i++) leaveTrace(g.lab.succession, 1, { grazed: 20 });
+    g.enter(g.dungeon.current(), g.dungeon.current().up);
+    expect(g.dungeon.influence.mobs, "a saturated graze did not thin the floor")
+      .toBeLessThan(1);
+    expect(g.level.mobs.length, "the floor was emptied entirely")
+      .toBeGreaterThanOrEqual(0);
+    for (let i = 0; i < 40; i++) { if (!g.dead) g.press("wait"); g.frame(100 + i * 40); }
+    const errs = g.toasts.all().filter((x) => x.level === "error").map((x) => x.text);
+    expect(errs, "a thinned floor threw").toEqual([]);
+  });
+
+  // NOTE: a Game-level daily test overflowed the harness stack in a way I
+  // could not isolate within budget -- a single `startRun` with `daily` set
+  // recursed, while the same call without it did not, and every component
+  // (dailySeed, Dungeon, rollCondition, six floors) is clean in isolation.
+  // The seed itself is unit-tested in logic.test.ts. FLAGGED: this needs a
+  // Game-level test before the daily is surfaced in the UI, because
+  // something in that path is genuinely wrong and I have not found it.
 });

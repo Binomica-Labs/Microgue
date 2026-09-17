@@ -7,6 +7,8 @@
 // strain. Everything a run must forget from the last one, and everything a
 // floor must set up on arrival, lives here.
 
+import { dailySeed } from "./daily.js";
+import { influence, traceLine, traceOf } from "./succession.js";
 import { ambient } from "./audio.js";
 import { clearBiofilm } from "./biofilm.js";
 import type { Game } from "./main.js";
@@ -33,6 +35,13 @@ import { NAME_POOL, listSlots, loadSlot } from "./saves.js";
 import { cleanName, isBlank } from "./name_entry.js";
 
 export function g_enter(_g: Game, level: Level, arrive: Point): void {
+  // What past lineages left here changes what this floor holds. Set BEFORE
+  // the level is populated, or the influence applies to the next floor
+  // instead of this one. See succession.ts.
+  const tr = traceOf(_g.lab.succession, _g.dungeon.floor);
+  _g.dungeon.influence = influence(tr);
+  const line = traceLine(tr);
+  if (line) _g.note(line);
   // The ambient bed retunes to the stratum: bright at the surface, a low
   // rumble in the deep, silent in the lab.
   ambient(level.depth);
@@ -206,7 +215,9 @@ export function g_startRun(
     _g.applySave(existing);
     _g.note(`Resumed ${_g.runName}.`);
   } else {
-    const seed = (Date.now() & 0xffff) + slot;
+    // A daily run takes the day's column -- same layout, same condition,
+    // same organisms for everyone, everywhere, today. See daily.ts.
+    const seed = _g.daily ? dailySeed() : (Date.now() & 0xffff) + slot;
     _g.dungeon = new Dungeon(96, 96, seed);
     _g.genome = new Plasmid();
     _g.run = newRun();          // a new culture has seen nothing
@@ -227,6 +238,14 @@ export function g_startRun(
     _g.genome.integrated = Math.max(_g.lab.startSites + def.sites, 0);
     _g.genome.strain = _g.lab.startStrain;
     if (def.trait) _g.genome.acquire(def.trait);
+
+    // The inheritance, before the class kit: what the lineage passes down is
+    // the strain's history, and the class kit is this strain's own start.
+    for (const part of _g.lab.heirloom) _g.genome.stash(part);
+    if (_g.lab.heirloom.length > 0) {
+      _g.note(`Generation ${String(_g.lab.generation)}. `
+        + `${String(_g.lab.heirloom.length)} constructs inherited.`);
+    }
 
     // Its opening operon, laid down as a WORKING unit -- promoter, genes,
     // terminator -- not dropped in the bin for the player to assemble. The

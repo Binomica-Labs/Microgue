@@ -142,6 +142,8 @@ class Game {
    *  mob list, and it cannot change meaningfully between frames. */
   /** What a press is holding, across every non-world screen. See press.ts. */
   armed: Armed | null = null;
+  /** This run is the daily column. See daily.ts. */
+  daily = false;
   musicAt = -Infinity;
   musicThreat = 0;
   /** Territory claimed this floor -- see biofilm.ts. */

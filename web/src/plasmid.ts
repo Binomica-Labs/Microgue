@@ -14,10 +14,13 @@
 // Everything else -- substrate gating, oxygen lability, codon optimisation --
 // carries over from the previous flat model.
 
+import { satisfied } from "./crossfeed.js";
 import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
+import { p_atpBalance, p_atpCost, p_atpGain, p_wastedTranscription }
+  from "./plasmid_atp.js";
 import { p_transact } from "./plasmid_tx.js";
 import { b_install, b_stash, b_takeOne, b_uninstall } from "./bin.js";
-import { COMPLEXES, GENES, HAZARDS, energyYield, stratum,
+import { COMPLEXES, GENES, HAZARDS, stratum,
          type Complex, type GeneId, type Hazard } from "./biology.js";
 
 /** Re-exported from transcription.ts, which owns the ring model. There were
@@ -57,16 +60,14 @@ export const ATP_MAX = 100;
 // The part model lives in transcription.ts and the catalogue in parts.ts, so
 // adding a promoter, a terminator or a gene modifier does not touch this class.
 export type { Part } from "./transcription.js";
-import { CHLOROSOME, COST_PER_KB, GENERATORS, NEEDS, O2_LABILE, WASTE_PER_UNIT }
+import { CHLOROSOME, NEEDS, O2_LABILE }
   from "./metabolism.js";
 import { SLOTS, modEffect, transcribe, type Part } from "./transcription.js";
 import { WILD_TYPE, alleleEffect } from "./allele.js";
 import { buildOperon } from "./operon.js";
 import { rescueStranded } from "./stack.js";
-import { capacityFor, copiesFor, copyBurden,
-         dosage, slotsFor,
+import { capacityFor, copiesFor, dosage, slotsFor,
          type TraitId } from "./chromosome.js";
-import { TERMINATORS } from "./parts.js";
 import { bonusCapacityKb, bonusSlots } from "./strain.js";
 import { MAX_LEVEL, MODIFIERS, evolutionCost, levelMultiplier, modifierSlots,
          type Context, type ModifierId } from "./parts.js";
@@ -365,6 +366,28 @@ export class Plasmid {
   }
 
   private _inducers: ReadonlySet<string> = new Set();
+  /**
+   * Cofactors obtained this run, from lysate. See crossfeed.ts.
+   *
+   * PRIVATE with an explicit adder, because expression is cached and reads
+   * this: a public Set could be mutated without invalidating, and every
+   * downstream number would keep the old answer until something else
+   * happened to dirty the cache. The bug that shape produces is a gene that
+   * stays dark after you fed it.
+   */
+  private _cofactors = new Set<string>();
+  get cofactors(): ReadonlySet<string> { return this._cofactors; }
+  addCofactor(id: string): boolean {
+    if (this._cofactors.has(id)) return false;
+    this._cofactors.add(id);
+    this.invalidate();
+    return true;
+  }
+  clearCofactors(): void {
+    if (this._cofactors.size === 0) return;
+    this._cofactors.clear();
+    this.invalidate();
+  }
   get inducers(): ReadonlySet<string> { return this._inducers; }
   set inducers(v: ReadonlySet<string>) {
     // By CONTENT: upkeep rebuilds this set every turn, so a reference compare
@@ -494,7 +517,9 @@ export class Plasmid {
   private rev = 0;
   private memoOperons: { rev: number; value: Operon[] } | null = null;
   /** @internal: the energy setter clears this from outside the accessor. */
-  private memoAtp = new Map<string, number>();
+  /** Memo for the ATP figures. Not private: plasmid_atp.ts owns the
+   *  computation and shares this cache -- see that module. */
+  memoAtp = new Map<string, number>();
 
   /** Drop every memoised read. No origin check: the non-ring inputs
    *  (depth, inducers, strain) cannot lose it. */
@@ -625,6 +650,10 @@ export class Plasmid {
     // This is the cost that makes a symbiont a choice, not a stat.
     if (this.symbiont !== null
         && SYMBIONTS[this.symbiont].vetoes.includes(id)) return 0;
+    // Cross-feeding: a few deep genes need a cofactor only one organism
+    // makes. The gene installs and transcribes; it simply produces nothing
+    // until you have lysed the thing that supplies it. See crossfeed.ts.
+    if (!satisfied(id, this._cofactors)) return 0;
     // `supply` is public and set from an ATP division. Clamping it here means
     // one bad frame cannot make every downstream number NaN for the rest of
     // the run -- expression, power, vitality and combat all read through this.
@@ -632,106 +661,10 @@ export class Plasmid {
     return this.rawExpression(id, depth) * s;
   }
 
-  /** ATP drawn per action. Memoised: it depends only on the ring and the
-   *  depth, NOT on `supply`, because it is computed from rawExpression. */
-  atpCost(depth: number): number {
-    const key = `c${depth}`;
-    const hit = this.memoAtp.get(key);
-    if (hit !== undefined) return hit;
-    const v = this.computeAtpCost(depth);
-    this.memoAtp.set(key, v);
-    return v;
-  }
-
-  private computeAtpCost(depth: number): number {
-    let c = 0;
-    for (const p of this.slots) {
-      if (p?.kind !== "gene") continue;
-      const mods = modEffect(p.mods);
-      const allele = alleleEffect(p.allele);
-      c += this.rawExpression(p.id, depth) * GENES[p.id].kb * COST_PER_KB
-        * mods.upkeep * allele.upkeep;
-    }
-    // Replicating the plasmid is most of what carrying one costs, and a
-    // high-copy origin costs proportionally more.
-    c *= copyBurden(this.copies());
-    // Transcription that reads past the last gene of an operon is polymerase
-    // and nucleotide spent on nothing. THIS is why a terminator matters
-    // beyond isolating the next promoter: a leaky one wastes ATP every turn,
-    // for ever, and a tandem one is cheap to run as well as tight.
-    return c + this.wastedTranscription(depth);
-  }
-
-  /**
-   * ATP burned on transcription that produces no protein.
-   *
-   * Flow that survives the last gene in an operon and runs into a gap is real
-   * transcription with nothing downstream to translate. A hairpin leaks 38% of
-   * it; a tandem rrnB T1T2 leaks 2%.
-   */
-  wastedTranscription(depth: number): number {
-    let waste = 0;
-    for (const op of this.operons()) {
-      if (op.output <= 0) continue;
-      const last = op.genes[op.genes.length - 1];
-      const tail = last === undefined ? 1 : last.flow;
-      // What is still running after the final gene, times the promoter output.
-      let leak = tail;
-      // USABLE positions, not the array: `norm` wraps at `usableSlots`, so
-      // iterating to SLOTS walked an 8-slot ring three times and re-applied
-      // every terminator on each pass. Fifth bug from that same root.
-      for (let k = 1; k <= this.usableSlots; k++) {
-        const at = this.norm((last?.slot ?? op.promoter) + k);
-        const part = this.slots[at];
-        if (part === undefined || part === null) break;
-        if (part.kind === "promoter") break;
-        if (part.kind === "terminator") leak *= TERMINATORS[part.id].readthrough;
-        if (leak < 0.01) break;
-      }
-      waste += op.output * leak * WASTE_PER_UNIT;
-    }
-    void depth;
-    return waste;
-  }
-
-  /** ATP produced per action. Scaled by the stratum's energy yield, so the
-   *  same kit generates far less on the methanogenic floor than at the surface. */
-  atpGain(depth: number): number {
-    // The memo is keyed on depth and ring only, so the symbiont multiplier is
-    // applied OUTSIDE it -- caching it would return a stale value the moment
-    // the symbiont changed.
-    const key = `g${depth}`;
-    let base = this.memoAtp.get(key);
-    if (base === undefined) {
-      base = this.computeAtpGain(depth);
-      this.memoAtp.set(key, base);
-    }
-    return this.symbiont !== null ? base * SYMBIONTS[this.symbiont].atp : base;
-  }
-
-  private computeAtpGain(depth: number): number {
-    // Baseline fermentation. Raised from 1.2 when transcriptional waste became
-    // a real cost: the "never dead on arrival" invariant was passing with a
-    // margin of 0.005, which is not a margin. A starting cell should be
-    // clearly viable, not arithmetically viable.
-    let g = 1.6;
-    for (const p of this.slots) {
-      if (p?.kind !== "gene") continue;
-      const rate = GENERATORS[p.id];
-      if (rate !== undefined) g += rate * this.rawExpression(p.id, depth);
-    }
-    // The whole depth gradient lives here: the same proteome earns far less
-    // when CO2 is the only acceptor left than when O2 is.
-    // Floor and slope found by sweeping against a fixture of intended builds:
-    // every canonical respiration must pay for itself at its own depth, and
-    // every generator-free hoard must drain -- and drain harder the deeper it
-    // is carried.
-    return Math.max(g, 0) * (0.4 + 0.6 * energyYield(depth));
-  }
-
-  atpBalance(depth: number): number {
-    return this.atpGain(depth) - this.atpCost(depth);
-  }
+  atpCost(depth: number): number { return p_atpCost(this, depth); }
+  wastedTranscription(depth: number): number { return p_wastedTranscription(this, depth); }
+  atpGain(depth: number): number { return p_atpGain(this, depth); }
+  atpBalance(depth: number): number { return p_atpBalance(this, depth); }
 
   optimise(id: GeneId): Result {
     // Codon optimisation is one modifier among several now, so this is a thin

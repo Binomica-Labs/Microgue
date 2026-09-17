@@ -113,6 +113,7 @@ export const SOURCES: Partial<Record<GeneId, Source>> = {
   motA: { query: 'motA[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
   fliC: { query: 'fliC[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
   cheY: { query: 'cheY[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
+  tssB: { query: 'tssB[Gene] AND "Vibrio cholerae"[Organism]', organism: "Vibrio cholerae" },
   mcrA: { query: 'mcrA[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   hdrB: { query: 'hdrB[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   // oriV is a design element, not a locus. It has no NCBI record and must not

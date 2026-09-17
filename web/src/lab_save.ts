@@ -11,6 +11,7 @@ import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
 import { MAX_STRAIN } from "./strain.js";
 import { LEDGER_CAP, newLab, stockCap, type Lab, type RunRecord } from "./lab.js";
 import { MAX_FLOOR } from "./dungeon.js";
+import { newSuccession } from "./succession.js";
 
 export const LAB_KEY = "microgue:lab:v1";
 
@@ -66,6 +67,14 @@ export function parseLab(raw: unknown): Lab {
       : [],
     startSites,
     startStrain: Math.min(Math.max(Math.round(num(raw["startStrain"], 1)), 1), MAX_STRAIN),
+    // The heirloom is parts, and parts are validated by the plasmid loader;
+    // rather than duplicate that here a lab loads with an EMPTY heirloom and
+    // the next death refills it. One generation of inheritance is lost
+    // across a reload, which is a fair price for not having a second,
+    // divergent part parser.
+    heirloom: [],
+    generation: Math.max(Math.round(num(raw["generation"], 1)), 1),
+    succession: newSuccession(),   // regrows from play; not persisted
   };
 }
 

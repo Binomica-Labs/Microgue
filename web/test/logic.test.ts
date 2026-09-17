@@ -9656,3 +9656,282 @@ describe("nothing malformed reaches the player or the renderer", () => {
       .toBeGreaterThan(100);
   });
 });
+
+describe("lineage: death is a partial loss, not a reset", () => {
+  const gene = (id: bio.GeneId): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+
+  it("a deeper run passes down more", async () => {
+    const { survivalRate } = await import("../src/lineage.js");
+    expect(survivalRate(24), "a full descent inherits no more than a shallow one")
+      .toBeGreaterThan(survivalRate(1));
+    // never everything: a lineage that inherits perfectly is a save file
+    expect(survivalRate(24), "a deep run inherits everything").toBeLessThan(0.8);
+    expect(survivalRate(1), "a shallow run inherits nothing").toBeGreaterThan(0.2);
+    for (const f of [NaN, -5, 1e9, Infinity]) {
+      const r = survivalRate(f);
+      expect(Number.isFinite(r) && r > 0 && r < 1, `survivalRate(${String(f)})`).toBe(true);
+    }
+  });
+
+  it("inheritance keeps some, loses some, and never the origin", async () => {
+    const { inherit } = await import("../src/lineage.js");
+    const ring: (Part | null)[] = [gene("ori"), gene("cbbL"), gene("katG"), null];
+    const bin: Part[] = [gene("sodA"), { kind: "promoter", id: "j23106" }];
+    let keptAny = 0, lostAny = 0;
+    for (let s = 0; s < 200; s++) {
+      const h = inherit(ring, bin, 12, 2, makeRng(s));
+      expect(h.parts.some((p) => p.kind === "gene" && p.id === "ori"),
+             "the origin was inherited").toBe(false);
+      expect(h.parts.length + h.lost.length, "parts vanished from the accounting")
+        .toBe(4);
+      if (h.parts.length > 0) keptAny++;
+      if (h.lost.length > 0) lostAny++;
+      expect(h.generation).toBe(2);
+    }
+    expect(keptAny, "nothing is ever inherited").toBeGreaterThan(150);
+    expect(lostAny, "nothing is ever lost -- that is a save file").toBeGreaterThan(50);
+  });
+
+  it("genes survive better than regulatory parts", async () => {
+    // Losing a promoter costs a few floors; losing a deep gene costs a run.
+    const { inherit } = await import("../src/lineage.js");
+    const ring: (Part | null)[] = [gene("cbbL"), gene("katG"), gene("sodA")];
+    const bin: Part[] = [{ kind: "promoter", id: "j23106" },
+                         { kind: "terminator", id: "hairpin" },
+                         { kind: "promoter", id: "j23119" }];
+    let genes = 0, parts = 0;
+    for (let s = 0; s < 400; s++) {
+      const h = inherit(ring, bin, 12, 2, makeRng(s));
+      genes += h.parts.filter((p) => p.kind === "gene").length;
+      parts += h.parts.filter((p) => p.kind !== "gene").length;
+    }
+    expect(genes / 3, "genes did not survive better than parts")
+      .toBeGreaterThan(parts / 3);
+  });
+
+  it("a lineage erodes over generations rather than collapsing", async () => {
+    // The mechanic is a slope. A cliff is a reset with extra steps.
+    const { inherit } = await import("../src/lineage.js");
+    let carried: Part[] = ["cbbL", "katG", "sodA", "celA", "psbA", "groL"]
+      .map((g) => gene(g as bio.GeneId));
+    const sizes: number[] = [carried.length];
+    for (let g = 2; g <= 6; g++) {
+      const h = inherit(carried, [], 14, g, makeRng(g * 31));
+      carried = [...h.parts];
+      sizes.push(carried.length);
+    }
+    // it shrinks...
+    expect(sizes[sizes.length - 1] ?? 0, "a lineage never erodes")
+      .toBeLessThan(sizes[0] ?? 0);
+    // ...but does not vanish in one step
+    expect(sizes[1] ?? 0, "one death wiped the lineage").toBeGreaterThan(0);
+  });
+
+  it("degrade slides an allele down without destroying it", async () => {
+    const { degrade } = await import("../src/allele.js");
+    let down = 0, up = 0;
+    for (let s = 0; s < 400; s++) {
+      const d = degrade(WILD_TYPE, makeRng(s));
+      for (const v of [d.kcat, d.km, d.stability]) {
+        expect(Number.isFinite(v), "degrade produced a non-finite stat").toBe(true);
+        expect(v).toBeGreaterThan(0.3);
+        expect(v).toBeLessThan(3);
+      }
+      if (d.kcat < WILD_TYPE.kcat) down++; else up++;
+    }
+    expect(down, "degradation is not biased downward").toBeGreaterThan(up);
+  });
+});
+
+describe("succession: the column remembers", () => {
+  it("a trace changes what a floor holds, within bounds", async () => {
+    const { newSuccession, leaveTrace, traceOf, influence } = await import("../src/succession.js");
+    const s = newSuccession();
+    expect(influence(traceOf(s, 3)), "a virgin floor is not neutral")
+      .toEqual({ mobs: 1, loot: 1, substrate: 1 });
+    // graze it hard
+    for (let i = 0; i < 20; i++) leaveTrace(s, 3, { grazed: 10 });
+    const inf = influence(traceOf(s, 3));
+    expect(inf.mobs, "grazing did not thin the floor").toBeLessThan(1);
+    expect(inf.mobs, "grazing emptied the floor entirely").toBeGreaterThan(0.5);
+    // and it saturates rather than growing without bound
+    for (let i = 0; i < 200; i++) leaveTrace(s, 3, { grazed: 50 });
+    expect(influence(traceOf(s, 3)).mobs, "a floor became a wasteland")
+      .toBeGreaterThan(0.5);
+  });
+
+  it("traces decay, so farming one floor stops paying", async () => {
+    const { newSuccession, leaveTrace, traceOf, decay } = await import("../src/succession.js");
+    const s = newSuccession();
+    leaveTrace(s, 5, { grazed: 40, fouled: 40, settled: 40 });
+    const before = traceOf(s, 5).grazed;
+    for (let i = 0; i < 6; i++) decay(s);
+    expect(traceOf(s, 5).grazed, "a trace never fades").toBeLessThan(before * 0.3);
+    // and eventually the floor is forgotten entirely
+    for (let i = 0; i < 30; i++) decay(s);
+    expect(s.has(5), "an exhausted trace is still stored").toBe(false);
+  });
+
+  it("garbage floors and traces do not corrupt the record", async () => {
+    const { newSuccession, leaveTrace, traceOf, influence, decay } = await import("../src/succession.js");
+    const s = newSuccession();
+    for (const f of [NaN, Infinity, -1e9]) {
+      expect(() => { leaveTrace(s, f, { grazed: 5 }); }).not.toThrow();
+      const t = traceOf(s, f);
+      expect(Number.isFinite(t.grazed)).toBe(true);
+    }
+    leaveTrace(s, 2, { grazed: NaN, fouled: Infinity, settled: -50 });
+    const inf = influence(traceOf(s, 2));
+    for (const v of Object.values(inf)) expect(Number.isFinite(v)).toBe(true);
+    expect(() => { decay(s); }).not.toThrow();
+  });
+});
+
+describe("the daily column", () => {
+  it("everyone gets the same seed on the same day, a different one tomorrow", async () => {
+    const { dailySeed, dayNumber, dailyLabel } = await import("../src/daily.js");
+    const a = dailySeed(20260915), b = dailySeed(20260915);
+    expect(a, "the same day gave two different columns").toBe(b);
+    expect(dailySeed(20260916), "consecutive days share a column").not.toBe(a);
+    // consecutive days must differ a LOT, not by one bit -- the generator's
+    // low bits drive the early layout
+    let close = 0;
+    for (let d = 1; d <= 28; d++) {
+      const x = dailySeed(20260900 + d), y = dailySeed(20260900 + d + 1);
+      if (Math.abs(x - y) < 1000) close++;
+    }
+    expect(close, "consecutive days give near-identical columns").toBe(0);
+    expect(dailyLabel(20260915)).toBe("2026-09-15");
+    expect(Number.isFinite(dayNumber())).toBe(true);
+    for (const bad of [NaN, Infinity, -1]) {
+      expect(Number.isFinite(dailySeed(bad)), `dailySeed(${String(bad)})`).toBe(true);
+      expect(typeof dailyLabel(bad)).toBe("string");
+    }
+    expect(Number.isFinite(dayNumber(new Date(NaN)))).toBe(true);
+  });
+});
+
+describe("cross-feeding: the bestiary is a supply chain", () => {
+  it("a gated gene is silent until its cofactor is held", async () => {
+    const { satisfied, cofactorFor, REQUIRES } = await import("../src/crossfeed.js");
+    const gated = Object.keys(REQUIRES) as bio.GeneId[];
+    expect(gated.length, "nothing is gated").toBeGreaterThan(2);
+    for (const g of gated) {
+      expect(satisfied(g, new Set()), `${g} expressed with no cofactor`).toBe(false);
+      const cf = cofactorFor(g);
+      expect(cf, `${g} is gated on a cofactor that does not exist`).not.toBeNull();
+      if (cf) expect(satisfied(g, new Set([cf.id])), `${g} still gated when fed`).toBe(true);
+    }
+    // an ungated gene is never blocked
+    expect(satisfied("cbbL", new Set())).toBe(true);
+  });
+
+  it("every cofactor has a real source organism that exists in the game", async () => {
+    // A cofactor from an organism that never spawns is an unreachable gene.
+    const { COFACTORS, yieldsCofactor } = await import("../src/crossfeed.js");
+    for (const c of Object.values(COFACTORS)) {
+      const org = bio.MICROBES.find(
+        (m) => m.name.toLowerCase() === c.from.toLowerCase());
+      expect(org, `${c.name} comes from "${c.from}", which is not an organism`)
+        .toBeDefined();
+      expect(yieldsCofactor(c.from)?.id, "the lookup does not round-trip").toBe(c.id);
+    }
+    expect(yieldsCofactor("Chlorella"), "a plain organism yields a cofactor").toBeNull();
+    expect(yieldsCofactor(""), "an empty name yields something").toBeNull();
+  });
+
+  it("no gated gene is one a build REQUIRES to descend", async () => {
+    // The first version gated mcrA, dsrA and mtrC -- the workhorses of the
+    // deep strata -- and broke twenty tests. That was the balance telling
+    // the truth: gating a core metabolic route on a scavenger hunt is a
+    // worse game. Gated genes must stay peripheral.
+    const { REQUIRES } = await import("../src/crossfeed.js");
+    for (const g of ["mcrA", "dsrA", "mtrC", "psbA", "cbbL", "atpB"]) {
+      expect(g in REQUIRES, `${g} is a core route and must not be gated`).toBe(false);
+    }
+  });
+});
+
+describe("the lineage reaches equilibrium, not collapse or snowball", () => {
+  const g = (i: number): Part => ({
+    kind: "gene",
+    id: (["cbbL", "katG", "sodA", "celA", "psbA", "groL", "recA", "uvrA",
+          "mtrC", "dsrA"][i % 10] ?? "cbbL") as bio.GeneId,
+    level: 1, mods: [], allele: WILD_TYPE,
+  });
+
+  it("a player who finds genes each run holds a stable lineage over 15 deaths", async () => {
+    // The property that matters, and it is NOT "the lineage shrinks". A
+    // player adds genes every run; the question is whether inheritance plus
+    // acquisition settles somewhere. A first pass measured a player who
+    // finds NOTHING and read the resulting collapse as a bug -- it was the
+    // model being wrong, not the mechanic.
+    const { inherit } = await import("../src/lineage.js");
+    for (const found of [4, 6, 9]) {
+      let carried: Part[] = [];
+      const seq: number[] = [];
+      for (let gen = 1; gen <= 15; gen++) {
+        const atDeath = [...carried,
+          ...Array.from({ length: found }, (_, i) => g(i + gen))];
+        carried = [...inherit(atDeath, [], 10, gen + 1,
+                              makeRng(gen * 613 + found)).parts];
+        seq.push(carried.length);
+      }
+      const tail = seq.slice(-8);
+      const mean = tail.reduce((a, b) => a + b, 0) / tail.length;
+      expect(mean, `finding ${String(found)}/run collapses to ${mean.toFixed(1)}`)
+        .toBeGreaterThan(1.5);
+      expect(mean, `finding ${String(found)}/run snowballs to ${mean.toFixed(1)}`)
+        .toBeLessThan(found * 3);
+      // and it never hits zero and stays there
+      expect(seq.slice(-5).some((n) => n > 0),
+             `finding ${String(found)}/run went extinct`).toBe(true);
+    }
+  });
+
+  it("50 generations of lineage and succession chained produce no bad numbers", async () => {
+    // The systems feed each other -- lineage into the next run, succession
+    // into what that run finds. Neither had run chained before.
+    const { inherit } = await import("../src/lineage.js");
+    const { newSuccession, leaveTrace, decay, traceOf, influence } =
+      await import("../src/succession.js");
+    let carried: Part[] = Array.from({ length: 8 }, (_, i) => g(i));
+    const s = newSuccession();
+    for (let gen = 2; gen <= 50; gen++) {
+      const floor = 3 + (gen % 18);
+      carried = [...inherit([...carried, g(gen)], [], floor, gen,
+                            makeRng(gen * 977)).parts];
+      leaveTrace(s, floor, { grazed: 12, fouled: 5, settled: 6 });
+      decay(s);
+      for (const p of carried) {
+        if (p.kind !== "gene") continue;
+        for (const v of [p.allele.kcat, p.allele.km, p.allele.stability]) {
+          expect(Number.isFinite(v), `gen ${String(gen)}: non-finite allele`).toBe(true);
+          expect(v, `gen ${String(gen)}: allele ${String(v)} out of band`)
+            .toBeGreaterThan(0.2);
+          expect(v).toBeLessThan(4);
+        }
+      }
+      for (const v of Object.values(influence(traceOf(s, floor)))) {
+        expect(Number.isFinite(v) && v > 0 && v <= 3,
+               `gen ${String(gen)}: influence ${String(v)}`).toBe(true);
+      }
+    }
+    // the succession map does not grow without bound either
+    expect(s.size, "every floor ever visited is still tracked").toBeLessThan(25);
+  });
+
+  it("an allele cannot be driven to zero or infinity by repeated copying", async () => {
+    // degrade() compounds. Over a long lineage a multiplicative slide with
+    // no floor would reach zero and a gene would silently stop working.
+    const { degrade } = await import("../src/allele.js");
+    let a = WILD_TYPE;
+    for (let i = 0; i < 500; i++) a = degrade(a, makeRng(i));
+    for (const v of [a.kcat, a.km, a.stability]) {
+      expect(Number.isFinite(v), "500 copies produced a non-finite stat").toBe(true);
+      expect(v, `500 copies drove a stat to ${String(v)}`).toBeGreaterThanOrEqual(0.4);
+      expect(v).toBeLessThanOrEqual(2.5);
+    }
+  });
+});

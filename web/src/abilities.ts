@@ -57,10 +57,14 @@ export const ABILITIES: readonly Ability[] = [
       + "membrane, not fibre.",
   },
   {
-    id: "phage", name: "phage burst", gene: "recA", kind: "bolt",
+    // Phage is reserved for its own update -- lysogeny, CRISPR defence and
+    // horizontal transfer deserve a system, not a damage number. This is a
+    // contact-dependent killing machine instead: the Type VI secretion
+    // system, a spring-loaded spear real bacteria fire into neighbours.
+    id: "t6ss", name: "T6SS spear", gene: "tssB", kind: "bolt",
     cost: 10, cooldown: 6, power: 7, range: 5, linger: 0, glyph: "\u27A4",
-    note: "Release induced prophage in a line. Hits the first thing it "
-      + "reaches, up to five tiles out.",
+    note: "Fire a Type VI secretion spear in a line. Contact-dependent "
+      + "killing: it hits the first thing it reaches, up to five tiles out.",
   },
   {
     id: "sulfide", name: "sulfide release", gene: "dsrA", kind: "burst",

@@ -83,6 +83,13 @@ export const floorWithin = (floor: number): number =>
 
 export class Dungeon {
   readonly w: number; readonly h: number; readonly seed: number;
+  /**
+   * How the column's history changes a floor: fewer mobs where a lineage
+   * grazed, more loot where lysate settled. Set from the lab's succession
+   * record before a floor is populated; 1/1/1 is a virgin column. See
+   * succession.ts.
+   */
+  influence = { mobs: 1, loot: 1, substrate: 1 };
   private readonly cache = new Map<number, Level>();
   /** Floor within the whole column, 1..MAX_FLOOR. */
   floor = 1;
@@ -371,7 +378,8 @@ export class Dungeon {
     if (pool.length === 0) return;
     for (const room of lvl.rooms) {
       const style = ROOM_STYLE[room.kind];
-      for (let i = 0; i < style.guard; i++) {
+      const guard = Math.max(Math.round(style.guard * this.influence.mobs), 0);
+      for (let i = 0; i < guard; i++) {
         const t = room.tiles[rng.int(room.tiles.length)];
         if (!t) continue;
         const p = pickWeighted(pool, rng);
