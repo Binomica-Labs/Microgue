@@ -79,12 +79,18 @@ export function b_install(_p: Plasmid, binIndex: number, slot: number): Result {
     // would be counted twice by every dosage figure. Stacking lives in the
     // bin -- spares wait there -- so installing a gene that is already on the
     // ring is refused, unless it is displacing its own other copy.
+    // A gene sits on the ring ONCE -- two copies would be counted twice by
+    // every dosage figure. But REFUSING the install was the wrong way to
+    // enforce that: finding a better allele of a gene you already carry is
+    // the entire point of the loot loop, and "katG is already on the ring"
+    // told a player holding a rare +53% stability katG that their find was
+    // worthless. Swap instead: the incoming copy takes the slot the old one
+    // held, and the old one goes to the bin where it can be catabolised or
+    // kept as a spare. One copy on the ring, the player's choice honoured.
     if (part.kind === "gene" && part.id !== "ori") {
       const dup = _p.slots.findIndex(
         (s, i) => i !== slot && s?.kind === "gene" && s.id === part.id);
-      if (dup >= 0) {
-        return { ok: false, err: `${part.id} is already on the ring` };
-      }
+      if (dup >= 0) return b_install(_p, binIndex, dup);
     }
     // ONE copy off the stack, not the whole row. Splicing the row out put
     // three copies onto a single position and lost two of them.

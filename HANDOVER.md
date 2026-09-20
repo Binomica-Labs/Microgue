@@ -1,3 +1,25 @@
+## v1.40.1 — my own guard was blocking the loot loop
+
+Reported: holding a RARE ancestral katG (+53% stability), hit "install on
+the plasmid", got "katG is already on the ring" and nothing happened.
+
+That refusal is the duplicate guard I added in v1.21.1. It was right that a
+gene may sit on the ring only ONCE -- two copies are counted twice by every
+dosage figure -- but refusing the install was the wrong way to enforce it.
+Finding a better allele of a gene you already carry IS the loot loop, and
+the message told a player their rare find was worthless.
+
+Installing a gene already on the ring now SWAPS: the incoming copy takes the
+slot the old one held (whichever slot was aimed at), and the old copy
+returns to the bin as a spare to catabolise or keep. One copy on the ring,
+the player's intent honoured. Removing the swap is three failures.
+
+**The test enshrined the bug.** "installing a gene already on the ring is
+refused" passed for nineteen versions and was asserting the wrong thing --
+the invariant that matters is "one copy on the ring", not "no second
+install". A test can lock in a mistake as firmly as it locks in a fix, and
+a green suite is no evidence the behaviour is right.
+
 # v1.40.0 — the renderer was rewriting game state
 
 ## Three turns, one line

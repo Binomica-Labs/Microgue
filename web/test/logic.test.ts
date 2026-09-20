@@ -8195,26 +8195,37 @@ describe("a swarm encircles rather than stacking", () => {
 });
 
 describe("a gene sits on the ring once", () => {
-  it("installing a gene already on the ring is refused", () => {
-    // Found by the ability-bar soak: pick up a second celA cassette, install
-    // it into a different slot, and the ring held two copies. Every dosage
-    // figure -- expression, power, ATP -- counted it twice. b_install had no
-    // guard; the "installed twice" invariant existed but nothing enforced it
-    // at the door.
+  it("installing a gene you already carry SWAPS it, keeping one copy", () => {
+    // This test used to assert a REFUSAL, and the refusal was a bug: a
+    // player holding a rare katG with +53% stability was told "katG is
+    // already on the ring" and their find was worthless. Finding a better
+    // allele of a gene you already carry is the entire point of the loot
+    // loop. The invariant that matters is ONE copy on the ring, not "no
+    // second install" -- so the incoming copy takes the old one's slot and
+    // the old one returns to the bin.
     const p = new Plasmid();
     p.integrated = 8;
-    p.stash({ kind: "gene", id: "celA", level: 1, mods: [], allele: WILD_TYPE });
-    p.stash({ kind: "gene", id: "celA", level: 1, mods: [], allele: WILD_TYPE });
-    // A fresh bin holds default parts; find celA by id, and avoid the origin.
-    const celA = () => p.bin.findIndex((b) => b.kind === "gene" && b.id === "celA");
+    const wild: Part = { kind: "gene", id: "katG", level: 1, mods: [],
+                         allele: WILD_TYPE };
+    const better: Part = { kind: "gene", id: "katG", level: 1, mods: [],
+                           allele: { ...WILD_TYPE, stability: 1.53 } };
+    p.stash(wild);
     const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
-    const s1 = ori === 2 ? 3 : 2, s2 = ori === 4 ? 5 : 4;
-    expect(p.install(celA(), s1).ok, "first install refused").toBe(true);
-    const r = p.install(celA(), s2);
-    expect(r.ok, "a second copy was installed onto the ring").toBe(false);
-    if (!r.ok) expect(r.err).toMatch(/already on the ring/);
-    // and the spare is still in the bin, not lost
-    expect(celA() >= 0, "the refused copy vanished").toBe(true);
+    const s1 = ori === 2 ? 3 : 2;
+    const katG = (): number => p.bin.findIndex((b) => b.kind === "gene" && b.id === "katG");
+    expect(p.install(katG(), s1).ok, "the first install was refused").toBe(true);
+    p.stash(better);
+    // aimed at a DIFFERENT slot: it must still land on the one katG holds
+    const r = p.install(katG(), s1 + 2);
+    expect(r.ok, "installing a better allele was refused").toBe(true);
+    const onRing = p.slots.filter((s) => s?.kind === "gene" && s.id === "katG");
+    expect(onRing.length, "the swap left two copies on the ring").toBe(1);
+    const held = onRing[0];
+    expect(held?.kind === "gene" ? held.allele.stability : 0,
+           "the better allele did not take the slot").toBeCloseTo(1.53, 5);
+    // and the displaced copy is a spare, not destroyed
+    expect(katG() >= 0, "the old copy vanished instead of returning to the bin")
+      .toBe(true);
   });
 
   it("but a gene may replace its own slot", () => {
