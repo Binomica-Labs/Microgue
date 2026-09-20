@@ -43,6 +43,10 @@ export interface TurnWorld {
   readonly fissionChance?: number;
   /** Tiles a wandering mob must not settle on -- the stairs. */
   readonly stairs?: readonly { x: number; y: number }[];
+  /** How many mobs this floor generated with, for the relative growth cap.
+   *  Absent means "use the current count", which makes the first turn on a
+   *  floor the baseline -- fine for a caller that does not track it. */
+  readonly founding?: number;
   /** Whether a tile is biofilm: a mob stepping onto one is mired and forfeits
    *  the rest of its move. */
   readonly mired: (x: number, y: number) => boolean;
@@ -109,7 +113,15 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // and appended after the loop -- pushing into `w.mobs` while iterating
     // it would give the daughter a turn on the turn it was born.
     m.calm = (m.calm ?? 0) + 1;
-    if (divides(m.hp, m.maxhp, { population: alive + born.length, calm: m.calm },
+    // Kin within two tiles: the contact-inhibition term. Counted here
+    // rather than in fission.ts because it needs the world.
+    const kin = w.mobs.filter((o) => o.alive && o !== m && o.id === m.id
+      && chebyshev(o.x, o.y, m.x, m.y) <= 2).length
+      + born.filter((o) => o.id === m.id
+          && chebyshev(o.x, o.y, m.x, m.y) <= 2).length;
+    if (divides(m.hp, m.maxhp,
+                { population: alive + born.length, founding: w.founding ?? alive,
+                  calm: m.calm, kin },
                 w.rng, w.fissionChance ?? undefined)) {
       const spot = freeNeighbour(m, w, born);
       if (spot) {
@@ -165,7 +177,8 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       for (let s = 0; s < steps; s++) {
         const act = agendaMove(m, w, occupied, fp);
         if (!act) break;
-        m.heading = Math.atan2(act.y - m.y, act.x - m.x);
+        const nh = Math.atan2(act.y - m.y, act.x - m.x);
+        m.heading = nh;
         m.x = act.x; m.y = act.y;
         events.push({ kind: "move", mob: m });
       }
@@ -317,7 +330,15 @@ function daughterUid(w: TurnWorld, born: readonly Mob[]): number {
  *  holds a few hundred mobs, so this is unreachable by that counter. */
 const DAUGHTER_BASE = 1_000_000;
 
-/** A free tile beside a cell, for a daughter to occupy. */
+/**
+ * A free tile beside a cell, for a daughter to occupy.
+ *
+ * The daughter is a spread copy, so she inherits the parent's heading AND
+ * size -- and an elite's `block2` body rotates with that heading. Testing
+ * the candidate with anything else let an overgrown Desulfovibrio put a
+ * daughter's far tile inside rock. The occupancy predicate is the shared
+ * one, so stairs and newborns are covered here too.
+ */
 function freeNeighbour(m: Mob, w: TurnWorld, born: readonly Mob[]): Point | null {
   const fp = SIZES[m.size].footprint;
   for (let k = 0; k < 8; k++) {
@@ -336,8 +357,9 @@ function freeNeighbour(m: Mob, w: TurnWorld, born: readonly Mob[]): Point | null
     // Allochromatium overlap" was. Stairs count too -- the agenda path
     // learned that and fission had the same hole, one floor further on.
     let clash = false;
+    const taken = occupancy(w, m, born);
     for (const t of tilesOf(fp, x, y, m.heading)) {
-      if (w.stairs?.some((s) => s.x === t.x && s.y === t.y)) { clash = true; break; }
+      if (taken(t.x, t.y)) { clash = true; break; }
       if (w.mobs.some((o) => o.alive
             && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, t.x, t.y))
           || born.some((o) =>
@@ -417,6 +439,13 @@ function agendaMove(
     // a multi-tile body rotates as it turns, so testing with the stale
     // heading let a filament swing its far end into rock. behaviour.ts has
     // always done this; the agenda path had to as well.
+    // A rotating body (line3, block2) sweeps different tiles depending on
+    // its heading, and the move ASSIGNS a new heading -- so the tiles to
+    // validate are the ones it will occupy AFTER the turn, computed exactly
+    // as the assignment computes them. A 3-tile boss spawns with
+    // `heading: null` (horizontal); the first agenda step that pointed it
+    // vertically swung its far end through the wall, because the check and
+    // the assignment disagreed about which heading to use.
     const h = Math.atan2(y - m.y, x - m.x);
     for (const t of tilesOf(fp, x, y, h)) {
       // EVERY tile, against rock AND against other bodies -- a one-tile

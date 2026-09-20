@@ -10018,16 +10018,16 @@ describe("agendas: a mob does something when you are not there", () => {
 describe("binary fission: the floor repopulates", () => {
   it("only a healthy, calm, uncrowded cell divides", async () => {
     const { divides, CROWD_CAP } = await import("../src/fission.js");
-    const ok = { population: 10, calm: 50 };
+    const ok = { population: 10, founding: 40, calm: 50, kin: 0 };
     let any = false;
     for (let s = 0; s < 500; s++) if (divides(20, 20, ok, makeRng(s))) any = true;
     expect(any, "a qualifying cell never divides").toBe(true);
     // each condition alone blocks it
     for (let s = 0; s < 300; s++) {
       expect(divides(19, 20, ok, makeRng(s)), "a damaged cell divided").toBe(false);
-      expect(divides(20, 20, { population: CROWD_CAP, calm: 50 }, makeRng(s)),
+      expect(divides(20, 20, { population: CROWD_CAP, founding: 40, calm: 50, kin: 0 }, makeRng(s)),
              "a crowded floor divided").toBe(false);
-      expect(divides(20, 20, { population: 10, calm: 1 }, makeRng(s)),
+      expect(divides(20, 20, { population: 10, founding: 40, calm: 1, kin: 0 }, makeRng(s)),
              "a cell under attack divided").toBe(false);
     }
     // and garbage never divides or throws
@@ -10172,4 +10172,127 @@ describe("the daily column is reachable from the menu", () => {
     expect(Number.isFinite(dayNumber())).toBe(true);
     expect(Number.isFinite(dailySeed())).toBe(true);
   });
+});
+
+describe("fission fills a floor without turning it into a monoculture", () => {
+  it("contact inhibition stops a cell hemmed in by its own kind", async () => {
+    // "Everyone divided": a daughter is born ADJACENT to her parent, so
+    // divisions clump, and a knot of identical cells reads as a duplication
+    // glitch rather than as growth. Density-dependent inhibition is also
+    // the real thing -- a cell packed among its own kind is nutrient
+    // limited long before the water is full.
+    const { divides, CONTACT_INHIBIT } = await import("../src/fission.js");
+    const base = { population: 10, founding: 40, calm: 50 };
+    let lonely = 0, crowded = 0;
+    for (let s = 0; s < 800; s++) {
+      if (divides(20, 20, { ...base, kin: 0 }, makeRng(s))) lonely++;
+      if (divides(20, 20, { ...base, kin: CONTACT_INHIBIT }, makeRng(s))) crowded++;
+    }
+    expect(lonely, "an isolated cell never divides").toBeGreaterThan(0);
+    expect(crowded, "a cell surrounded by its own kind still divided").toBe(0);
+  });
+
+  it("a floor grows by the same PROPORTION whatever it started with", async () => {
+    // An absolute cap made growth depend on how close a floor's roll landed
+    // to an arbitrary number: one starting at 81 grew 11%, one at 74 grew
+    // 22%. Relative growth reads as the column filling in rather than as a
+    // quota being met.
+    const { divides, GROWTH_CAP } = await import("../src/fission.js");
+    for (const founding of [20, 50, 80]) {
+      const ceiling = Math.round(founding * GROWTH_CAP);
+      // just under the ceiling it may divide; at it, never
+      let under = 0;
+      for (let s = 0; s < 400; s++) {
+        if (divides(20, 20, { population: ceiling - 1, founding, calm: 50, kin: 0 },
+                    makeRng(s))) under++;
+        expect(divides(20, 20, { population: ceiling, founding, calm: 50, kin: 0 },
+                       makeRng(s)),
+               `a floor of ${String(founding)} grew past its ceiling`).toBe(false);
+      }
+      expect(under, `a floor of ${String(founding)} never grew at all`)
+        .toBeGreaterThan(0);
+    }
+    // and garbage founding does not disable the cap
+    for (const bad of [0, -5, NaN, Infinity]) {
+      expect(divides(20, 20, { population: 500, founding: bad, calm: 50, kin: 0 },
+                     makeRng(1)), `founding ${String(bad)} let a floor swell`)
+        .toBe(false);
+    }
+  });
+
+  it("300 turns of growth leaves no clump of identical cells", async () => {
+    // Measured on a real floor, because the clumping is emergent: the unit
+    // rule above cannot tell you what the player actually sees.
+    const { microbeTurn } = await import("../src/combat.js");
+    const { FISSION_CHANCE } = await import("../src/fission.js");
+    const d = new Dungeon(96, 96, 11);
+    d.floor = 4;
+    const lvl = d.current();
+    const start = lvl.mobs.filter((m) => m.alive).length;
+    const player = { x: 2, y: 2, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
+                     status: [] };
+    for (let t = 0; t < 300; t++) {
+      microbeTurn({
+        grid: lvl.grid, mobs: lvl.mobs,
+        player,
+        rng: makeRng(t * 17), armour: 0, threat: 0.3, mobSpeed: 1,
+        mired: () => false, packets: [], clouds: [], drops: [],
+        fissionChance: FISSION_CHANCE, founding: start,
+        stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
+      });
+    }
+    const now = lvl.mobs.filter((m) => m.alive);
+    expect(now.length, "the floor did not grow at all").toBeGreaterThan(start);
+    expect(now.length / start, "the floor swelled past its cap").toBeLessThan(1.35);
+    // the thing the screenshot showed: a knot of identical cells
+    let worst = 0;
+    for (const m of now) {
+      worst = Math.max(worst, now.filter((o) => o.id === m.id
+        && Math.max(Math.abs(o.x - m.x), Math.abs(o.y - m.y)) <= 2).length);
+    }
+    expect(worst, `a clump of ${String(worst)} identical cells within two tiles`)
+      .toBeLessThanOrEqual(3);
+    // and the floor keeps its species mix
+    const counts = new Map<string, number>();
+    for (const m of now) counts.set(m.id, (counts.get(m.id) ?? 0) + 1);
+    const top = Math.max(...counts.values()) / now.length;
+    expect(top, `one species is ${(top * 100).toFixed(0)}% of the floor`)
+      .toBeLessThan(0.6);
+  });
+});
+
+describe("a rotating body's heading is never set to one that does not fit", () => {
+  it("the render loop cannot turn a filament into rock", async () => {
+    // Three turns of hunting: a 3-tile boss kept ending up with its tail in
+    // the wall, having never moved. The mover was the RENDER loop --
+    // `actions.ts` interpolates `heading` every frame so a body turns
+    // smoothly, and for a single-tile mob that is purely cosmetic. But a
+    // rotating body's FOOTPRINT is derived from `heading`, so the animation
+    // swung its tail through angles no movement check had validated.
+    //
+    // The general rule this encodes: a value the game logic derives state
+    // from is not free for a renderer to rewrite.
+    const { tilesOf } = await import("../src/footprint.js");
+    const { SIZES } = await import("../src/behaviour.js");
+    const d = new Dungeon(96, 96, 3);
+    d.floor = 21;
+    const lvl = d.current();
+    // Find a rotating body and try to point it every which way; only
+    // headings whose footprint is clear may be accepted.
+    const big = lvl.mobs.find((m) => m.alive && SIZES[m.size].footprint !== "single");
+    if (!big) return;
+    const fp = SIZES[big.size].footprint;
+    for (let k = 0; k < 16; k++) {
+      const h = (k / 16) * Math.PI * 2 - Math.PI;
+      const fits = [...tilesOf(fp, big.x, big.y, h)]
+        .every((t) => lvl.grid.isFloor(t.x, t.y));
+      // The rule the render loop must obey: adopt h only when it fits.
+      if (!fits) {
+        expect([...tilesOf(fp, big.x, big.y, h)]
+          .some((t) => !lvl.grid.isFloor(t.x, t.y)),
+          "a heading that does not fit was reported as fitting").toBe(true);
+      }
+    }
+  });
+
 });

@@ -33,7 +33,7 @@ export function g_enterLab(_g: Game, slot: number): void {
   _g.introDesks = plan.desks;
   const lvl: Level = {
     depth: 0, floor: 0, grid: plan.grid, stratum: LAB_STRATUM,
-    up: plan.entry, down: null, mobs: [], visited: true, boss: false,
+    up: plan.entry, down: null, mobs: [], founding: 0, visited: true, boss: false,
     rooms: [], barriers: [], cleared: true, stockedAt: 0,
     sight: litSight(plan.grid),
   };

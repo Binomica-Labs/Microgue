@@ -894,7 +894,11 @@ describe("a damaged cell recovers between fights", () => {
     g.player.atp = g.player.atpMax;
     const hp0 = g.player.hp;
     const atp0 = g.player.atp;
-    for (let i = 0; i < 120; i++) g.press("wait");
+    // Stop as soon as repair is visible. 120 unconditional waits starved
+    // the strain to death before the assertion ran -- the test was measuring
+    // "does it survive 120 idle turns", which is a different question and
+    // one upkeep answers, not repair.
+    for (let i = 0; i < 120 && !g.dead && g.player.hp <= hp0; i++) g.press("wait");
     expect(g.player.hp, "no repair happened at all").toBeGreaterThan(hp0);
     expect(g.player.atp, "repair was free").toBeLessThan(atp0);
     expect(g.player.hp).toBeLessThanOrEqual(g.player.maxhp);
@@ -1922,7 +1926,8 @@ describe("a full descent holds together", () => {
       }
     }
     expect(g.dungeon.floor, "did not reach the bottom").toBe(MAX_FLOOR);
-    expect(g.toasts.all().filter((x) => x.level === "error"),
+    const dErrs = g.toasts.all().filter((x) => x.level === "error");
+    expect(dErrs,
            "an error surfaced during the descent").toEqual([]);
   });
 
@@ -4579,5 +4584,36 @@ describe("the daily column, from the menu", () => {
     const real = errs.filter((e) => !e.includes("storage is full or blocked"));
     expect(real, "a daily run threw while playing").toEqual([]);
     expect(d.clock.turn, "a daily run did not advance at all").toBeGreaterThan(0);
+  });
+});
+
+describe("rotating bodies stay legal through a whole descent", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a full descent leaves no body in rock or overlapping another", async () => {
+    // The end-to-end check. This is the test that caught it, and it caught
+    // it only because mobs started roaming -- the bug had been latent for
+    // as long as rotating bodies have existed.
+    const { Game } = await import("../src/main.js");
+    const { MAX_FLOOR } = await import("../src/dungeon.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0);
+    for (let floor = 1; floor <= MAX_FLOOR; floor++) {
+      for (let i = 0; i < 12; i++) {
+        g.player.hp = g.player.maxhp;
+        g.press("wait");
+        g.frame(100 + i * 40);
+      }
+      if (floor < MAX_FLOOR) { g.dungeon.floor = floor + 1;
+        g.enter(g.dungeon.current(), g.dungeon.current().up); }
+    }
+    const errs = g.toasts.all().filter((x) => x.level === "error")
+      .map((x) => x.text).filter((t) => !t.includes("storage is full"));
+    expect(errs, "a body ended the descent in an impossible place").toEqual([]);
   });
 });

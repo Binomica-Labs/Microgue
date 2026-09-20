@@ -8,6 +8,9 @@
 // and `t_explore`. What is left in turn.ts is the bookkeeping around an action:
 // stairs, pickup, world-building, repath.
 
+import { covers } from "./footprint.js";
+import { tilesOf } from "./footprint.js";
+import { SIZES } from "./behaviour.js";
 import { music, play, stopMusic } from "./audio.js";
 import { pentatonicOf, voicing } from "./music.js";
 import { lyse } from "./cast.js";
@@ -306,7 +309,39 @@ export function t_step_(_g: Game, t: number): void {
       if (Math.abs(m.y - m.ay) < 0.02) m.ay = m.y;
       const mh = headingOf(m.x - m.ax, m.y - m.ay);
       if (mh !== null) {
-        m.heading = m.heading === null ? mh : turnToward(m.heading, mh, TURN * dt);
+        // This is the RENDER heading, interpolated every frame so a body
+        // turns smoothly rather than snapping. For a single-tile mob that is
+        // purely cosmetic -- but a rotating body's FOOTPRINT is derived from
+        // `heading`, so a filament sweeping from horizontal to vertical
+        // passed through angles no movement check ever validated and put its
+        // tail in rock. The turn code checks the tiles for the heading it
+        // ASSIGNS; this loop then moved the heading somewhere else entirely.
+        //
+        // Multi-tile bodies therefore snap to the travel direction, which is
+        // always a heading the mover already proved legal. Only the
+        // cosmetic, single-tile case interpolates.
+        // ...and even the snapped value is derived from the ANIMATED
+        // position (`ax`,`ay`), which lags the logical one, so it can point
+        // somewhere the body does not actually fit either. For a rotating
+        // body the only safe heading is one whose footprint is clear on the
+        // real grid; anything else is a cosmetic preference that corrupts
+        // the world.
+        const rotates = SIZES[m.size].footprint !== "single";
+        if (!rotates) {
+          m.heading = m.heading === null ? mh : turnToward(m.heading, mh, TURN * dt);
+        } else {
+          // Floor AND bodies: a turn that swings a filament's tail through
+          // a neighbour is the same corruption as swinging it into rock,
+          // and the invariants (rightly) call both a broken world.
+          let ok = true;
+          for (const t of tilesOf(SIZES[m.size].footprint, m.x, m.y, mh)) {
+            if (!_g.level.grid.isFloor(t.x, t.y)) { ok = false; break; }
+            const clash = _g.level.mobs.some((o) => o.alive && o !== m
+              && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, t.x, t.y));
+            if (clash) { ok = false; break; }
+          }
+          if (ok) m.heading = mh;
+        }
       }
     }
 

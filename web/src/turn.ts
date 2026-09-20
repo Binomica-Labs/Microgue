@@ -176,7 +176,13 @@ export function t_audit(_g: Game): void {
   if (_g.dead) return;
     const v = firstViolation(_g.world());
     if (!v) return;
-    _g.toasts.push(`invariant: ${v.name} — ${v.detail}`, "error", _g.now);
+    // The FLOOR, because an invariant that fires during a descent is read
+    // after the descent ends, and I spent a turn hammering floor 24 for a
+    // violation that happened on 21. A diagnostic that omits where it
+    // happened sends you to the wrong place.
+    _g.toasts.push(
+      `invariant [F${String(_g.dungeon.floor)}]: ${v.name} — ${v.detail}`,
+      "error", _g.now);
   }
 
 export function t_world(_g: Game): WorldView {
@@ -356,6 +362,10 @@ export function t_mobTurn(_g: Game): void {
       // faster and an oligotrophic column almost not at all.
       drops: _g.drops,
       fissionChance: chanceUnder(_g.run.condition),
+      // The floor's own starting population is the baseline it may grow
+      // from, so growth is the same proportion on a sparse floor and a
+      // dense one. See fission.ts.
+      founding: _g.level.founding,
       // `up` is always present; `down` is null on the last floor, which is
       // why one of these needs the guard and the other does not.
       stairs: _g.level.down ? [_g.level.up, _g.level.down] : [_g.level.up],

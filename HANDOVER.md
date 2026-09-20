@@ -1,3 +1,46 @@
+# v1.40.0 — the renderer was rewriting game state
+
+## Three turns, one line
+
+A 3-tile boss kept ending up with its tail in rock, having never moved. I
+ruled out, by measurement: bad spawn (300 seeds), fission (uid below the
+daughter range), elite promotion (does not resize), the agenda mover
+(instrumented -- never fired), stale level objects, grid mutation, `mired`,
+and every path in combat.ts. The mob was already illegal when its turn
+began and nothing moved it.
+
+The mover was `actions.ts`, in the FRAME loop:
+
+    m.heading = turnToward(m.heading, mh, TURN * dt);
+
+An animation interpolating `heading` every frame so a body turns smoothly.
+For a single-tile mob that is purely cosmetic -- but a rotating body's
+FOOTPRINT is derived from `heading`, so a filament sweeping from horizontal
+to vertical swung its tail through angles no movement check had ever
+validated.
+
+**A value the game logic derives state from is not free for a renderer to
+rewrite.** Rotating bodies now only adopt a heading whose footprint is clear
+of rock AND of other bodies; single-tile mobs still interpolate, because for
+them it really is only a picture. Removing the guard is three failures.
+
+The bug had been latent for as long as rotating bodies have existed. It took
+roaming mobs (v1.39) to make a filament turn often enough to hit it.
+
+## The diagnostic that cost a turn
+
+The invariant toast said which rule broke and not WHERE. I hammered floor 24
+-- where the descent test ends -- for a full turn before discovering the
+violation happened on floor 21. Invariant messages now carry the floor.
+
+## What I would do differently
+
+Three times I proposed a cause, "fixed" it, and moved on without confirming
+the violation count dropped. Twice the fix had not even landed. And I tested
+a stale build for a full cycle because a debug line had a type error. When a
+fix does not change the count, the theory is wrong OR the patch did not
+apply -- check which before theorising again.
+
 ## v1.39.1 — the daily bug was already fixed, and the test was the loss
 
 v1.38 flagged an unresolved stack overflow in the daily path, removed the

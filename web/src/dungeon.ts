@@ -48,6 +48,9 @@ export interface Level {
   /** Set once a boss floor is populated, for the arrival message. */
   bossName?: string;
   up: Point; down: Point | null; mobs: Mob[]; visited: boolean;
+  /** How many mobs this floor generated with. Fission grows a floor
+   *  relative to this, not to an absolute number. */
+  founding: number;
   /** What has been lit, and what is remembered, for this level. */
   sight: Sight;
 }
@@ -135,7 +138,7 @@ export class Dungeon {
     const down = floor < MAX_FLOOR ? mg.farthestFrom(grid, up) : null;
 
     const lvl: Level = { depth, floor, grid, stratum: s, up, down, mobs: [],
-                         visited: false, boss: isBossFloor(floor),
+                         founding: 0, visited: false, boss: isBossFloor(floor),
                          // Rooms sealed off by the connectivity sweep are gone.
                          rooms: rooms.filter((r) => grid.isFloor(r.cx, r.cy)),
                          barriers: [],
@@ -192,7 +195,14 @@ export class Dungeon {
    */
   private canPlace(lvl: Level, size: Size, x: number, y: number): boolean {
     const fp = SIZES[size].footprint;
-    const want = tilesOf(fp, x, y, null);
+    // A rotating body (line3) must fit in BOTH orientations, not just the
+    // horizontal one `null` implies. Placement validated only the flat
+    // layout, so a 3-tile boss was placed legally and became illegal the
+    // moment anything gave it a heading -- which nothing did until mobs
+    // started roaming. Checking both makes the spot genuinely safe to turn
+    // around in, which is what a body that can turn needs.
+    const want = [...tilesOf(fp, x, y, null),
+                  ...tilesOf(fp, x, y, Math.PI / 2)];
     for (const t of want) {
       if (!lvl.grid.isFloor(t.x, t.y)) return false;
       // Never on a stair. On the last floor there is no way down, so
@@ -389,6 +399,9 @@ export class Dungeon {
       }
       room.stocked = true;
     }
+    // The baseline the relative growth cap measures against, recorded once
+    // the floor is fully populated.
+    lvl.founding = lvl.mobs.filter((m) => m.alive).length;
   }
 
   private placeBoss(lvl: Level, rng: Rng): void {
