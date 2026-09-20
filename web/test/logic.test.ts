@@ -10307,3 +10307,86 @@ describe("a rotating body's heading is never set to one that does not fit", () =
   });
 
 });
+
+describe("mobs lose interest: the floor does not empty into a knot", () => {
+  it("a walking player does not collect a permanent escort", async () => {
+    // Reported as "crazily populated all of a sudden". The cause was a
+    // RATCHET: mobs wander in on their agendas, switch to pursuit the
+    // moment they sense you, and pursue for ever. Diffusion in, directed
+    // pursuit that never releases -- so every mob that ever came near
+    // accumulated. Measured before the fix: five crowding the player and
+    // climbing.
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, 11);
+    d.floor = 1;
+    const lvl = d.current();
+    const start = lvl.mobs.filter((m) => m.alive).length;
+    const player = { x: lvl.up.x, y: lvl.up.y, hp: 99999, maxhp: 99999,
+                     atp: 50, atpMax: 100, status: [] };
+    const rng = makeRng(5);
+    // Counted DURING the run: `bored` decays every turn, so a snapshot at
+    // the end sees none of it.
+    const everBored = new Set<number>();
+    for (let t = 0; t <= 600; t++) {
+      for (let k = 0; k < 4; k++) {
+        const nx = player.x + rng.int(3) - 1, ny = player.y + rng.int(3) - 1;
+        if (lvl.grid.isFloor(nx, ny)) { player.x = nx; player.y = ny; break; }
+      }
+      microbeTurn({
+        grid: lvl.grid, mobs: lvl.mobs,
+        player,
+        rng: makeRng(t * 13), armour: 1, threat: 0.3, mobSpeed: 1,
+        mired: () => false, packets: [], clouds: [], drops: [], founding: start,
+        stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
+      });
+      for (const m of lvl.mobs) if ((m.bored ?? 0) > 0) everBored.add(m.uid);
+    }
+    // Assert the MECHANISM, not the emergent count. The crowding figure
+    // moves by one or two between configurations -- real, but too small to
+    // tell a working guard from a lucky seed. Whether mobs disengage at all
+    // is unambiguous: without adaptation it is exactly zero, for ever.
+    expect(everBored.size, "no mob ever lost interest -- pursuit is a ratchet")
+      .toBeGreaterThan(0);
+    const crowding = lvl.mobs.filter((m) => m.alive
+      && Math.max(Math.abs(m.x - player.x), Math.abs(m.y - player.y)) <= 4).length;
+    expect(crowding, `${String(crowding)} mobs crowding the player after 600 turns`)
+      .toBeLessThanOrEqual(5);
+    // ...but the floor is not empty around you either: some pressure IS the
+    // game, and a fix that made mobs ignore you would be worse than the bug.
+    const inSight = lvl.mobs.filter((m) => m.alive
+      && Math.max(Math.abs(m.x - player.x), Math.abs(m.y - player.y)) <= 12).length;
+    expect(inSight, "nothing is near the player at all -- the floor ignores you")
+      .toBeGreaterThan(0);
+  });
+
+  it("a mob that is landing hits never loses interest", async () => {
+    // The adaptation must only ever fire on something that CANNOT reach
+    // you. A fight that breaks off because a timer expired would be worse
+    // than the crowding it fixes.
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, 4);
+    d.floor = 2;
+    const lvl = d.current();
+    const proto = lvl.mobs.find((m) => m.alive);
+    if (!proto) return;
+    // put one mob right beside a stationary player and let it work
+    lvl.mobs.length = 0;
+    const px = proto.x + 4, py = proto.y;
+    if (!lvl.grid.isFloor(px, py)) return;
+    lvl.mobs.push({ ...proto, x: px - 1, y: py, ax: px - 1, ay: py,
+                    alive: true, hp: 999, maxhp: 999, behaviour: "chase" });
+    const player = { x: px, y: py, hp: 99999, maxhp: 99999, atp: 50,
+                     atpMax: 100, status: [] };
+    let strikes = 0;
+    for (let t = 0; t < 120; t++) {
+      for (const e of microbeTurn({
+        grid: lvl.grid, mobs: lvl.mobs,
+        player,
+        rng: makeRng(t * 3), armour: 1, threat: 0.5, mobSpeed: 1,
+        mired: () => false, packets: [], clouds: [], drops: [],
+        stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
+      })) if (e.kind === "strike") strikes++;
+    }
+    expect(strikes, "an adjacent attacker gave up mid-fight").toBeGreaterThan(10);
+  });
+});

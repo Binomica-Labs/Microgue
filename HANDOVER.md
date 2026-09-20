@@ -1,3 +1,45 @@
+# v1.41.0 — mobs lose interest; pursuit was a ratchet
+
+Reported: "crazily populated all of a sudden" -- a mixed knot of six mobs
+crowding the player on F1.
+
+Not fission this time. Measured: a walking player collected THIRTEEN
+followers over six hundred turns and kept six. The mechanism is a ratchet.
+Mobs wander in on their agendas (v1.39), switch to pursuit the moment they
+sense the player, and pursue for ever -- diffusion in, directed pursuit that
+never releases. Every mob that ever came near accumulated, so the floor
+slowly emptied itself into a clot around whoever was moving.
+
+## Sensory adaptation
+
+Real chemotaxis adapts: receptors methylate and a cell stops responding to a
+signal it cannot resolve. A mob that has chased for 10 turns WITHOUT landing
+a hit loses interest and ignores the player for 40 turns. Landing a hit
+resets the clock, so this only ever fires on something that cannot reach you
+-- a fight is never interrupted, which `spec` pins separately.
+
+**Disengaging alone made it worse** (nine followers, not six). A bored mob
+fell back on an agenda that wanders near wherever it already is, so it
+milled about the player anyway. It has to LEAVE: on disengaging it takes a
+patrol target sixteen tiles away on the far side, and swims there. A cell
+that gives up on a gradient swims down it.
+
+Tuned by measurement, not feel: chase 26 left three crowding, 14 left four,
+10 leaves two against a baseline of five.
+
+## A test that could not tell the fix from a lucky seed
+
+My first version asserted the crowding count, which moves by one or two
+between configurations -- it passed with the guard removed. The emergent
+number was too weak a signal. It asserts the MECHANISM now: how many mobs
+ever disengage, which is exactly zero without adaptation and dozens with it.
+
+And the first mechanism version sampled `bored` at the END of the run, by
+which time every timer had expired -- zero either way. Counted during the
+run instead. **Two ways to write a test that cannot fail, in one sitting:
+measure an emergent quantity with a small effect size, or sample a decaying
+value after it has decayed.**
+
 ## v1.40.1 — my own guard was blocking the loot loop
 
 Reported: holding a RARE ancestral katG (+53% stability), hit "install on

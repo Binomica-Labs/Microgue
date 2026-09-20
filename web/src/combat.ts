@@ -167,7 +167,44 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     //
     // Now an unaware mob takes its own turn: it lives its life (forage,
     // patrol, rest, divide) and skips only the combat half.
-    const aware = dist <= senseRange(m.behaviour) || m.behaviour === "sessile";
+    // SENSORY ADAPTATION. Mobs latched on and never let go: a wandering
+    // cell drifted into sense range, switched to pursuit, and pursued
+    // forever. Measured, a walking player collected thirteen followers over
+    // six hundred turns and kept six of them -- the floor emptied itself
+    // into a knot around whoever was moving. Diffusion in, directed pursuit
+    // that never releases, is a ratchet.
+    //
+    // Real chemotaxis adapts: receptors methylate and a cell stops
+    // responding to a signal it cannot resolve. A mob that has chased
+    // fruitlessly for CHASE_LIMIT turns loses interest and goes back to its
+    // own life for BORED_TURNS, during which it does not sense the player at
+    // all. Landing a hit resets the clock -- something that is actually
+    // catching you has no reason to give up.
+    m.bored = Math.max((m.bored ?? 0) - 1, 0);
+    const senses = dist <= senseRange(m.behaviour) || m.behaviour === "sessile";
+    if (senses && m.bored === 0) {
+      m.chase = (m.chase ?? 0) + 1;
+      if (m.chase > CHASE_LIMIT) {
+        m.bored = BORED_TURNS;
+        m.chase = 0;
+        // ...and it LEAVES. Simply not chasing was not enough: a bored mob
+        // fell back on an agenda that wanders near wherever it already is,
+        // so it milled about the player anyway and the knot kept growing
+        // (nine followers instead of six). A cell that has given up on a
+        // gradient swims away from it. Point the agenda at somewhere far
+        // on the far side, so disengaging actually disperses the floor.
+        const ax = m.x - w.player.x, ay = m.y - w.player.y;
+        const len = Math.hypot(ax, ay) || 1;
+        const tx = Math.round(m.x + (ax / len) * 16);
+        const ty = Math.round(m.y + (ay / len) * 16);
+        m.agenda = { kind: "patrol",
+                     target: w.grid.isFloor(tx, ty) ? { x: tx, y: ty } : null,
+                     ttl: BORED_TURNS };
+      }
+    } else if (!senses) {
+      m.chase = 0;
+    }
+    const aware = senses && m.bored === 0;
     if (!aware) {
       const budget = { banked: m.banked ?? 0 };
       const steps = speedTick(budget,
@@ -234,6 +271,7 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       const dmg = Math.max(Math.round(m.atk * 0.55 * w.armour), 1);
       w.player.hp = Math.max(w.player.hp - dmg, 0);
       events.push({ kind: "strike", mob: m, dmg });
+      m.chase = 0;            // it is catching you; no reason to give up
 
       const inflict = INFLICTS[m.id];
       if (inflict !== undefined && w.rng.next() < 0.35) {
@@ -329,6 +367,15 @@ function daughterUid(w: TurnWorld, born: readonly Mob[]): number {
 /** Where daughter uids start. The dungeon issues from 1 upward and a floor
  *  holds a few hundred mobs, so this is unreachable by that counter. */
 const DAUGHTER_BASE = 1_000_000;
+
+/** Turns of FRUITLESS pursuit before a mob loses interest. A mob that lands
+ *  a hit resets this, so a real fight is never interrupted -- this only ever
+ *  fires on something that cannot reach you. Tuned by measurement: 26 left
+ *  three followers crowding the player, 10 leaves two. */
+const CHASE_LIMIT = 10;
+
+/** How long it stays disengaged. Long enough to actually lose you. */
+const BORED_TURNS = 40;
 
 /**
  * A free tile beside a cell, for a daughter to occupy.
