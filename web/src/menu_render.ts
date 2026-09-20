@@ -6,6 +6,7 @@
 // without the renderer knowing what a tap means.
 
 import { mainRows, type Confirm, type MenuMode } from "./menu.js";
+import { dailyLabel } from "./daily.js";
 import { CREDIT_LINE } from "./credits.js";
 import type { SlotInfo } from "./saves.js";
 import type { Box, Insets } from "./chrome.js";
@@ -63,6 +64,7 @@ function row(
 
 const LABEL: Record<MenuMode, string> = {
   main: "", newGame: "New Game", continue: "Continue", settings: "Settings",
+  daily: "Daily Column",
 };
 
 export function drawMenu(
@@ -120,11 +122,18 @@ export function drawMenu(
     });
   }
 
-  if (mode === "newGame" || mode === "continue") {
+  if (mode === "newGame" || mode === "continue" || mode === "daily") {
     ctx.textAlign = "center";
     ctx.fillStyle = DIM;
     ctx.font = `${10 * u}px ui-monospace,monospace`;
-    ctx.fillText(mode === "newGame"
+    if (mode === "daily") {
+      ctx.fillStyle = "#cfe04a";
+      ctx.font = `${9 * u}px ui-monospace,monospace`;
+      ctx.fillText(`today's column \u00b7 ${dailyLabel()}`, W / 2, top + 12 * u);
+      ctx.fillStyle = DIM;
+      ctx.font = `${10 * u}px ui-monospace,monospace`;
+    }
+    ctx.fillText(mode === "newGame" || mode === "daily"
       ? "choose a slot to inoculate"
       : "choose a strain to continue, or delete one",
       W / 2, top);

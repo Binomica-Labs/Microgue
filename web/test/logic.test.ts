@@ -9935,3 +9935,241 @@ describe("the lineage reaches equilibrium, not collapse or snowball", () => {
     }
   });
 });
+
+describe("agendas: a mob does something when you are not there", () => {
+  it("every behaviour gets an agenda, and they are not all the same", async () => {
+    // Six of ten behaviours used to return null out of sense range and
+    // FREEZE until the player came back. The mapping is per-behaviour so a
+    // floor's idle life looks different per species without per-species
+    // code: a sessile filament rests, a glider holds surface.
+    const { defaultAgenda } = await import("../src/agenda.js");
+    const kinds = new Set<string>();
+    for (const b of ["chase", "glide", "drift", "hunt", "ambush", "flank",
+                     "leech", "sessile", "wire", "swarm"]) {
+      const seen = new Set<string>();
+      for (let s = 0; s < 60; s++) seen.add(defaultAgenda(b, makeRng(s)));
+      expect(seen.size, `${b} has only one possible agenda`).toBeGreaterThan(1);
+      for (const k of seen) {
+        expect(["forage", "patrol", "rest", "divide"], `${b} -> ${k}`).toContain(k);
+        kinds.add(k);
+      }
+    }
+    expect(kinds.size, "every behaviour lands on the same agendas")
+      .toBeGreaterThanOrEqual(3);
+    // a sessile thing never patrols or forages: it cannot move
+    for (let s = 0; s < 60; s++) {
+      expect(["rest", "divide"]).toContain(defaultAgenda("sessile", makeRng(s)));
+    }
+  });
+
+  it("an agenda expires so a mob does not pursue one goal for ever", async () => {
+    const { newAgenda, ageAgenda } = await import("../src/agenda.js");
+    const a = newAgenda("drift", makeRng(1));
+    expect(a.ttl, "an agenda starts expired").toBeGreaterThan(0);
+    let turns = 0;
+    while (!ageAgenda(a) && turns < 500) turns++;
+    expect(turns, "an agenda never expires").toBeLessThan(40);
+    expect(turns, "an agenda expires immediately").toBeGreaterThan(2);
+  });
+
+  it("resting holds still; foraging moves toward its goal", async () => {
+    const { agendaStep } = await import("../src/agenda.js");
+    const free = (): boolean => true;
+    const rest = { kind: "rest" as const, target: null, ttl: 10 };
+    for (let s = 0; s < 40; s++) {
+      expect(agendaStep(rest, { x: 5, y: 5 }, { x: 9, y: 9 }, makeRng(s), free),
+             "a resting cell moved").toBeNull();
+    }
+    // toward a goal: most steps close the distance
+    const forage = { kind: "forage" as const, target: null, ttl: 10 };
+    let closer = 0, total = 0;
+    for (let s = 0; s < 200; s++) {
+      const step = agendaStep(forage, { x: 5, y: 5 }, { x: 15, y: 15 }, makeRng(s), free);
+      if (!step) continue;
+      total++;
+      if (Math.max(Math.abs(step.x - 15), Math.abs(step.y - 15)) < 10) closer++;
+    }
+    expect(total, "a forager never moved").toBeGreaterThan(50);
+    expect(closer / total, "foraging does not approach its goal").toBeGreaterThan(0.6);
+  });
+
+  it("an agenda never walks into rock, and survives garbage", async () => {
+    const { agendaStep, newAgenda } = await import("../src/agenda.js");
+    const walled = (): boolean => false;
+    for (const kind of ["forage", "patrol", "divide"] as const) {
+      const a = { kind, target: { x: 20, y: 20 }, ttl: 5 };
+      for (let s = 0; s < 60; s++) {
+        expect(agendaStep(a, { x: 5, y: 5 }, null, makeRng(s), walled),
+               `${kind} moved into rock`).toBeNull();
+      }
+    }
+    // garbage coordinates do not produce a non-finite step
+    const a = newAgenda("drift", makeRng(2));
+    for (const at of [{ x: NaN, y: 0 }, { x: Infinity, y: -Infinity }]) {
+      const step = agendaStep(a, at, { x: 1, y: 1 }, makeRng(3), () => true);
+      if (step) {
+        expect(Number.isFinite(step.x) && Number.isFinite(step.y),
+               "an agenda produced a non-finite step").toBe(true);
+      }
+    }
+  });
+});
+
+describe("binary fission: the floor repopulates", () => {
+  it("only a healthy, calm, uncrowded cell divides", async () => {
+    const { divides, CROWD_CAP } = await import("../src/fission.js");
+    const ok = { population: 10, calm: 50 };
+    let any = false;
+    for (let s = 0; s < 500; s++) if (divides(20, 20, ok, makeRng(s))) any = true;
+    expect(any, "a qualifying cell never divides").toBe(true);
+    // each condition alone blocks it
+    for (let s = 0; s < 300; s++) {
+      expect(divides(19, 20, ok, makeRng(s)), "a damaged cell divided").toBe(false);
+      expect(divides(20, 20, { population: CROWD_CAP, calm: 50 }, makeRng(s)),
+             "a crowded floor divided").toBe(false);
+      expect(divides(20, 20, { population: 10, calm: 1 }, makeRng(s)),
+             "a cell under attack divided").toBe(false);
+    }
+    // and garbage never divides or throws
+    for (const [hp, mx] of [[NaN, 10], [10, NaN], [10, 0], [10, -5]] as const) {
+      expect(divides(hp, mx, ok, makeRng(1)), `divides(${String(hp)},${String(mx)})`)
+        .toBe(false);
+    }
+  });
+
+  it("the split halves the parent: doubling makes more targets, not tougher ones", async () => {
+    const { partition } = await import("../src/fission.js");
+    for (const mx of [2, 7, 20, 100]) {
+      const p = partition(mx);
+      expect(p.parent + p.daughter, `maxhp ${String(mx)} gained health from splitting`)
+        .toBeLessThanOrEqual(mx + 1);
+      expect(p.parent, "a daughter or parent has no health").toBeGreaterThan(0);
+      expect(p.daughter).toBeGreaterThan(0);
+    }
+    for (const bad of [0, -5, NaN, Infinity]) {
+      const p = partition(bad);
+      expect(Number.isFinite(p.parent) && p.parent > 0, `partition(${String(bad)})`)
+        .toBe(true);
+    }
+  });
+
+  it("a bloom speeds doubling and an oligotrophic column nearly stops it", async () => {
+    const { chanceUnder, FISSION_CHANCE } = await import("../src/fission.js");
+    expect(chanceUnder("bloom"), "a bloom does not bloom")
+      .toBeGreaterThan(FISSION_CHANCE);
+    expect(chanceUnder("oligotrophic"), "a starved column doubles normally")
+      .toBeLessThan(FISSION_CHANCE);
+    expect(chanceUnder("none")).toBe(FISSION_CHANCE);
+    expect(chanceUnder("nonsense"), "an unknown condition changed the rate")
+      .toBe(FISSION_CHANCE);
+    // never certain, never impossible
+    for (const c of ["bloom", "oligotrophic", "none", "anoxic"]) {
+      const p = chanceUnder(c);
+      expect(p).toBeGreaterThan(0);
+      expect(p).toBeLessThan(0.2);
+    }
+  });
+});
+
+describe("mobs live their lives when the player is nowhere near", () => {
+  it("a floor with the player far away still moves, and repopulates", async () => {
+    // THE property this whole system exists for, and it needed a fix
+    // upstream of everything: mobs out of sense range were `continue`d past
+    // entirely, so wiring agendas into decideStep's null case changed
+    // nothing at all. Measured end to end rather than asserted.
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, 11);
+    d.floor = 4;
+    const lvl = d.current();
+    const player = { x: 2, y: 2, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
+                     status: [] };
+    const start = new Map(lvl.mobs.filter((m) => m.alive)
+      .map((m) => [m.uid, `${String(m.x)},${String(m.y)}`]));
+    expect(start.size, "no mobs to watch").toBeGreaterThan(20);
+    for (let t = 0; t < 200; t++) {
+      microbeTurn({
+        grid: lvl.grid, mobs: lvl.mobs,
+        player,
+        rng: makeRng(t * 17), armour: 0, threat: 0.3, mobSpeed: 1,
+        mired: () => false, packets: [], clouds: [], drops: [],
+        fissionChance: 0.004,
+      });
+    }
+    let moved = 0;
+    const kinds = new Set<string>();
+    for (const m of lvl.mobs) {
+      if (!m.alive) continue;
+      const was = start.get(m.uid);
+      if (was !== undefined && `${String(m.x)},${String(m.y)}` !== was) moved++;
+      const k = m.agenda?.kind;
+      if (k !== undefined) kinds.add(k);
+    }
+    expect(moved / start.size, `only ${String(moved)}/${String(start.size)} mobs `
+      + "moved on their own -- the floor is frozen").toBeGreaterThan(0.8);
+    expect(kinds.size, "every mob picked the same agenda").toBeGreaterThan(1);
+    // and fission repopulated it
+    expect(lvl.mobs.filter((m) => m.alive).length,
+           "the floor never grew").toBeGreaterThan(start.size);
+  });
+
+  it("an unaware mob never drifts onto the player or another body", async () => {
+    // Agendas move mobs the combat code never looked at, so the occupancy
+    // rules have to hold on that path too.
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, 5);
+    d.floor = 6;
+    const lvl = d.current();
+    const player = { x: 48, y: 48, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
+                     status: [] };
+    for (let t = 0; t < 150; t++) {
+      microbeTurn({
+        grid: lvl.grid, mobs: lvl.mobs,
+        player,
+        rng: makeRng(t * 31), armour: 0, threat: 0.2, mobSpeed: 1,
+        mired: () => false, packets: [], clouds: [], drops: [],
+        fissionChance: 0.01,
+      });
+      const seen = new Set<string>();
+      for (const m of lvl.mobs) {
+        if (!m.alive) continue;
+        expect(lvl.grid.isFloor(m.x, m.y),
+               `turn ${String(t)}: ${m.name} stands in rock`).toBe(true);
+        expect(m.x === player.x && m.y === player.y,
+               `turn ${String(t)}: ${m.name} stands on the player`).toBe(false);
+        const k = `${String(m.x)},${String(m.y)}`;
+        expect(seen.has(k), `turn ${String(t)}: two bodies at ${k}`).toBe(false);
+        seen.add(k);
+      }
+    }
+  });
+});
+
+describe("the daily column is reachable from the menu", () => {
+  it("the main menu offers it, with and without a save", async () => {
+    const { mainRows } = await import("../src/menu.js");
+    for (const hasSave of [true, false]) {
+      const rows = mainRows(hasSave);
+      expect(rows, `no daily row (hasSave=${String(hasSave)})`).toContain("daily");
+      expect(rows.indexOf("daily"), "the daily is not next to New Game")
+        .toBe(rows.indexOf("newGame") + 1);
+    }
+  });
+
+  it("the Date stub that hid this bug cannot recurse again", async () => {
+    // `new Date()` inside the test harness used to call the STUB, which
+    // called `new Date(0)`, which was the stub again -- infinite recursion.
+    // Nothing in the game had ever constructed a Date, so it lay dormant
+    // until dailySeed() did, and surfaced as "the daily feature overflows
+    // the stack". The game was never broken. This asserts the harness is
+    // sane: a constructed Date must be a real one.
+    const d = new Date();
+    expect(d instanceof Date, "the Date stub does not produce a Date").toBe(true);
+    expect(Number.isFinite(d.getTime()), "a stubbed Date has no time").toBe(true);
+    expect(Number.isFinite(new Date(0).getTime())).toBe(true);
+    expect(Number.isFinite(Date.now())).toBe(true);
+    // and the thing that tripped over it works
+    const { dailySeed, dayNumber } = await import("../src/daily.js");
+    expect(Number.isFinite(dayNumber())).toBe(true);
+    expect(Number.isFinite(dailySeed())).toBe(true);
+  });
+});

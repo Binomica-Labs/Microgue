@@ -10,6 +10,7 @@
 // If entity kinds pass roughly six AND their behaviours genuinely cross-cut,
 // revisit. Until then this is strictly safer.
 
+import type { Agenda } from "./agenda.js";
 import type { GeneId } from "./biology.js";
 import type { Facing } from "./motion.js";
 import type { Status } from "./status.js";
@@ -61,6 +62,10 @@ export interface Microbe extends Body {
   lastIntent?: string;
   /** ms of the last hit taken, for the flinch. See life.ts. */
   hurtAt?: number;
+  /** What this cell does when nothing is hunting it. See agenda.ts. */
+  agenda?: Agenda;
+  /** Turns since it last took damage. Fission needs a calm cell. */
+  calm?: number;
   /** Turns until it may fire again, and how long it has been winding up. */
   reload: number;
   charging: number;

@@ -245,6 +245,7 @@ export function t_exploreStep(_g: Game): void {
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 
 import { play } from "./audio.js";
+import { chanceUnder } from "./fission.js";
 import { tickSecretions } from "./cast.js";
 import type { Intent } from "./combat.js";
 
@@ -351,6 +352,13 @@ export function t_mobTurn(_g: Game): void {
       threat: Math.min(_g.genome.power(_g.dungeon.depth)
         / (2 + _g.dungeon.depth), 1),
       mobSpeed: CONDITIONS[_g.run.condition].mobSpeed,
+      // Foragers walk toward substrate; a bloom makes the floor double
+      // faster and an oligotrophic column almost not at all.
+      drops: _g.drops,
+      fissionChance: chanceUnder(_g.run.condition),
+      // `up` is always present; `down` is null on the last floor, which is
+      // why one of these needs the guard and the other does not.
+      stairs: _g.level.down ? [_g.level.up, _g.level.down] : [_g.level.up],
       mired: (x, y) => isBiofilm(_g.biofilm, _g.dungeon.floor, x, y),
       packets: _g.packets,
       clouds: _g.clouds,
@@ -388,6 +396,14 @@ export function t_mobTurn(_g: Game): void {
         _g.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
                                    _g.turnSeed + e.mob.y));
         _g.lastAttacker = e.mob.name;
+      } else if (e.kind === "divide") {
+        // A cell splitting in view is the most characteristic thing a
+        // bacterium does; it should not happen silently.
+        if (isVisible(_g.level.sight, e.mob.x, e.mob.y)) {
+          _g.fx.add({ kind: "ring", t0: _g.now, dur: 420, x: e.mob.x, y: e.mob.y,
+                      colour: "#bfe8c8", r: 0.9 });
+          _g.note(`The ${e.mob.name} divides.`);
+        }
       } else if (e.kind === "intent" && e.intent) {
         // A posture change, said once: the reactive AI is only interesting if
         // you can READ it. A floating word over the mob and a log line.

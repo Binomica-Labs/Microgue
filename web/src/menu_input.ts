@@ -102,7 +102,10 @@ export function i_menuTap(_g: Game, x: number, y: number): void {
   if (hit?.slot === undefined) return;
   const slot = hit.slot;
 
-  if (m.mode === "newGame") {
+  if (m.mode === "newGame" || m.mode === "daily") {
+    // The daily is a new game on today's column: same slot rules, same
+    // overwrite warning, but the run takes the day's seed. See daily.ts.
+    _g.daily = m.mode === "daily";
     // A used slot warns before it is overwritten; an empty one goes straight
     // to the choice (or the lab, if it is ever re-enabled).
     if (loadSlot(slot)) {
@@ -116,6 +119,7 @@ export function i_menuTap(_g: Game, x: number, y: number): void {
   }
 
   if (m.mode === "continue") {
+    _g.daily = false;                 // a resume is whatever it was
     if (hit.del) {
       m.confirm = { kind: "delete", slot };
     } else if (loadSlot(slot)) {

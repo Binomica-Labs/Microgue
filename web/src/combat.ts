@@ -4,11 +4,13 @@
 // Everything here takes its world explicitly rather than reaching for game
 // state, which is what makes it testable without a canvas.
 
+import { divides, partition } from "./fission.js";
+import { ageAgenda, agendaStep, newAgenda } from "./agenda.js";
 import { canStrike, chebyshev, decideStep, senseRange, SIZES } from "./behaviour.js";
 import { speedOf, tick as speedTick } from "./speed.js";
 import { covers, tilesOf } from "./footprint.js";
 import type { Mob } from "./dungeon.js";
-import type { Grid } from "./mapgen.js";
+import type { Grid, Point } from "./mapgen.js";
 import type { Rng } from "./rng.js";
 import { apply, haste, tick, type Status, type StatusId } from "./status.js";
 import { WEAPONS, lineOfSight } from "./weapons.js";
@@ -33,6 +35,14 @@ export interface TurnWorld {
   readonly threat: number;
   /** Mob action-speed multiplier from the run condition, x1 neutral. */
   readonly mobSpeed: number;
+  /** Floor drops, so a forager can walk a gradient toward substrate.
+   *  Optional: a caller that does not supply them gets patrol-style
+   *  wandering, which is a graceful degradation, not a bug. */
+  readonly drops?: readonly { x: number; y: number }[];
+  /** Per-turn fission chance; a bloom raises it. See fission.ts. */
+  readonly fissionChance?: number;
+  /** Tiles a wandering mob must not settle on -- the stairs. */
+  readonly stairs?: readonly { x: number; y: number }[];
   /** Whether a tile is biofilm: a mob stepping onto one is mired and forfeits
    *  the rest of its move. */
   readonly mired: (x: number, y: number) => boolean;
@@ -51,7 +61,7 @@ export interface TurnEvent {
    * no adaptation from any of its kills.
    */
   readonly kind: "strike" | "move" | "status" | "charge" | "fire" | "died"
-    | "intent";
+    | "intent" | "divide";
   readonly mob: Mob;
   readonly dmg?: number;
   readonly status?: StatusId;
@@ -88,9 +98,34 @@ export function occupiedBy(mobs: readonly Mob[], x: number, y: number): boolean 
  *  can attach effects without this module knowing anything about rendering. */
 export function microbeTurn(w: TurnWorld): TurnEvent[] {
   const events: TurnEvent[] = [];
+  const born: Mob[] = [];
+  const alive = w.mobs.filter((o) => o.alive).length;
 
   for (const m of w.mobs) {
     if (!m.alive) continue;
+
+    // Binary fission: the thing a bacterium is actually for. A well-fed,
+    // undamaged, undisturbed cell with room DOUBLES. Collected into `born`
+    // and appended after the loop -- pushing into `w.mobs` while iterating
+    // it would give the daughter a turn on the turn it was born.
+    m.calm = (m.calm ?? 0) + 1;
+    if (divides(m.hp, m.maxhp, { population: alive + born.length, calm: m.calm },
+                w.rng, w.fissionChance ?? undefined)) {
+      const spot = freeNeighbour(m, w, born);
+      if (spot) {
+        const share = partition(m.maxhp);
+        m.hp = share.parent;
+        m.calm = 0;
+        // A fresh agenda, not the parent's: two daughters that behave
+        // identically read as a duplication glitch rather than as life.
+        const d: Mob = { ...m, uid: daughterUid(w, born), x: spot.x, y: spot.y,
+                         ax: spot.x, ay: spot.y, hp: share.daughter,
+                         calm: 0, banked: 0, status: [],
+                         agenda: newAgenda(m.behaviour, w.rng) };
+        born.push(d);
+        events.push({ kind: "divide", mob: m, at: spot });
+      }
+    }
 
     // Status effects resolve first: a poisoned microbe still takes damage.
     const selfDmg = tick(m.status);
@@ -112,7 +147,30 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     const fp = SIZES[m.size].footprint;
     const dist = Math.min(...tilesOf(fp, m.x, m.y, m.heading)
       .map((t) => chebyshev(t.x, t.y, w.player.x, w.player.y)));
-    if (dist > senseRange(m.behaviour) && m.behaviour !== "sessile") continue;
+    // Out of sense range, a mob used to be SKIPPED entirely -- it did not
+    // move, did not age its agenda, did nothing at all until the player
+    // walked close enough. That is the freeze the agenda layer exists to
+    // fix, and it sits upstream of every behaviour, so wiring agendas into
+    // `decideStep`'s null case alone changed nothing.
+    //
+    // Now an unaware mob takes its own turn: it lives its life (forage,
+    // patrol, rest, divide) and skips only the combat half.
+    const aware = dist <= senseRange(m.behaviour) || m.behaviour === "sessile";
+    if (!aware) {
+      const budget = { banked: m.banked ?? 0 };
+      const steps = speedTick(budget,
+        speedOf(m.behaviour, m.size) * w.mobSpeed, haste(m.status));
+      m.banked = budget.banked;
+      const occupied = occupancy(w, m, born);
+      for (let s = 0; s < steps; s++) {
+        const act = agendaMove(m, w, occupied, fp);
+        if (!act) break;
+        m.heading = Math.atan2(act.y - m.y, act.x - m.x);
+        m.x = act.x; m.y = act.y;
+        events.push({ kind: "move", mob: m });
+      }
+      continue;
+    }
 
     // Ranged weapons resolve before contact. A speargun winds up first, and
     // that wind-up is the only warning you get.
@@ -185,6 +243,13 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     const allyList = w.mobs.filter(
       (o) => o.alive && o !== m && o.id === m.id && chebyshev(o.x, o.y, m.x, m.y) <= 3);
     const allies = allyList.length;
+    // One occupancy test, shared by the combat decision and the agenda --
+    // two copies would drift and a mob would walk through another.
+    // Pending daughters count as occupants: they are on the floor from the
+    // moment they are born, but they are not in `w.mobs` until the loop
+    // ends. Without them here, a cell that moved later in the same turn
+    // walked straight onto a newborn.
+    const occupied = occupancy(w, m, born);
     for (let s = 0; s < steps; s++) {
     const step = decideStep(
       m.behaviour, { x: m.x, y: m.y },
@@ -192,18 +257,25 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
         hpFrac: m.maxhp > 0 ? m.hp / m.maxhp : 1, threat: w.threat,
         allyAt: allyList.map((o) => ({ x: o.x, y: o.y })) },
       w.grid, w.rng,
-      (x, y) => (x === w.player.x && y === w.player.y)
-        || w.mobs.some((o) => o.alive && o !== m
-             && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y)),
+      occupied,
       fp);
 
-    if (!step) break;
+    // Combat first, agenda second. If nothing about the player moved this
+    // cell, it goes back to its own life -- foraging, patrolling, resting,
+    // looking for room to divide. Six behaviours used to return null here
+    // and simply FREEZE until the player came back, which is a monster
+    // waiting for a hero rather than an organism. See agenda.ts.
+    const act = step ?? agendaMove(m, w, occupied, fp);
+
+    if (!act) break;
     // Read the posture off the step: closing, holding distance, or opening.
     const dBefore = chebyshev(m.x, m.y, w.player.x, w.player.y);
-    const dAfter = chebyshev(step.x, step.y, w.player.x, w.player.y);
-    const intent = intentOf(m, dBefore, dAfter);
-    m.heading = Math.atan2(step.y - m.y, step.x - m.x);
-    m.x = step.x; m.y = step.y;
+    const dAfter = chebyshev(act.x, act.y, w.player.x, w.player.y);
+    // Only a COMBAT step has a posture worth announcing. A cell wandering
+    // toward a substrate patch is not "circling you".
+    const intent = step ? intentOf(m, dBefore, dAfter) : null;
+    m.heading = Math.atan2(act.y - m.y, act.x - m.x);
+    m.x = act.x; m.y = act.y;
     events.push({ kind: "move", mob: m });
     if (intent !== null && intent !== m.lastIntent) {
       m.lastIntent = intent;
@@ -216,7 +288,69 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     }
   }
 
+  for (const d of born) w.mobs.push(d);
   return events;
+}
+
+/**
+ * A uid for a daughter that cannot collide with any live mob's.
+ *
+ * The dungeon's own counter is not reachable here and a duplicate uid is
+ * not cosmetic -- lunge offsets, life phase and the intent memo are all
+ * keyed by it, so two cells sharing one would animate as a single organism.
+ */
+function daughterUid(w: TurnWorld, born: readonly Mob[]): number {
+  // max+1 over the LIVING mobs is not enough: the dungeon keeps its own
+  // counter and will issue that number later for a spawn, and a dead mob's
+  // uid is still referenced by effects in flight. Daughters take a separate
+  // high range that the dungeon's sequential counter cannot reach in a run.
+  // ...and `born` must be counted too: daughters are appended AFTER the
+  // loop, so two divisions in one turn both saw the same max and took the
+  // same uid.
+  let max = DAUGHTER_BASE;
+  for (const o of w.mobs) if (o.uid >= DAUGHTER_BASE) max = Math.max(max, o.uid);
+  for (const o of born) if (o.uid >= DAUGHTER_BASE) max = Math.max(max, o.uid);
+  return max + 1;
+}
+
+/** Where daughter uids start. The dungeon issues from 1 upward and a floor
+ *  holds a few hundred mobs, so this is unreachable by that counter. */
+const DAUGHTER_BASE = 1_000_000;
+
+/** A free tile beside a cell, for a daughter to occupy. */
+function freeNeighbour(m: Mob, w: TurnWorld, born: readonly Mob[]): Point | null {
+  const fp = SIZES[m.size].footprint;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    const x = m.x + Math.round(Math.cos(a)), y = m.y + Math.round(Math.sin(a));
+    if (x === m.x && y === m.y) continue;
+    if (x === w.player.x && y === w.player.y) continue;
+    let ok = true;
+    for (const t of tilesOf(fp, x, y, m.heading)) {
+      if (!w.grid.isFloor(t.x, t.y)) { ok = false; break; }
+    }
+    if (!ok) continue;
+    // EVERY tile of the daughter's own footprint must be clear, not just
+    // its centre. A block2 organism is 2x2: checking one tile let a large
+    // daughter be born half-inside its neighbour, which is what "two
+    // Allochromatium overlap" was. Stairs count too -- the agenda path
+    // learned that and fission had the same hole, one floor further on.
+    let clash = false;
+    for (const t of tilesOf(fp, x, y, m.heading)) {
+      if (w.stairs?.some((s) => s.x === t.x && s.y === t.y)) { clash = true; break; }
+      if (w.mobs.some((o) => o.alive
+            && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, t.x, t.y))
+          || born.some((o) =>
+            covers(SIZES[o.size].footprint, o.x, o.y, o.heading, t.x, t.y))
+          || (t.x === w.player.x && t.y === w.player.y)) {
+        clash = true;
+        break;
+      }
+    }
+    if (clash) continue;
+    return { x, y };
+  }
+  return null;
 }
 
 /**
@@ -240,4 +374,81 @@ function intentOf(m: Mob, dBefore: number, dAfter: number): Intent | null {
     case "chase": case "glide": case "drift": case "sessile": case "wire":
       return null;                      // no posture to announce
   }
+}
+
+/**
+ * The step a mob's own agenda wants, when combat wants nothing.
+ *
+ * Built here rather than in agenda.ts because it needs the world: the grid
+ * to test walkability, and (for foraging) the nearest substrate drop. The
+ * agenda itself is stored on the mob and rerolled when it expires.
+ */
+function agendaMove(
+  m: Mob, w: TurnWorld, occupied: (x: number, y: number) => boolean,
+  fp: ReturnType<typeof tilesOf> extends never ? never : Parameters<typeof covers>[0],
+): Point | null {
+  m.agenda ??= newAgenda(m.behaviour, w.rng);
+  if (ageAgenda(m.agenda)) m.agenda = newAgenda(m.behaviour, w.rng);
+  const a = m.agenda;
+
+  // A forager is drawn to the nearest substrate it can reach; everything
+  // else walks its own remembered point.
+  let toward: Point | null = null;
+  if (a.kind === "forage") {
+    let best = Infinity;
+    for (const d of w.drops ?? []) {
+      const dist = chebyshev(d.x, d.y, m.x, m.y);
+      if (dist < best && dist <= 14) { best = dist; toward = { x: d.x, y: d.y }; }
+    }
+  }
+  if (!toward && a.target === null) {
+    // Pick somewhere to be. A patrol point near where it already is, so a
+    // mob stays in its own region rather than crossing the whole floor.
+    const rx = m.x + w.rng.int(13) - 6, ry = m.y + w.rng.int(13) - 6;
+    if (w.grid.isFloor(rx, ry)) a.target = { x: rx, y: ry };
+  }
+  if (a.target && chebyshev(a.target.x, a.target.y, m.x, m.y) <= 1) {
+    a.target = null;                         // arrived; pick a new one
+  }
+
+  const free = (x: number, y: number): boolean => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    // The heading a mob would have AFTER the step, not the one it has now:
+    // a multi-tile body rotates as it turns, so testing with the stale
+    // heading let a filament swing its far end into rock. behaviour.ts has
+    // always done this; the agenda path had to as well.
+    const h = Math.atan2(y - m.y, x - m.x);
+    for (const t of tilesOf(fp, x, y, h)) {
+      // EVERY tile, against rock AND against other bodies -- a one-tile
+      // occupancy test let two large cells overlap at their edges.
+      if (!w.grid.isFloor(t.x, t.y)) return false;
+      if (occupied(t.x, t.y)) return false;
+      // Stairs stay clear. They were only kept clear at SPAWN, because
+      // nothing had ever walked far enough on its own to reach one -- the
+      // agendas made a latent rule into a visible violation.
+      if (w.stairs?.some((s) => s.x === t.x && s.y === t.y)) return false;
+    }
+    return true;
+  };
+  return agendaStep(a, { x: m.x, y: m.y }, toward, w.rng, free);
+}
+
+/**
+ * Is a tile taken? One definition, shared by every path that moves a body.
+ *
+ * There were two copies -- one for the combat step, one for the unaware
+ * agenda step -- and they DIVERGED: the agenda copy learned that stairs are
+ * off-limits and the combat copy did not, so a hunting mob could still end
+ * a turn standing on the way down. Two predicates for one rule is a bug
+ * waiting for whichever copy gets updated alone.
+ */
+function occupancy(
+  w: TurnWorld, self: Mob, born: readonly Mob[],
+): (x: number, y: number) => boolean {
+  return (x, y) => (x === w.player.x && y === w.player.y)
+    || w.stairs?.some((s) => s.x === x && s.y === y) === true
+    || w.mobs.some((o) => o.alive && o !== self
+         && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y))
+    || born.some((o) => o !== self
+         && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y));
 }

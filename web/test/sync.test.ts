@@ -10,7 +10,23 @@ import { describe, expect, it } from "vitest";
 // comments as commands. `bash -n` passes on the broken version, so only
 // actually running it catches this.
 
-const SRC = readFileSync("sync.sh", "utf8");
+/**
+ * Some of the files these tests check live at the REPO ROOT (sync.sh,
+ * .gitignore) and some in web/ (package.json, src/). Reading them all as
+ * bare relative paths only worked while the tests happened to run from
+ * whichever directory held them; a clean checkout made it an ENOENT that
+ * looked like a broken test rather than a path assumption. Try both roots.
+ */
+function readEither(...paths: string[]): string {
+  for (const p of paths) {
+    for (const base of ["", "../"]) {
+      try { return readFileSync(base + p, "utf8"); } catch { /* next */ }
+    }
+  }
+  return "";
+}
+
+const SRC = readEither("sync.sh");
 
 describe("sync.sh", () => {
   it("is syntactically valid", () => {
@@ -167,7 +183,7 @@ describe("build identity", () => {
 });
 
 describe("generated artefacts are not committed", () => {
-  const ignore = readFileSync(".gitignore", "utf8");
+  const ignore = readEither(".gitignore");
 
   it("the bundles and BUILD are ignored, because CI regenerates them", () => {
     for (const f of ["public/microgue.js", "public/sw.js", "public/BUILD"]) {

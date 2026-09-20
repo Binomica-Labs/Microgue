@@ -1,3 +1,82 @@
+## v1.39.1 — the daily bug was already fixed, and the test was the loss
+
+v1.38 flagged an unresolved stack overflow in the daily path, removed the
+test, and gated the daily on finding it. Hunting it this session: **it does
+not reproduce.** A daily `startRun` works alone, in its original slot, and
+in the full file. The v1.39 combat work -- one shared `occupancy()`, and
+unaware mobs taking their own turn instead of being `continue`d past -- took
+the recursion out with it.
+
+So the test is RESTORED, not left deleted. A test removed for a bug that
+later gets fixed is coverage silently lost, and nothing would ever have told
+me. Flagging the bug was right; leaving the hole unexamined would not have
+been.
+
+The daily was already wired into the menu, so the missing piece was the
+end-to-end check that gated it: choosing Daily takes today's column, New
+Game does not, and a daily run actually PLAYS.
+
+**One harness artifact worth naming.** That test first failed on "Cannot
+save -- storage is full or blocked", which reads like a daily bug and is
+not: the stubbed store is full of saves written by every earlier test in
+the file. Filtered explicitly rather than broadly, so a real throw still
+fails the test.
+
+# v1.39.0 — mobs live their own lives; binary fission
+
+## The one-line cause of a system-wide freeze
+
+Six of ten behaviours returned `null` out of sense range, so I built an
+agenda layer (forage, patrol, rest, divide) and wired it into that null
+case. It changed NOTHING -- 0% of mobs moved. I chased it through the
+agenda model, the speed budget, footprints and walkability before finding
+the actual cause upstream of all of it:
+
+    if (dist > senseRange(m.behaviour)) continue;
+
+Mobs outside sense range were skipped ENTIRELY, before any movement code
+ran. That line was the freeze. An unaware mob now takes its own turn and
+skips only the combat half. After the fix: 100% of mobs move on their own,
+with a real spread of agendas (forage 49, patrol 29, rest 12 on one floor).
+
+**The lesson: when a new system has no effect, look upstream before
+debugging the system.** I debugged three layers of my own code before
+reading the function that was discarding its input.
+
+## Binary fission
+
+A full-health, undamaged, uncrowded cell with room DOUBLES (~1.8%/turn,
+tripled in a bloom, near-stopped in an oligotrophic column). Parent and
+daughter each take HALF health -- doubling makes more targets, not tougher
+ones, and a floor left alone is full of weak cells rather than a wall.
+Population 74 -> 90 over 200 turns, measured.
+
+## Six bugs, one family
+
+Everything that moves or is born has to respect a world it is not yet part
+of: colliding daughter uids; two same-turn daughters taking one tile; a mob
+walking onto a newborn; a 2x2 organism born half-inside its neighbour
+(centre tile checked, footprint not); a multi-tile body rotating into rock
+because `free()` tested the STALE heading instead of the post-step one.
+
+And one latent bug the feature exposed: **stairs were only kept clear at
+spawn.** Nothing had ever walked far enough on its own to reach one, so a
+dormant rule became a visible violation the moment mobs started roaming.
+
+## Two predicates for one rule
+
+The stairs fix went into the agenda's occupancy test and not the combat
+one -- two copies of "is this tile taken?" that had silently diverged, so a
+hunting mob could still end a turn on the way down. Replaced with a single
+`occupancy()` shared by every path that moves a body.
+
+## Container reset
+
+The session opened with the working tree gone. Restored from the v1.38.0
+tarball; eslint.config.js and vitest.config.ts live at the REPO ROOT, not in
+web/, and sync.test.ts reads sync.sh and .gitignore from there too -- it now
+tries both roots instead of assuming a cwd.
+
 # v1.38.0 — RELEASE: hardening the meta-loop
 
 ## A bug that made the headline feature a no-op

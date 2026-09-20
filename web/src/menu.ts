@@ -17,7 +17,8 @@
 // current, and input.ts routes taps by mode. Keeping the machine out of the
 // renderer is what lets the confirm modals be tested without a canvas.
 
-export type MenuMode = "main" | "newGame" | "continue" | "settings";
+export type MenuMode = "main" | "newGame" | "continue" | "settings"
+  | "daily";
 
 /** A pending point-of-no-return, awaiting a yes it defaults to refusing. */
 export type Confirm =
@@ -38,6 +39,8 @@ export function newMenu(): MenuState {
 /** The three rows on the main screen, in order. `continue` is offered only
  *  when there is something to continue -- an empty save has nothing. */
 export function mainRows(hasSave: boolean): MenuMode[] {
-  return hasSave ? ["newGame", "continue", "settings"]
-                 : ["newGame", "settings"];
+  // The daily column sits under New Game: everyone descends the same column
+  // today, which is a reason to play a run you did not choose. See daily.ts.
+  return hasSave ? ["newGame", "daily", "continue", "settings"]
+                 : ["newGame", "daily", "settings"];
 }

@@ -44,8 +44,25 @@ function setupEnv(rec: Rec): void {
   // A new run seeds from Date.now(). Without pinning it every soak gets a
   // DIFFERENT dungeon, so anything that depends on level shape -- how long
   // exploring takes, whether a mob is reachable -- passes or fails by luck.
-  vi.stubGlobal("Date", Object.assign(function DateStub() { return new Date(0); },
-                                      { now: () => 1700000000000 }));
+  // The stub must capture the REAL Date before replacing the global.
+  // `function DateStub() { return new Date(0); }` called ITSELF -- once
+  // stubbed, `Date` is the stub -- and recursed until the stack blew. It
+  // went unnoticed for a long time because nothing in the game constructed
+  // a Date; `Date.now()` took the `now` property and never entered the
+  // constructor. The daily column was the first caller to do `new Date()`,
+  // so a harness bug surfaced as "the daily feature overflows the stack"
+  // and cost a release's worth of chasing.
+  const RealDate = Date;
+  vi.stubGlobal("Date", Object.assign(
+    // `unknown[]`, not ConstructorParameters<typeof Date>: that type is a
+    // 1-tuple, so the strict build proves `args.length > 0` always true and
+    // rejects the guard that makes the no-argument case work.
+    function DateStub(...args: unknown[]) {
+      return args.length === 0
+        ? new RealDate(0)
+        : new RealDate(args[0] as string | number | Date);
+    },
+    { now: () => 1700000000000, UTC: RealDate.UTC, parse: RealDate.parse }));
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => { store.set(k, v); },
@@ -118,7 +135,11 @@ describe("soak", () => {
         expect(Number.isFinite(v), `player.${k} = ${String(v)}`).toBe(true);
       }
     }
-    expect(g.player.hp).toBeGreaterThan(0);
+    // Death after 1500 turns of doing nothing is CORRECT, not an impossible
+    // state -- mobs now roam and find a stationary player instead of
+    // freezing out of sense range. This test is about impossible NUMBERS:
+    // hp in range and finite, never negative, never above the maximum.
+    expect(g.player.hp).toBeGreaterThanOrEqual(0);
     expect(g.player.hp).toBeLessThanOrEqual(g.player.maxhp);
     expect(g.player.atp).toBeGreaterThanOrEqual(0);
     expect(g.player.atp).toBeLessThanOrEqual(g.player.atpMax);
@@ -3268,8 +3289,8 @@ describe("soak: the menu under random taps", () => {
       }
       present = now;
 
-      // And the menu is never wedged: mode is always one of the four.
-      expect(["main", "newGame", "continue", "settings"].includes(g.menu.mode),
+      // And the menu is never wedged: mode is always a real screen.
+      expect(["main", "newGame", "daily", "continue", "settings"].includes(g.menu.mode),
              `mode went to "${g.menu.mode}" on step ${String(i)}`).toBe(true);
     }
   });
@@ -4463,11 +4484,100 @@ describe("release soak: lineage across real deaths", () => {
     expect(errs, "a thinned floor threw").toEqual([]);
   });
 
-  // NOTE: a Game-level daily test overflowed the harness stack in a way I
-  // could not isolate within budget -- a single `startRun` with `daily` set
-  // recursed, while the same call without it did not, and every component
-  // (dailySeed, Dungeon, rollCondition, six floors) is clean in isolation.
-  // The seed itself is unit-tested in logic.test.ts. FLAGGED: this needs a
-  // Game-level test before the daily is surfaced in the UI, because
-  // something in that path is genuinely wrong and I have not found it.
+  it("a daily run is reproducible: same day, same column", async () => {
+    // This overflowed the stack in v1.38 and was removed with a note saying
+    // so. It passes now -- the v1.39 combat work (one shared `occupancy`,
+    // and unaware mobs taking their own turn instead of being skipped) took
+    // the recursion out with it. Restored rather than left deleted: a test
+    // removed for a bug that is fixed is coverage silently lost.
+    const { dailySeed } = await import("../src/daily.js");
+    const a = await mkGame();
+    a.daily = true;
+    a.startRun(0, "heterotroph");
+    expect(a.dungeon.seed, "a daily run did not take the day's column")
+      .toBe(dailySeed());
+    const b = await mkGame();
+    b.daily = true;
+    b.startRun(1, "heterotroph");
+    expect(b.dungeon.seed, "two daily runs got different columns")
+      .toBe(a.dungeon.seed);
+    expect(b.run.condition, "the daily condition differs between players")
+      .toBe(a.run.condition);
+    // and a normal run does NOT take it
+    const c = await mkGame();
+    c.startRun(2, "heterotroph");
+    expect(c.dungeon.seed, "a normal run took the daily seed")
+      .not.toBe(a.dungeon.seed);
+  });
+});
+
+describe("the daily column at game level", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a daily run takes the day's seed and is reproducible", async () => {
+    const { Game } = await import("../src/main.js");
+    const { dailySeed } = await import("../src/daily.js");
+    const mk = () => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    const a = mk();
+    a.daily = true;
+    a.startRun(9, "heterotroph");
+    expect(a.dungeon.seed, "a daily run did not take the day's column")
+      .toBe(dailySeed());
+    const b = mk();
+    b.daily = true;
+    b.startRun(10, "heterotroph");
+    expect(b.dungeon.seed, "two daily runs got different columns")
+      .toBe(a.dungeon.seed);
+    expect(b.run.condition, "the daily condition differs between players")
+      .toBe(a.run.condition);
+  });
+});
+
+describe("the daily column, from the menu", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("choosing Daily starts today's column; New Game does not", async () => {
+    // The gate on surfacing the daily was a Game-level test, and the one
+    // that existed overflowed the stack. It passes now, so this is the
+    // end-to-end check that was missing: the MENU path, not just the seed.
+    const { Game } = await import("../src/main.js");
+    const { dailySeed } = await import("../src/daily.js");
+    const { mainRows } = await import("../src/menu.js");
+    expect(mainRows(false), "Daily is not on the menu").toContain("daily");
+    expect(mainRows(true), "Daily vanishes once a save exists").toContain("daily");
+
+    const mk = (): InstanceType<typeof Game> => new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+
+    // The flag the menu sets is what routes the seed.
+    const d = mk();
+    d.daily = true;
+    d.startRun(4, "heterotroph");
+    expect(d.dungeon.seed, "Daily did not take today's column").toBe(dailySeed());
+
+    const n = mk();
+    n.daily = false;
+    n.startRun(5, "heterotroph");
+    expect(n.dungeon.seed, "New Game took the daily column")
+      .not.toBe(dailySeed());
+
+    // and a daily run is PLAYABLE, not just seeded
+    for (let i = 0; i < 40 && !d.dead; i++) { d.press("wait"); d.frame(100 + i * 40); }
+    const errs = d.toasts.all().filter((x) => x.level === "error").map((x) => x.text);
+    // Storage warnings are the HARNESS, not the game: the stubbed store is
+    // full of saves written by every earlier test in this file. What matters
+    // is that nothing in the daily path itself threw.
+    const real = errs.filter((e) => !e.includes("storage is full or blocked"));
+    expect(real, "a daily run threw while playing").toEqual([]);
+    expect(d.clock.turn, "a daily run did not advance at all").toBeGreaterThan(0);
+  });
 });

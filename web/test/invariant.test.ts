@@ -64,6 +64,9 @@ describe("sacred invariants", () => {
             grid: level.grid, mobs: level.mobs,
             player: { ...player, status: [] as Status[] },
             rng: makeRng(t + f), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets, clouds,
+            // Wandering mobs must not settle on stairs; the world has to say
+            // where they are. See combat.ts.
+            stairs: level.down ? [level.up, level.down] : [level.up],
           });
           const v = check({
             plasmid: p, level, player, drops: [], packets, clouds,
