@@ -4742,3 +4742,49 @@ describe("items and abilities: the audit of v1.45", () => {
            "the epic copy was eaten").toBe("epic");
   });
 });
+
+describe("mob hits go where hurt goes", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("cold hardening halves melee, and every hit is in the recorder", async () => {
+    // Cold hardening -- "incoming damage halved" -- was applied in `hurt`,
+    // and mob hits land inside combat.ts without passing through it, so it
+    // halved statuses and hazards and never the thing that does the damage.
+    // Those hits were not traced either: hp fell with no entry at all.
+    const { Game } = await import("../src/main.js");
+    const hits = (surged: boolean): number[] => {
+      const g = new Game({
+        width: 400, height: 800, style: {} as CSSStyleDeclaration,
+        getContext: () => stubContext({ calls: 0 }),
+        addEventListener: () => undefined,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+      } as unknown as HTMLCanvasElement);
+      g.startRun(0, "heterotroph");
+      const proto = g.level.mobs.find((m) => m.alive && m.size !== "filament"
+        && m.size !== "large");
+      if (!proto) throw new Error("no mob");
+      const { x, y } = g.player;
+      const spot = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+        .map(([dx, dy]) => ({ x: x + (dx ?? 0), y: y + (dy ?? 0) }))
+        .find((p) => g.level.grid.isFloor(p.x, p.y));
+      if (!spot) throw new Error("no room beside the player");
+      g.level.mobs.length = 0;
+      g.level.mobs.push({ ...proto, ...spot, ax: spot.x, ay: spot.y, alive: true,
+                          hp: 9999, maxhp: 9999, atk: 20, behaviour: "chase",
+                          weapon: "melee", heading: null, status: [] });
+      for (let i = 0; i < 12; i++) {
+        if (surged) g.surge = { armour: 0.5, until: g.clock.turn + 5 };
+        g.player.hp = g.player.maxhp;
+        g.press("wait");
+      }
+      return g.trace.all().filter((e) => e.kind === "hurt" && e.what.startsWith(proto.name))
+        .map((e) => Number(/for (\d+)/.exec(e.what)?.[1] ?? NaN));
+    };
+    const plain = hits(false);
+    const halved = hits(true);
+    expect(plain.length, "no mob hit was recorded").toBeGreaterThan(3);
+    expect(halved.length).toBeGreaterThan(3);
+    const avg = (a: number[]) => a.reduce((p, q) => p + q, 0) / a.length;
+    expect(avg(halved), "the surge did not halve melee").toBeLessThan(avg(plain) * 0.7);
+  });
+});

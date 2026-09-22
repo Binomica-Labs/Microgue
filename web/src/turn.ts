@@ -350,7 +350,13 @@ export function t_mobTurn(_g: Game): void {
       mobs: _g.level.mobs,
       player: _g.player,
       rng: makeRng(_g.turnSeed++),
-      armour: _g.genome.armour(_g.dungeon.depth),
+      // The surge folded in HERE: mob hits land inside combat.ts, not through
+      // `hurt`, so cold hardening -- "incoming damage halved" -- halved
+      // hazards and statuses and never the melee and bolts that do most of
+      // the damage. Packets and clouds below go through `hurt`, which
+      // applies it itself, so they take the plain `arm`.
+      armour: _g.genome.armour(_g.dungeon.depth)
+        * (_g.surge && _g.surge.until > _g.clock.turn ? _g.surge.armour : 1),
       // How threatening the strain is at this depth: its power against a
       // reference that rises with depth, clamped to 0..1. Reactive predators
       // press a weak cell and circle a strong one. The reference (2 + depth) is
@@ -406,6 +412,10 @@ export function t_mobTurn(_g: Game): void {
         _g.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
                                    _g.turnSeed + e.mob.y));
         _g.lastAttacker = e.mob.name;
+        // Traced like every `hurt`: the recorder showed hp falling with no
+        // entry at all, so a death report could not say what did it.
+        _g.trace.push(_g.clock.turn, "hurt",
+                      `${e.mob.name} for ${String(e.dmg ?? 0)}; hp ${String(_g.player.hp)}`);
       } else if (e.kind === "divide") {
         // A cell splitting in view is the most characteristic thing a
         // bacterium does; it should not happen silently.
@@ -440,6 +450,11 @@ export function t_mobTurn(_g: Game): void {
         }
         _g.note(say.incomingLine(e.mob.name, e.mob.weapon, e.dmg ?? 0,
                                   _g.turnSeed + e.mob.x));
+        if (e.dmg !== undefined) {
+          _g.lastAttacker = e.mob.name;
+          _g.trace.push(_g.clock.turn, "hurt",
+                        `${e.mob.name}'s ${w.name} for ${String(e.dmg)}; hp ${String(_g.player.hp)}`);
+        }
       } else if (e.kind === "died") {
         // A status the player applied finished it. Counted here rather than in
         // combat.ts, which is pure and has no run to write to.

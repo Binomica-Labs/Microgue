@@ -8911,15 +8911,43 @@ describe("marine snow", () => {
 
   it("motes sink: a mote is lower later", async () => {
     const { motes } = await import("../src/snow.js");
-    const a = motes(1000, 7, bio.stratum(2), 0, 0, 20, 20);
-    const b = motes(1500, 7, bio.stratum(2), 0, 0, 20, 20);
-    // same seed and window, so mote i is the same lane; most should have sunk
-    let sank = 0;
-    for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      const ya = a[i]?.y ?? 0, yb = b[i]?.y ?? 0;
-      if (yb > ya || yb < ya - 15) sank++;    // lower, or wrapped to the top
+    const a = new Map(motes(1000, 7, bio.stratum(2), 0, 0, 60, 60).map((m) => [m.id, m]));
+    const b = motes(1500, 7, bio.stratum(2), 0, 0, 60, 60);
+    let same = 0, sank = 0;
+    for (const m of b) {
+      const was = a.get(m.id);
+      if (!was) continue;
+      same++;
+      if (m.y > was.y) sank++;
     }
-    expect(sank / Math.max(a.length, 1), "motes do not sink").toBeGreaterThan(0.9);
+    expect(same, "no mote was seen twice -- identities are not stable").toBeGreaterThan(5);
+    expect(sank / same, "motes do not sink").toBeGreaterThan(0.9);
+  });
+
+  it("snow stays put in the world while the camera moves", async () => {
+    // Reported: the snow "chases the player and drops slowly relative to the
+    // player's position, as a kind of shadow". Lanes were laid across the
+    // window, so moving the window moved every mote. The same mote must be at
+    // the same world position whichever window it is seen through.
+    const { motes } = await import("../src/snow.js");
+    const here = new Map(motes(4000, 7, bio.stratum(3), 0, 0, 25, 25).map((m) => [m.id, m]));
+    const moved = motes(4000, 7, bio.stratum(3), 10, 6, 35, 31);
+    let shared = 0;
+    for (const m of moved) {
+      const was = here.get(m.id);
+      if (!was) continue;
+      shared++;
+      expect(m.x, "a mote moved with the camera").toBeCloseTo(was.x, 9);
+      expect(m.y, "a mote moved with the camera").toBeCloseTo(was.y, 9);
+    }
+    expect(shared, "the overlapping windows share no motes").toBeGreaterThan(5);
+    // And a window's motes lie over the world, not pinned to its corner:
+    // shifting the view by a tile must not shift the motes by a tile.
+    const xs = (ms: { x: number }[]) => ms.map((m) => m.x).sort((p, q) => p - q);
+    const w1 = xs(motes(4000, 7, bio.stratum(3), 40, 40, 60, 60));
+    const w2 = xs(motes(4000, 7, bio.stratum(3), 41, 40, 61, 60));
+    const overlap = w2.filter((x) => x >= 40.5 && x <= 60.5).filter((x) => w1.includes(x));
+    expect(overlap.length, "a one-tile pan moved the snowfield").toBeGreaterThan(3);
   });
 
   it("a degenerate window yields no motes and no crash", async () => {

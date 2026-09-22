@@ -1,3 +1,49 @@
+# v1.46.0 — the snow stays put; the surge reaches the hits that matter
+
+## Marine snow followed the player
+
+Reported: "marine snow also chases the player and drops slowly relative to
+the player's position as a kind of player's shadow."
+
+`motes()` laid each lane at `x0 + hash * w` and wrapped the fall over the
+window height, and the window IS the camera. So every mote was positioned
+relative to the view: pan, and the whole snowfield came with you, sinking
+against the player rather than through the world. Snow exists to be the
+fixed medium the eye reads motion against, so this was worse than having
+no snow.
+
+Motes now live in world space: 8-tile strips, and a fall that repeats every
+32 tiles down. Every period of a strip holds the same motes, so one leaving
+the bottom of a period is exactly the one entering the next: no seam, and
+nothing pops. The window only chooses which motes to return. Motes carry a
+stable `id`, and the new test checks that the same mote sits at the same
+world position through two different windows. The old "motes sink" test
+matched motes by array index, which only worked because the old layout was
+window-relative.
+
+## Cold hardening never touched melee
+
+Found by the playtest bot (see below). `hurt()` applies the cold-shock
+surge ("incoming damage halved"), but mob melee and bolts subtract hp
+inside combat.ts and never pass through it. So the surge halved statuses
+and hazards and missed the main damage source. It is folded into the
+`armour` the mob turn receives. Packets and clouds still go through `hurt`
+and keep the plain figure, so nothing is halved twice.
+
+Those hits were also missing from the recorder: hp fell with no trace
+entry, and a death report could not say what did it. Strikes and direct
+fire are traced now, and direct fire (bolt, spear) carries its damage. The
+log line used to read "for 0" and never set `lastAttacker`.
+
+## A bot in the browser
+
+`scratchpad/bot` (not in the repo) drives the real bundle in headless
+Chrome: explore, strike what it sees, clear the boss, descend. On v1.45
+four seeds all died on F1 between turns 35 and 66, mostly to Oxidative
+stress from Nitzschia/Synechococcus: 35% per hit, stacking magnitude,
+refreshed on every hit. Whether that is a balance problem or a bot that
+never installs katG is the next question.
+
 # v1.45.0 — items and abilities, audited
 
 The last batch from the sweep. Five new tests, all failing on v1.44.

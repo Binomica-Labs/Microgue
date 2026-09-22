@@ -280,13 +280,18 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
             cx: w.player.x, cy: w.player.y, radius: weapon.radius, dmg: raw,
             ttl: weapon.persist, inflicts: weapon.inflicts, colour: m.pigment,
           });
-        } else {
-          const dmg = Math.max(Math.round(raw * w.armour), 1);
-          w.player.hp = Math.max(w.player.hp - dmg, 0);
+        }
+        // Direct hits (bolt, spear) land now and say how hard. Without `dmg`
+        // the log line read "for 0" and the caller could not blame the mob.
+        let direct: number | undefined;
+        if (weapon.kind !== "packet" && weapon.kind !== "cloud") {
+          direct = Math.max(Math.round(raw * w.armour), 1);
+          w.player.hp = Math.max(w.player.hp - direct, 0);
           if (weapon.inflicts) apply(w.player.status, weapon.inflicts, 4, 1);
         }
         events.push({ kind: "fire", mob: m, weapon: weapon.name,
-                      at: { x: w.player.x, y: w.player.y } });
+                      at: { x: w.player.x, y: w.player.y },
+                      ...(direct !== undefined ? { dmg: direct } : {}) });
         continue;
       }
     }
