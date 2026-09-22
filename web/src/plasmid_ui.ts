@@ -6,6 +6,7 @@
 // is as large as the ring is wide.
 
 import { raisedCard, shade } from "./relief.js";
+import { drawGlyph, glyphOfPart } from "./part_glyph.js";
 import type { Box } from "./chrome.js";
 import { countOf } from "./stack.js";
 import { GENES, type Pathway } from "./biology.js";
@@ -127,7 +128,7 @@ export function drawBinList(
   const W = g.w ?? g.cell * g.cols + g.gap * (g.cols - 1);
   const H = g.h ?? g.cell * 3;
   rows.length = 0;
-  const rowH = 34 * u;
+  const rowH = BIN_ROW * u;
   const visible = Math.max(Math.floor(H / rowH), 1);
   const maxScroll = Math.max(parts.length - visible, 0);
   const want = Number.isFinite(scroll) ? Math.round(scroll) : 0;
@@ -155,32 +156,57 @@ export function drawBinList(
     ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
     ctx.stroke();
 
-    // A spine in the pathway colour: what it DOES, beside how rare it is.
-    ctx.fillStyle = partColour(p);
-    ctx.fillRect(box.x + 1.5 * u, box.y + 4 * u, 3.5 * u, box.h - 8 * u);
+    // The part's symbol on its own tile, at the left where the eye starts.
+    // Tinted by what it does, edged by how rare it is.
+    const ink = partColour(p);
+    const tile = box.h - 8 * u;
+    const tx = box.x + 5 * u, ty = box.y + 4 * u;
+    ctx.fillStyle = "#0b100d";
+    ctx.beginPath();
+    ctx.roundRect(tx, ty, tile, tile, 5 * u);
+    ctx.fill();
+    ctx.globalAlpha *= 0.16;
+    ctx.fillStyle = ink;
+    ctx.fill();
+    ctx.globalAlpha = dragging === i ? 0.3 : 1;
+    ctx.strokeStyle = tier.colour;
+    ctx.lineWidth = Math.max(u, 1);
+    ctx.stroke();
+    drawGlyph(ctx, glyphOfPart(p), tx + tile * 0.08, ty + tile * 0.08, tile * 0.84, ink);
 
+    const textX = tx + tile + 8 * u;
+    const textW = box.x + box.w - textX - 64 * u;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#ffffff";
-    ctx.font = `${11 * u}px ui-monospace,monospace`;
+    ctx.font = `${12.5 * u}px ui-monospace,monospace`;
     const n = countOf(p);
     ctx.fillText(fitInto(ctx, partTitle(p) + (n > 1 ? `  \u00d7${String(n)}` : ""),
-                         box.w - 74 * u, 11 * u, 7 * u),
-                 box.x + 10 * u, box.y + 13.5 * u);
+                         textW, 12.5 * u, 8 * u),
+                 textX, box.y + 16 * u);
 
-    ctx.fillStyle = "#8fa89a";
-    ctx.font = `${8.5 * u}px ui-monospace,monospace`;
-    ctx.fillText(fitInto(ctx, partBlurb(p), box.w - 74 * u, 8.5 * u, 6 * u),
-                 box.x + 10 * u, box.y + 24 * u);
+    ctx.fillStyle = "#9fb8a8";
+    ctx.font = `${9 * u}px ui-monospace,monospace`;
+    ctx.fillText(fitInto(ctx, partBlurb(p), textW, 9 * u, 6 * u),
+                 textX, box.y + 30 * u);
 
     ctx.textAlign = "right";
     ctx.fillStyle = tier.colour;
-    ctx.font = `${8 * u}px ui-monospace,monospace`;
-    ctx.fillText(tier.name, box.x + box.w - 8 * u, box.y + 13 * u);
-    if (p.kind === "gene") {
+    ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+    const rx = box.x + box.w - 8 * u;
+    ctx.fillText(tier.name, rx, box.y + 15 * u);
+    // One number per kind, the one you compare on, as a meter: easier to
+    // scan down a column than a figure.
+    const m = partMeter(p);
+    if (m) {
+      const mw = 44 * u, mh = 4 * u, my = box.y + 24 * u;
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(rx - mw, my, mw, mh);
+      ctx.fillStyle = ink;
+      ctx.fillRect(rx - mw, my, mw * Math.min(Math.max(m.frac, 0), 1), mh);
       ctx.fillStyle = "#6f8f7c";
-      ctx.fillText(`${GENES[p.id].kb.toFixed(1)} kb`,
-                   box.x + box.w - 8 * u, box.y + 24 * u);
+      ctx.font = `${7.5 * u}px ui-monospace,monospace`;
+      ctx.fillText(m.label, rx, box.y + 36 * u);
     }
     ctx.globalAlpha = 1;
   });
@@ -195,6 +221,27 @@ export function drawBinList(
     ctx.fillRect(g.x + W + 2 * u, g.y + (H - knobH) * t, 3 * u, knobH);
   }
   return { maxScroll, rowH };
+}
+
+/** Height of one parts-bin row, in UI units. Shared with the scroll input, so
+ *  a drag moves the list one row per row of finger travel. */
+export const BIN_ROW = 42;
+
+/** The one figure a part is compared on, as a fraction and a label. */
+function partMeter(p: Part): { frac: number; label: string } | null {
+  if (p.kind === "promoter") {
+    const s = PROMOTERS[p.id].strength;
+    return { frac: s / 1.5, label: `output x${s.toFixed(2)}` };
+  }
+  if (p.kind === "terminator") {
+    const e = 1 - TERMINATORS[p.id].readthrough;
+    return { frac: e, label: `${String(Math.round(e * 100))}% stop` };
+  }
+  if (p.id === "ori") return null;
+  // Genes: size against the largest there is. kb is what a gene costs you in
+  // ring, and it is the figure that decides whether it fits.
+  const kb = GENES[p.id].kb;
+  return { frac: kb / 4, label: `${kb.toFixed(1)} kb${p.level > 1 ? ` · L${String(p.level)}` : ""}` };
 }
 
 /** Full name, allele and all. */
@@ -624,9 +671,14 @@ export function drawItemCard(
 
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+  // The part's symbol leads the title, the same one the bin shows, so the
+  // card and the row it came from are visibly the same thing.
+  const gs = 24 * u;
+  drawGlyph(ctx, glyphOfPart(part), x + pad - 3 * u, y + 8 * u, gs, partColour(part));
   ctx.fillStyle = tier.colour;
   ctx.font = `${15 * u}px ui-monospace,monospace`;
-  ctx.fillText(title, x + pad, y + 26 * u);
+  ctx.fillText(fitInto(ctx, title, cardW - pad * 2 - gs - 70 * u, 15 * u, 9 * u),
+               x + pad + gs + 4 * u, y + 26 * u);
   ctx.font = `${9 * u}px ui-monospace,monospace`;
   ctx.textAlign = "right";
   ctx.fillText(tier.name.toUpperCase(), x + cardW - pad, y + 26 * u);

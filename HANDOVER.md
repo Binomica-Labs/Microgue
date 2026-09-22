@@ -1,3 +1,45 @@
+# v1.51.0 — every part has a symbol
+
+## What changed
+
+* `part_glyph.ts`, new. Each part is drawn as its SBOL Visual symbol, the
+  notation real plasmid maps use: a gene is a block arrow, a promoter a bent
+  arrow, a terminator a T, the origin a circle on the backbone. It also has
+  symbols for modifiers (a spark), substrates (a small molecule) and symbionts
+  (a cell with a nucleoid). All are vector paths, not font glyphs, so nothing
+  renders as a missing-glyph box on any platform.
+* A gene's arrow carries its pathway's emblem, cut out in dark ink: photo
+  sun, carbon sugar ring, nitrogen N≡N, sulfur S8 crown, iron crystal, methane
+  tetrahedron, energy bolt, stress cross, motility flagellum, secretion drop,
+  resist shield, core circle. The name says which gene; the emblem says what
+  it is for.
+* **Parts bin rows** are 42u tall (were 34u), with a symbol tile on the left
+  tinted in the pathway colour and edged in the rarity colour, a larger title,
+  and a meter on the right for the figure each kind is compared on: gene kb
+  (with the level when evolved), promoter output, terminator efficiency.
+  `BIN_ROW` is shared with the scroll input and the list-height caps.
+* **Lysate tiles** are dark with a rarity edge and the symbol on top, not a
+  solid block of rarity colour. Every cassette of one tier used to look the
+  same. The second line shows only the rarity, since the symbol already says
+  the kind; "uncommon terminator" used to run across the next tile.
+* **Item card**: the symbol leads the title.
+* On-screen buttons are no longer drawn over an open lysate. It is modal, so
+  they could not be pressed anyway, and they covered its right-hand tiles.
+  They are still laid out, because the camera depends on their positions.
+
+## Proven
+
+The golden was diffed before re-recording, using a new `GOLDEN_DUMP=path` hook
+that writes the trace. 358 lines of 92649 changed, all inside the parts bin
+and the help text under it, which moved down 16px with the taller rows.
+
+`test/glyph.test.ts`: every symbol draws, stays finite and stays inside its box.
+All 12 emblems are distinct, every gene maps to one, items get the symbol of the
+part they become, and a zero, negative or NaN size draws nothing.
+
+`npm run shots` gained 8-bin (one gene per pathway), 9-lysate (one of every
+item kind) and 10-card.
+
 # v1.50.0 — the layout survives the sizes nobody designs for
 
 v1.49 was tested on real devices. This pass ran nine sizes that browsers

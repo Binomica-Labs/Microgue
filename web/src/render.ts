@@ -23,7 +23,7 @@ import { BIN_CAP } from "./plasmid.js";
 import { SIZES } from "./behaviour.js";
 import { boundsOf } from "./footprint.js";
 import { cloudAlpha, cloudTiles } from "./projectile.js";
-import { describe as describeSlot, drawBinList, drawItemCard, drawRing }
+import { BIN_ROW, describe as describeSlot, drawBinList, drawItemCard, drawRing }
   from "./plasmid_ui.js";
 import { clampView, drawGraph, fitView, frame, litBounds } from "./kegg_ui.js";
 import { drawClose, stage, uiUnit } from "./chrome.js";
@@ -536,7 +536,10 @@ export function r_draw(_g: Game): void {
       _g.drawPlasmid(W, H);
     } else {
       layoutButtons(_g.buttons, W, H, _g.insets(), u, _g.barH + _g.logMaxH);
-      drawButtons(ctx, _g.buttons, u);
+      // Laid out regardless (the camera centres on the room they leave), but
+      // not DRAWN over an open lysate. The lysate is modal, so they could not
+      // be pressed, and they painted straight across its right-hand tiles.
+      if (!_g.openDrop) drawButtons(ctx, _g.buttons, u);
       // The ability bar sits above the log, below the world. Only when the
       // build grants something.
       _g.abilitySlots = drawAbilityBar(_g, W, H - _g.insets().bottom - _g.barH - _g.logH, u);
@@ -709,8 +712,9 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const binW = _g.bin.cell * _g.bin.cols + _g.bin.gap * (_g.bin.cols - 1);
     // Beside the ring the list has the pane's height to itself; leave room
     // for a few lines of notes under it rather than a fixed 152.
-    const binCap = side ? Math.max(H - raw.bottom - paneTop - 110 * u, 102 * u) : 152 * u;
-    const binH = Math.min(_g.genome.bin.length * 34 * u, binCap);
+    const binCap = side ? Math.max(H - raw.bottom - paneTop - 110 * u, 3 * BIN_ROW * u)
+                          : 4 * BIN_ROW * u;
+    const binH = Math.min(_g.genome.bin.length * BIN_ROW * u, binCap);
     const list = drawBinList(ctx, { ..._g.bin, w: binW, h: binH },
                              _g.genome.bin, u, _g.dragBin, _g.binScroll,
                              _g.binRows);

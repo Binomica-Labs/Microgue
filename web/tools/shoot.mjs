@@ -50,6 +50,31 @@ const SCENES = [
   // The whole floor, revealed and zoomed out. Wall contour is the thing this
   // one is for: FOV normally shows a few tiles and you cannot judge a
   // silhouette from that.
+  // A bin with one of everything: every pathway emblem, every part kind.
+  { name: "8-bin", drive:
+    "microgue.start(0); const g = microgue.game;"
+    + "const W = (rarity) => ({kcat:1, km:1, stability:1, prefix:null, suffix:null, rarity});"
+    + "const R = ['common','uncommon','rare','epic','legendary'];"
+    + "['psbA','cbbL','narG','soxB','mtrC','mcrA','hydA','katG','motA','luxAB','merA'].forEach((id, i) =>"
+    + "  g.genome.bin.unshift({kind:'gene', id, level: id==='katG'?3:1, mods:[], allele: W(R[i % 5])}));"
+    + "g.genome.bin = g.genome.bin.slice(0, 18);"
+    + "microgue.press('plasmid'); null" },
+  { name: "9-lysate", drive:
+    "microgue.start(0); const g = microgue.game;"
+    + "g.openDrop = {x: g.player.x, y: g.player.y, items: ["
+    + "{kind:'cassette', gene:'psbA', allele:{kcat:1,km:1,stability:1,prefix:null,suffix:null,rarity:'rare'}},"
+    + "{kind:'cassette', gene:'narG', allele:{kcat:1,km:1,stability:1,prefix:null,suffix:null,rarity:'common'}},"
+    + "{kind:'promoter', id:'j23119', rarity:'rare'},"
+    + "{kind:'terminator', id:'rrnbt1', rarity:'uncommon'},"
+    + "{kind:'substrate', id:'glucose'},"
+    + "{kind:'modifier', id:'codon', rarity:'uncommon'},"
+    + "{kind:'symbiont', id:'hydrogenosome'} ]}; null" },
+  // The detail card a tapped part opens.
+  { name: "10-card", drive:
+    "microgue.start(0); const g = microgue.game;"
+    + "g.genome.bin.unshift({kind:'gene', id:'narG', level:2, mods:[], "
+    + "allele:{kcat:1.3,km:0.8,stability:1.1,prefix:null,suffix:null,rarity:'epic'}});"
+    + "microgue.press('plasmid'); g.card = g.genome.bin[0]; g.cardIndex = 0; null" },
   { name: "7-walls", drive:
     "microgue.start(0);"
     + "const g = microgue.game; g.level.sight.seen.fill(1); g.level.sight.visible.fill(1);"

@@ -12,7 +12,7 @@ import * as bio from "./biology.js";
 import { classifyDown, classifyKey } from "./gesture.js";
 import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
-import { slotAt } from "./plasmid_ui.js";
+import { BIN_ROW, slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box, uiUnit } from "./chrome.js";
 import { i_menuPress, i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
@@ -320,7 +320,7 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
         _g.gesture = "none";
         // With the player's UI scale: the list is DRAWN with it, so without it
         // the rows slid under the finger at any scale but 1.
-        const rowPx = uiUnit(innerWidth, innerHeight, _g.settings.uiScale) * 34;
+        const rowPx = uiUnit(innerWidth, innerHeight, _g.settings.uiScale) * BIN_ROW;
         _g.binScroll = Math.min(Math.max(_g.binAnchor - dy / rowPx, 0),
                                 _g.binMaxScroll);
         return;

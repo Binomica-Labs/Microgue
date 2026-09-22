@@ -16,7 +16,9 @@ import { TRAITS, TRAIT_IDS, expansionCost, type TraitId }
   from "./chromosome.js";
 import { describeLevel } from "./strain.js";
 import { describeLab, type Lab, type Offer } from "./lab.js";
-import { SUBSTRATES, itemColour, itemName, itemNote, type Drop }
+import { drawGlyph, glyphOfItem } from "./part_glyph.js";
+import { PATHWAY_COLOUR } from "./plasmid_ui.js";
+import { SUBSTRATES, itemColour, itemName, itemNote, rarityOf, type Drop }
   from "./items.js";
 import { BUILD, VERSION } from "./version.js";
 
@@ -456,24 +458,45 @@ export function drawContainer(
       const by = py0 + 58 * u + r * (cell + gap);
       boxes.push({ x: bx, y: by, w: cell, h: cell });
 
-      ctx.fillStyle = itemColour(it);
+      // A dark tile edged in its rarity, with the part's symbol on it. The old
+      // tile was a solid block of rarity colour with text on it: every
+      // cassette of a tier looked identical until you read the name.
+      const edge = itemColour(it);
+      const ink = it.kind === "cassette" ? PATHWAY_COLOUR[GENES[it.gene].pathway]
+        : it.kind === "substrate" ? SUBSTRATES[it.id].colour
+        : it.kind === "promoter" ? "#ffd166"
+        : it.kind === "terminator" ? "#c9ced4"
+        : edge;
+      ctx.fillStyle = "#0e1512";
       ctx.beginPath();
       ctx.roundRect(bx, by, cell, cell, cell * 0.2);
       ctx.fill();
-      ctx.fillStyle = "#0f1512";
+      ctx.globalAlpha = 0.14;
+      ctx.fillStyle = ink;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = Math.max(1.6 * u, 1.4);
+      ctx.stroke();
+      const gs = cell * 0.5;
+      drawGlyph(ctx, glyphOfItem(it), bx + (cell - gs) / 2, by + cell * 0.07, gs, ink);
+
+      ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       // Fitted to the tile. Allele names run to "psbA of fast folding" now, and
       // a fixed size overflowed the tile and printed across its neighbours.
-      fitInto(ctx, itemName(it), cell - 6 * u, Math.max(cell * 0.19, 9), 6);
-      ctx.fillText(itemName(it), bx + cell / 2, by + cell / 2 - cell * 0.06);
-      ctx.font = `${Math.max(cell * 0.14, 7)}px ui-monospace,monospace`;
-      ctx.fillText(
-        it.kind === "cassette" ? "cassette"
-          : it.kind === "substrate" ? SUBSTRATES[it.id].formula
-          : it.kind === "symbiont" ? "symbiont"
-          : `${RARITY[it.rarity].name} ${it.kind}`,
-                   bx + cell / 2, by + cell / 2 + cell * 0.16);
+      fitInto(ctx, itemName(it), cell - 6 * u, Math.max(cell * 0.17, 9), 6);
+      ctx.fillText(itemName(it), bx + cell / 2, by + cell * 0.69);
+      // Rarity only: the symbol already says promoter, terminator, gene or
+      // modifier. "uncommon terminator" is 19 characters and ran across the
+      // next tile on every phone.
+      ctx.fillStyle = edge;
+      const kind = it.kind === "substrate" ? SUBSTRATES[it.id].formula
+        : it.kind === "symbiont" ? "symbiont"
+        : RARITY[rarityOf(it)].name;
+      fitInto(ctx, kind, cell - 6 * u, Math.max(cell * 0.12, 7), 5);
+      ctx.fillText(kind, bx + cell / 2, by + cell * 0.86);
     });
 
     const first = d.items[0];

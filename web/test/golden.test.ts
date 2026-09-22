@@ -39,8 +39,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  camera put back on the screen centre and the buttons reserving the live
  *  log height, the old hash came back exactly -- so the move is those two
  *  and only those. The world is offset by half the button column and half
- *  the status bar, and the control strip reserves the log's full four lines. */
-const GOLDEN = "b025dc390038dce4";
+ *  the status bar, and the control strip reserves the log's full four lines.
+ *
+ *  Re-recorded for the part symbols (v1.51). Diffed with GOLDEN_DUMP against
+ *  v1.50 first: 358 lines of 92649, every one between the parts bin's clip
+ *  rect and the plasmid help text -- the symbol tiles and meters, rows 42u
+ *  instead of 34u, and the help text below moved 16px down with them. */
+const GOLDEN = "ad8217231b254ebd";
 
 const trace: string[] = [];
 
@@ -206,6 +211,11 @@ describe("golden render trace", () => {
     // nothing at all, so the value is recorded here.
     await play();
     const hash = createHash("sha256").update(trace.join("\n")).digest("hex").slice(0, 16);
+    // GOLDEN_DUMP=path writes the trace, so a move can be diffed against the
+    // previous build before anyone updates the hash.
+    if (process.env["GOLDEN_DUMP"]) {
+      (await import("node:fs")).writeFileSync(process.env["GOLDEN_DUMP"], trace.join("\n"));
+    }
     expect(hash, "the rendered frame changed -- look at what and why before "
       + "updating this").toBe(GOLDEN);
   });
