@@ -1,3 +1,38 @@
+# v1.44.0 — mob life, audited
+
+The second batch from the sweep: the mob-turn loop in `combat.ts`. Six new
+tests in `logic.test.ts` ("the audit of v1.44"), and all six fail on v1.43.
+
+- **Sessile cells sulked beside you.** They "sense" from anywhere so they
+  strike whatever comes adjacent, which also ran the chase clock while you
+  were across the floor. After ten turns: bored for forty, passive while you
+  stood next to them. Sessile cells no longer run the clock, since they
+  cannot chase at all.
+- **Gunners gave up mid-hit.** Only a melee strike reset `chase`. Firing and
+  winding up reset it now.
+- **Bosses divided.** `{ ...m }` copies `elite`, the name and the grown
+  stats. The copy held `isCleared` shut after you killed the original, and
+  on elite floors it minted elites and elite loot past the promotion count.
+  Elites never divide.
+- **Every cell divided once, ever.** A split leaves two halves, fission needs
+  a whole cell, and nothing healed a mob. Calm cells now regrow (about 40
+  turns from half to whole). `GROWTH_CAP` still bounds the floor: measured
+  over 40 seeds, F1 goes 58.9 -> 73.8 mobs in 300 turns either way.
+- **`calm` was never reset by damage.** Five paths hurt a mob and none
+  touched it. It is now measured from hp in the mob's own turn
+  (`seenHp`), so it catches every source, including ones added later.
+- **Slow bodies aged their clocks at half speed.** Sensing and boredom ran
+  behind the cooldown gate, so a filament chased for 20 turns and sulked for
+  80. They now run first.
+
+**Checked, not assumed:** a new strain waiting at spawn died at turn 42 in
+the recorder test instead of 134, which looked like the fix making F1
+lethal. Over 40 seeds a stationary player actually takes LESS damage (F1:
+247 vs 305 per 300 turns). One seed's mob path, not a trend. The recorder
+test now keeps the strain alive, since it is about the trace ring rather
+than survival. The golden hash moved with the simulation. Reverting
+combat.ts and entity.ts restores it exactly.
+
 # v1.43.0 — the lineage actually reaches the heir
 
 An audit sweep (the four questions under "Next") over the meta-loop. Every

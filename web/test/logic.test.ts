@@ -10390,3 +10390,124 @@ describe("mobs lose interest: the floor does not empty into a knot", () => {
     expect(strikes, "an adjacent attacker gave up mid-fight").toBeGreaterThan(10);
   });
 });
+
+describe("mob life: the audit of v1.44", () => {
+  // One mob, a bare turn world, and a player placed where the test wants.
+  const setup = async (seed: number) => {
+    const { microbeTurn } = await import("../src/combat.js");
+    const d = new Dungeon(96, 96, seed);
+    d.floor = 2;
+    const lvl = d.current();
+    const proto = lvl.mobs.find((m) => m.alive && m.size === "medium")
+      ?? lvl.mobs.find((m) => m.alive);
+    if (!proto) throw new Error("no mob to copy");
+    // An open run of seven floor tiles in a row, for clean lines of sight.
+    let row: { x: number; y: number } | null = null;
+    for (let y = 2; y < 94 && !row; y++) {
+      for (let x = 2; x < 88 && !row; x++) {
+        let ok = true;
+        for (let k = 0; k < 7; k++) ok &&= lvl.grid.isFloor(x + k, y);
+        if (ok) row = { x, y };
+      }
+    }
+    if (!row) throw new Error("no open row");
+    lvl.mobs.length = 0;
+    const player = { x: row.x + 6, y: row.y, hp: 99999, maxhp: 99999, atp: 50,
+                     atpMax: 100, status: [] };
+    const turn = (t: number, extra: Partial<Parameters<typeof microbeTurn>[0]> = {}) =>
+      microbeTurn({
+        grid: lvl.grid, mobs: lvl.mobs, player,
+        rng: makeRng(t * 7 + 1), armour: 1, threat: 0.5, mobSpeed: 1,
+        mired: () => false, packets: [], clouds: [], drops: [],
+        stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up], ...extra,
+      });
+    return { lvl, proto, row, player, turn };
+  };
+
+  it("a sessile cell still strikes you after you spent a while elsewhere", async () => {
+    // It "senses" from anywhere, so it ran the chase clock while you were
+    // across the floor, went bored, and then ignored you standing beside it.
+    const { lvl, proto, row, player, turn } = await setup(4);
+    lvl.mobs.push({ ...proto, x: row.x + 5, y: row.y, ax: row.x + 5, ay: row.y,
+                    alive: true, hp: 999, maxhp: 999, behaviour: "sessile",
+                    weapon: "melee", heading: null });
+    player.x = row.x + 60 < 94 ? row.x + 60 : 2; player.y = row.y;
+    for (let t = 0; t < 20; t++) turn(t);
+    player.x = row.x + 6; player.y = row.y;
+    let strikes = 0;
+    for (let t = 20; t < 60; t++) {
+      for (const e of turn(t)) if (e.kind === "strike") strikes++;
+    }
+    expect(strikes, "a sessile cell sulked beside you").toBeGreaterThan(20);
+  });
+
+  it("a gunner that is hitting you does not lose interest", async () => {
+    const { lvl, proto, row, turn } = await setup(4);
+    lvl.mobs.push({ ...proto, x: row.x + 3, y: row.y, ax: row.x + 3, ay: row.y,
+                    alive: true, hp: 999, maxhp: 999, behaviour: "chase",
+                    weapon: "bolt", reload: 0, charging: 0, heading: null });
+    let fired = 0, bored = 0;
+    for (let t = 0; t < 80; t++) {
+      for (const e of turn(t)) if (e.kind === "fire") fired++;
+      if ((lvl.mobs[0]!.bored ?? 0) > 0) bored++;
+    }
+    expect(fired, "the gunner never fired -- the test is not testing").toBeGreaterThan(10);
+    expect(bored, "it gave up while it was hitting you").toBe(0);
+  });
+
+  it("an elite never divides, and an ordinary cell in its place does", async () => {
+    // A boss that split left a second boss holding the stairs shut.
+    for (const elite of [true, false]) {
+      const { lvl, proto, row, player, turn } = await setup(4);
+      player.x = 2; player.y = 2;               // far away: calm, unaware
+      lvl.mobs.push({ ...proto, x: row.x + 3, y: row.y, ax: row.x + 3, ay: row.y,
+                      alive: true, elite, hp: proto.maxhp, calm: 100, heading: null });
+      let divided = 0;
+      for (let t = 0; t < 200; t++) {
+        for (const e of turn(t, { fissionChance: 1, founding: 40 })) {
+          if (e.kind === "divide") divided++;
+        }
+      }
+      if (elite) expect(divided, "an elite divided").toBe(0);
+      else expect(divided, "the control never divided -- the test is not testing")
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it("a cell divides again once it has grown back", async () => {
+    // Nothing healed a mob and a split leaves two halves, so every cell
+    // divided exactly once, ever: one founder could only ever become two.
+    const { lvl, proto, row, player, turn } = await setup(4);
+    player.x = 2; player.y = 2;
+    lvl.mobs.push({ ...proto, x: row.x + 3, y: row.y, ax: row.x + 3, ay: row.y,
+                    alive: true, elite: false, hp: proto.maxhp, calm: 100, heading: null });
+    for (let t = 0; t < 400; t++) turn(t, { fissionChance: 0.2, founding: 40 });
+    const alive = lvl.mobs.filter((m) => m.alive).length;
+    expect(alive, "one founder never got past two cells").toBeGreaterThanOrEqual(4);
+  });
+
+  it("damage from any source makes a cell uncalm", async () => {
+    // Five paths hurt a mob and none reset `calm`; it is measured from hp now.
+    const { lvl, proto, row, player, turn } = await setup(4);
+    player.x = 2; player.y = 2;
+    lvl.mobs.push({ ...proto, x: row.x + 3, y: row.y, ax: row.x + 3, ay: row.y,
+                    alive: true, elite: false, hp: proto.maxhp, calm: 0, heading: null });
+    const m = lvl.mobs[0]!;
+    for (let t = 0; t < 10; t++) turn(t, { fissionChance: 0 });
+    expect(m.calm ?? 0).toBeGreaterThanOrEqual(10);
+    m.hp -= 1;                                   // hurt by something outside combat.ts
+    turn(10, { fissionChance: 0 });
+    expect(m.calm, "a hit did not reset calm").toBe(0);
+  });
+
+  it("a slow body ages its boredom in real turns", async () => {
+    // Behind the cooldown gate, a large body counted every other turn.
+    const { lvl, proto, row, player, turn } = await setup(4);
+    player.x = 2; player.y = 2;
+    lvl.mobs.push({ ...proto, x: row.x + 3, y: row.y, ax: row.x + 3, ay: row.y,
+                    alive: true, size: "large", hp: 999, maxhp: 999,
+                    bored: 12, heading: 0 });
+    for (let t = 0; t < 12; t++) turn(t, { fissionChance: 0 });
+    expect(lvl.mobs[0]!.bored, "boredom ran at half speed").toBe(0);
+  });
+});

@@ -112,14 +112,29 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // undamaged, undisturbed cell with room DOUBLES. Collected into `born`
     // and appended after the loop -- pushing into `w.mobs` while iterating
     // it would give the daughter a turn on the turn it was born.
-    m.calm = (m.calm ?? 0) + 1;
+    // "Turns since it last took damage", measured HERE rather than reset at
+    // each damage site: five paths hurt a mob (the strike, the aura, three
+    // casts) and none of them reset it, so "not while being hit" never held.
+    // Comparing against last turn's hp catches every one, and any added later.
+    m.calm = m.hp < (m.seenHp ?? m.hp) ? 0 : (m.calm ?? 0) + 1;
+    // Regrowth. Fission needs a whole cell and leaves two halves, and nothing
+    // ever healed a mob -- so every cell on a floor divided exactly once,
+    // ever, and a cleared room never refilled. An undisturbed cell grows back,
+    // about forty turns from half to whole. GROWTH_CAP still bounds the floor.
+    if (m.calm >= REGROW_AFTER && m.calm % 4 === 0 && m.hp < m.maxhp) {
+      m.hp = Math.min(m.hp + Math.max(Math.round(m.maxhp * 0.1), 1), m.maxhp);
+    }
     // Kin within two tiles: the contact-inhibition term. Counted here
     // rather than in fission.ts because it needs the world.
     const kin = w.mobs.filter((o) => o.alive && o !== m && o.id === m.id
       && chebyshev(o.x, o.y, m.x, m.y) <= 2).length
       + born.filter((o) => o.id === m.id
           && chebyshev(o.x, o.y, m.x, m.y) <= 2).length;
-    if (divides(m.hp, m.maxhp,
+    // Never an elite. `{ ...m }` copies `elite`, the name and the grown
+    // stats, so a boss that divided left a second boss holding the floor's
+    // gate shut, and an elite floor gained elites (and their loot) the
+    // promotion count never allowed.
+    if (!m.elite && divides(m.hp, m.maxhp,
                 { population: alive + born.length, founding: w.founding ?? alive,
                   calm: m.calm, kin },
                 w.rng, w.fissionChance ?? undefined)) {
@@ -132,12 +147,13 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
         // identically read as a duplication glitch rather than as life.
         const d: Mob = { ...m, uid: daughterUid(w, born), x: spot.x, y: spot.y,
                          ax: spot.x, ay: spot.y, hp: share.daughter,
-                         calm: 0, banked: 0, status: [],
+                         calm: 0, seenHp: share.daughter, banked: 0, status: [],
                          agenda: newAgenda(m.behaviour, w.rng) };
         born.push(d);
         events.push({ kind: "divide", mob: m, at: spot });
       }
     }
+    m.seenHp = m.hp;
 
     // Status effects resolve first: a poisoned microbe still takes damage.
     const selfDmg = tick(m.status);
@@ -150,10 +166,9 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       }
     }
 
-    // Large bodies act less often, and impaired ones less still.
-    if (m.cooldown > 0) { m.cooldown -= 1; continue; }
-    m.cooldown = Math.round(SIZES[m.size].cooldown / haste(m.status));
-
+    // Sensing and the boredom clocks run BEFORE the cooldown gate. After it,
+    // a body that acts every other turn aged them at half speed, so a
+    // filament chased for twenty turns and sulked for eighty.
     // Distance from the NEAREST tile of the body: a three-tile filament can
     // reach you from either end.
     const fp = SIZES[m.size].footprint;
@@ -182,7 +197,11 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // catching you has no reason to give up.
     m.bored = Math.max((m.bored ?? 0) - 1, 0);
     const senses = dist <= senseRange(m.behaviour) || m.behaviour === "sessile";
-    if (senses && m.bored === 0) {
+    // Not a sessile cell: it cannot chase, so it cannot chase fruitlessly.
+    // It "senses" from anywhere so it strikes whatever comes adjacent, and
+    // that made it bored after ten turns of you being elsewhere on the floor
+    // -- then passive for forty while you stood next to it.
+    if (senses && m.bored === 0 && m.behaviour !== "sessile") {
       m.chase = (m.chase ?? 0) + 1;
       if (m.chase > CHASE_LIMIT) {
         m.bored = BORED_TURNS;
@@ -204,6 +223,10 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     } else if (!senses) {
       m.chase = 0;
     }
+    // Large bodies act less often, and impaired ones less still.
+    if (m.cooldown > 0) { m.cooldown -= 1; continue; }
+    m.cooldown = Math.round(SIZES[m.size].cooldown / haste(m.status));
+
     const aware = senses && m.bored === 0;
     if (!aware) {
       const budget = { banked: m.banked ?? 0 };
@@ -238,11 +261,15 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       if (clear) {
         if (m.charging < weapon.windup) {
           m.charging += 1;
+          m.chase = 0;        // winding up a shot at you is not giving up
           events.push({ kind: "charge", mob: m, weapon: weapon.name });
           continue;
         }
         m.charging = 0;
         m.reload = weapon.cooldown;
+        // A hit at range resets the clock like a hit in contact. Only the
+        // melee path did, so a gunner gave up while it was hitting you.
+        m.chase = 0;
         const raw = Math.max(Math.round(m.atk * weapon.power), 1);
 
         if (weapon.kind === "packet") {
@@ -376,6 +403,9 @@ const CHASE_LIMIT = 10;
 
 /** How long it stays disengaged. Long enough to actually lose you. */
 const BORED_TURNS = 40;
+/** Calm turns before a split or wounded cell starts to grow back. Matches the
+ *  calm fission itself asks for. */
+const REGROW_AFTER = 6;
 
 /**
  * A free tile beside a cell, for a daughter to occupy.

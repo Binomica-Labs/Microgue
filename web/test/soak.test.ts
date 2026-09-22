@@ -2439,7 +2439,11 @@ describe("the recorder records enough to debug from", () => {
     // A snapshot every turn would evict the events that explain the state.
     const g = await game();
     g.startRun(0);
-    for (let i = 0; i < 200; i++) g.press("wait");
+    // Unkillable: this is about the ring, and a strain that died at turn 42
+    // on one seed's mob path wrote two snapshots and failed for no reason
+    // to do with the recorder.
+    for (let i = 0; i < 200; i++) { g.player.hp = g.player.maxhp; g.press("wait"); }
+    expect(g.dead, "the strain died anyway").toBe(false);
     const all = g.trace.all();
     const snaps = all.filter((e) => e.kind === "state").length;
     expect(snaps, "no snapshots at all over 200 turns").toBeGreaterThan(3);

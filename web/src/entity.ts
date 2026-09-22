@@ -66,6 +66,9 @@ export interface Microbe extends Body {
   agenda?: Agenda;
   /** Turns since it last took damage. Fission needs a calm cell. */
   calm?: number;
+  /** Its hp at the end of its last turn, which is how `calm` notices damage
+   *  from any source. */
+  seenHp?: number;
   /** Turns spent aware of the player without landing a hit. See combat.ts. */
   chase?: number;
   /** Turns of disengagement left: it has lost interest and will not sense
