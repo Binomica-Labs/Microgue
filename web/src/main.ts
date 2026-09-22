@@ -45,7 +45,7 @@ import type { Point } from "./mapgen.js";
 import { Effects } from "./fx.js";
 import { 
          type Cloud, type Packet } from "./projectile.js";
-import { type Box } from "./chrome.js";
+import { type Box, uiUnit } from "./chrome.js";
 import { 
          type ResearchRow } from "./screens.js";
 import { installUpdater } from "./sw_client.js";
@@ -126,6 +126,7 @@ class Game {
   spinStart: number | null = null;
   barH = 0;
   logH = 0;
+  logMaxH = 0;
   settings: Settings = DEFAULT_SETTINGS;
   /** @internal: public only because the turn engine lives in turn.ts */
   last = 0;
@@ -526,13 +527,36 @@ class Game {
     if (this.path && this.path.length > 1) this.walk = { nodes: this.path, i: 0 };
   }
 
+  /**
+   * Where on screen the player is drawn: the middle of the space the HUD
+   * leaves, not the middle of the glass.
+   *
+   * Centring on the whole screen put the cell behind the controls in
+   * landscape. On an 844x390 phone the status bar takes a quarter of the
+   * height and four columns of buttons a quarter of the width, so the "centre"
+   * sat on the log with the world's open side under the buttons. Before the
+   * HUD has laid out once (barH 0, buttons unplaced) it is the plain centre.
+   */
+  camCentre(W: number, H: number): Point {
+    const ins = this.insets();
+    const bottom = H - ins.bottom - this.barH;
+    let right = W - ins.right;
+    for (const b of this.buttons) if (b.w > 0) right = Math.min(right, b.x);
+    // Never so far off-centre that the far side of the view is starved: the
+    // lit disc has to fit on BOTH sides of the cell.
+    const cx = Math.max((ins.left + right) / 2, W * 0.3);
+    const cy = Math.max((ins.top + bottom) / 2, H * 0.3);
+    return { x: cx, y: cy };
+  }
+
   /** Screen point -> tile. Lives on the class because pointerDown needs it. */
   toTile(cx: number, cy: number): Point {
     const r = this.canvas.getBoundingClientRect();
     const s = TILE * this.zoom;
+    const c = this.camCentre(r.width, r.height);
     return {
-      x: Math.floor((cx - r.left - r.width / 2) / s + this.player.ax + 0.5),
-      y: Math.floor((cy - r.top - r.height / 2) / s + this.player.ay + 0.5),
+      x: Math.floor((cx - r.left - c.x) / s + this.player.ax + 0.5),
+      y: Math.floor((cy - r.top - c.y) / s + this.player.ay + 0.5),
     };
   }
 
@@ -734,7 +758,7 @@ class Game {
   /** @internal: public because input routing lives in input.ts */
   mapPoint(x: number, y: number): { x: number; y: number } {
     const ins = this.insets();
-    const u = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * this.settings.uiScale;
+    const u = uiUnit(innerWidth, innerHeight, this.settings.uiScale);
     const v = this.view;
     if (!v) return { x: 0, y: 0 };
     return toWorld(v, x, y - (ins.top + 52 * u));

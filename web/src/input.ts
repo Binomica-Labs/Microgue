@@ -13,7 +13,7 @@ import { classifyDown, classifyKey } from "./gesture.js";
 import { buttonAt } from "./buttons.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { slotAt } from "./plasmid_ui.js";
-import { inBox as inBoxOf, type Box } from "./chrome.js";
+import { inBox as inBoxOf, type Box, uiUnit } from "./chrome.js";
 import { i_menuPress, i_menuTap } from "./menu_input.js";
 import { advance } from "./aftermath.js";
 import { castAbility } from "./cast.js";
@@ -300,7 +300,7 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
   if ((_g.dead || _g.showLab) && _g.shopFrom !== null) {
     const dy = y - _g.shopFrom.y;
     _g.shopMoved = Math.max(_g.shopMoved, Math.abs(dy) + Math.abs(x - _g.shopFrom.x));
-    const rowPx = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * 34;
+    const rowPx = uiUnit(innerWidth, innerHeight) * 34;
     const want = _g.shopAnchor - dy / rowPx;
     _g.shopScroll = Math.min(Math.max(want, 0), _g.shopMaxScroll);
     return;
@@ -318,7 +318,7 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
         _g.dragBin = null;                 // it is a scroll, not an install
         _g.dragXY = null;
         _g.gesture = "none";
-        const rowPx = Math.max(Math.min(innerWidth, innerHeight) / 420, 1) * 34;
+        const rowPx = uiUnit(innerWidth, innerHeight) * 34;
         _g.binScroll = Math.min(Math.max(_g.binAnchor - dy / rowPx, 0),
                                 _g.binMaxScroll);
         return;

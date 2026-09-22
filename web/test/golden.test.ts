@@ -33,8 +33,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  lines of 77680, and every one of them either a measureText from ellipsising
  *  the status line -- which real Chrome showed running off the right edge of
  *  every phone -- or a fill in Nitzschia's pigment, from the striae its sprite
- *  had been missing. */
-const GOLDEN = "f0e97b5d8171a8b7";
+ *  had been missing.
+ *
+ *  Re-recorded for the layout pass (v1.49). Proven before updating: with the
+ *  camera put back on the screen centre and the buttons reserving the live
+ *  log height, the old hash came back exactly -- so the move is those two
+ *  and only those. The world is offset by half the button column and half
+ *  the status bar, and the control strip reserves the log's full four lines. */
+const GOLDEN = "b025dc390038dce4";
 
 const trace: string[] = [];
 

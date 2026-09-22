@@ -34,6 +34,9 @@ const VIEWS = [
   { name: "small-phone", width: 320, height: 640, dpr: 2, mobile: true },
   { name: "tablet", width: 820, height: 1180, dpr: 2, mobile: true },
   { name: "desktop", width: 1440, height: 900, dpr: 2, mobile: false },
+  { name: "phone-land", width: 844, height: 390, dpr: 3, mobile: true },
+  { name: "small-land", width: 640, height: 320, dpr: 2, mobile: true },
+  { name: "monitor", width: 2560, height: 1440, dpr: 1, mobile: false },
 ];
 
 /** Each scene drives the real game through the console handle in debug.ts. */

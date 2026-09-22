@@ -1813,7 +1813,7 @@ describe("state that should persist, does", () => {
     // Presentation and derived state with no meaning after a reload.
     log: "the message log", slotBoxes: "hit boxes, per frame",
     spinStart: "a spin in progress", barH: "layout, per frame",
-    logH: "layout, per frame", turnSeed: "derived from the turn",
+    logH: "layout, per frame", logMaxH: "layout, per frame", turnSeed: "derived from the turn",
     exporting: "an export in flight", spotted: "who has been noticed this run",
     researchPick: "a bench selection", packets: "in-flight effects",
     clouds: "in-flight effects", insetCache: "a cached measurement",

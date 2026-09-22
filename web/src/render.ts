@@ -26,7 +26,7 @@ import { cloudAlpha, cloudTiles } from "./projectile.js";
 import { describe as describeSlot, drawBinList, drawItemCard, drawRing }
   from "./plasmid_ui.js";
 import { clampView, drawGraph, fitView, frame, litBounds } from "./kegg_ui.js";
-import { drawClose, stage } from "./chrome.js";
+import { drawClose, stage, uiUnit } from "./chrome.js";
 import { isSeen, isVisible } from "./fov.js";
 import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
@@ -72,7 +72,7 @@ export function r_draw(_g: Game): void {
     if (_g.pickingClassFor !== null) { r_drawPicker(_g, W, H); return; }
     // Naming is modal too: after the class, before inoculation.
     if (_g.naming !== null) {
-      const u = Math.max(Math.min(W, H) / 420, 1);
+      const u = uiUnit(W, H);
       _g.nameBoxes = drawNaming(_g, W, H, _g.insets(), u);
       _g.drawToasts(W, H);
       return;
@@ -105,13 +105,16 @@ export function r_draw(_g: Game): void {
     const px = TILE * _g.zoom;
     ctx.save();
     const sh = _g.fx.shakeOffset(_g.now);
-    ctx.translate(W / 2 - (_g.player.ax + 0.5) * px + sh.x,
-                  H / 2 - (_g.player.ay + 0.5) * px + sh.y);
+    const cam = _g.camCentre(W, H);
+    ctx.translate(cam.x - (_g.player.ax + 0.5) * px + sh.x,
+                  cam.y - (_g.player.ay + 0.5) * px + sh.y);
 
-    const x0 = Math.max(Math.floor((_g.player.ax - W / px / 2) - 1), 0);
-    const x1 = Math.min(Math.ceil((_g.player.ax + W / px / 2) + 1), _g.level.grid.w - 1);
-    const y0 = Math.max(Math.floor((_g.player.ay - H / px / 2) - 1), 0);
-    const y1 = Math.min(Math.ceil((_g.player.ay + H / px / 2) + 1), _g.level.grid.h - 1);
+    // The camera is off-centre when the HUD is lopsided, so each side of the
+    // tile window is measured from the camera, not as half the screen.
+    const x0 = Math.max(Math.floor((_g.player.ax - cam.x / px) - 1), 0);
+    const x1 = Math.min(Math.ceil((_g.player.ax + (W - cam.x) / px) + 1), _g.level.grid.w - 1);
+    const y0 = Math.max(Math.floor((_g.player.ay - cam.y / px) - 1), 0);
+    const y1 = Math.min(Math.ceil((_g.player.ay + (H - cam.y) / px) + 1), _g.level.grid.h - 1);
 
     // Clip the world to the tile window the fog actually covers. The wall
     // silhouette is the WHOLE grid (rock with cave-holes), but the fog loop
@@ -455,21 +458,21 @@ export function r_draw(_g: Game): void {
                       stairs: down ?? null,
                       hostiles: _g.level.mobs.filter(
                         (m) => m.alive && isVisible(_g.level.sight, m.x, m.y)) },
-                    Math.max(Math.min(W, H) / 420, 1),
+                    uiUnit(W, H),
                     () => makeCanvas());
       }
     }
     // Over the HUD: it is a decision about the tile you are standing on, and
     // it has to be answerable before anything else is.
-    r_drawOffer(_g, Math.max(Math.min(W, H) / 420, 1), W, H);
+    r_drawOffer(_g, uiUnit(W, H), W, H);
     if (_g.openDrop) {
       _g.containerBoxes = drawContainer(
-        ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
-        Math.max(Math.min(W, H) / 420, 1), _g.openDrop, _g.dropBoxes,
+        ctx, W, H, stage(W, _g.insets(), uiUnit(W, H)),
+        uiUnit(W, H), _g.openDrop, _g.dropBoxes,
         (t, w) => _g.wrap(t, w));
     }
     _g.drawToasts(W, H);
-    const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    const u = uiUnit(W, H, _g.settings.uiScale);
     // Death takes over the screen: the run has to have an ending you can read.
     // `!drawingLysis` on the OUTER condition, not just the inner one. While
     // lysis is drawing the world it calls back into r_draw, which fell through
@@ -504,7 +507,7 @@ export function r_draw(_g: Game): void {
           ctx.globalAlpha = f.report;
         }
       }
-      const u = Math.max(Math.min(W, H) / 420, 1);
+      const u = uiUnit(W, H);
       // Three screens, one at a time: report, store, ready. Each names itself
       // and has one action. See aftermath.ts.
       const ab = drawAftermath(ctx, W, H, stage(W, _g.insets(), u), u,
@@ -532,7 +535,7 @@ export function r_draw(_g: Game): void {
     } else if (_g.showPlasmid) {
       _g.drawPlasmid(W, H);
     } else {
-      layoutButtons(_g.buttons, W, H, _g.insets(), u, _g.barH + _g.logH);
+      layoutButtons(_g.buttons, W, H, _g.insets(), u, _g.barH + _g.logMaxH);
       drawButtons(ctx, _g.buttons, u);
       // The ability bar sits above the log, below the world. Only when the
       // build grants something.
@@ -557,7 +560,7 @@ export function r_drawToasts(_g: Game, W: number, H: number): void {
     const items = _g.toasts.all();
     if (items.length === 0) return;
     const ins = _g.insets();
-    const u = Math.max(Math.min(W, H) / 420, 1);
+    const u = uiUnit(W, H);
     const pad = 10 * u;
     let y = ins.top + pad;
 
@@ -590,7 +593,7 @@ export function r_drawEmergency(_g: Game, msg: string): void {
     try {
       const { ctx } = _g;
       const W = innerWidth, H = innerHeight;
-      const u = Math.max(Math.min(W, H) / 420, 1);
+      const u = uiUnit(W, H);
       ctx.setTransform(Math.min(devicePixelRatio || 1, 2), 0, 0,
                        Math.min(devicePixelRatio || 1, 2), 0, 0);
       ctx.globalAlpha = 1;
@@ -615,13 +618,37 @@ export function r_drawEmergency(_g: Game, msg: string): void {
 
 export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
-    const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    const u = uiUnit(W, H, _g.settings.uiScale);
     const ins = stage(W, _g.insets(), u);
     ctx.fillStyle = "rgba(0,0,0,0.93)";
     ctx.fillRect(0, 0, W, H);
 
+    // Landscape splits the screen: ring on the left, parts and notes on the
+    // right. Stacked, the ring had to fit 46% of a 390px height, so it was
+    // small, and the list under it ran off the bottom of the glass -- on a
+    // landscape phone the second half of the parts bin was simply not there.
+    const raw = _g.insets();
+    const fullW = W - raw.left - raw.right;
+    const side = fullW >= H * 1.25;
+    const span = side ? Math.min(fullW, 860 * u) : 0;
+    const x0 = raw.left + (fullW - span) / 2;
+    const ringW = span * 0.44;
+    // The right pane starts below the close button, which owns that corner.
+    const paneX = x0 + ringW + 12 * u;
+    const paneW = span - ringW - 12 * u;
     const avail = Math.min(W - ins.left - ins.right, H * 0.46);
-    _g.ring = {
+    const sideR = Math.min(ringW, H - raw.top - raw.bottom - 24 * u) * 0.46;
+    // Level with the top of the ring where there is height to spare, so the
+    // two panes read as one screen rather than a list stuck in the corner.
+    const paneTop = Math.max(ins.top + 70 * u, (raw.top + H - raw.bottom) / 2 - sideR);
+    _g.ring = side ? {
+      used: _g.genome.usableSlots,
+      cx: x0 + ringW / 2,
+      cy: (raw.top + H - raw.bottom) / 2,
+      rOuter: sideR,
+      rInner: sideR - Math.max(sideR * 0.26, 30 * u),
+      rot: _g.ring.rot,
+    } : {
       // The ring is the REPLICON's, not the array's. Drawing all 24 on a
       // 16-slot backbone put eight phantom wedges on screen that could be
       // tapped, selected and dropped into, and did nothing when you did.
@@ -642,12 +669,18 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     r_ringReadout(_g, u);
 
   // Parts bin: everything you hold but have not installed.
-  const cell = Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
   const gap = 8 * u;
+  const cell = side
+    ? Math.max((paneW - 7 * gap) / 6, 20)
+    : Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
   _g.bin = {
-    x: ins.left + gap, y: _g.ring.cy + _g.ring.rOuter + 16 * u,
+    x: side ? paneX + gap : ins.left + gap,
+    y: side ? paneTop : _g.ring.cy + _g.ring.rOuter + 16 * u,
     cell, gap, cols: 6,
   };
+  // Where the notes under the list go, and how wide they may run.
+  const textX = _g.bin.x;
+  const textW = side ? paneW - 2 * gap : W - (ins.left + ins.right + 32 * u);
   ctx.fillStyle = "#8fa89a";
   ctx.font = `${11 * u}px ui-monospace,monospace`;
 
@@ -660,7 +693,10 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     // The list gets the room the tile grid used, and no more: complexes and
     // hazards still have to fit under it.
     const binW = _g.bin.cell * _g.bin.cols + _g.bin.gap * (_g.bin.cols - 1);
-    const binH = Math.min(_g.genome.bin.length * 34 * u, 152 * u);
+    // Beside the ring the list has the pane's height to itself; leave room
+    // for a few lines of notes under it rather than a fixed 152.
+    const binCap = side ? Math.max(H - raw.bottom - paneTop - 110 * u, 102 * u) : 152 * u;
+    const binH = Math.min(_g.genome.bin.length * 34 * u, binCap);
     const list = drawBinList(ctx, { ..._g.bin, w: binW, h: binH },
                              _g.genome.bin, u, _g.dragBin, _g.binScroll,
                              _g.binRows);
@@ -698,7 +734,7 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const bottom = H - ins.bottom - 6 * u;
     const wrapped: { text: string; head: boolean }[] = [];
     for (const [i, line] of lines.entries()) {
-      for (const w of _g.wrap(line, W - (ins.left + ins.right + 32 * u))) {
+      for (const w of _g.wrap(line, textW)) {
         wrapped.push({ text: w, head: i === 0 });
       }
     }
@@ -716,7 +752,7 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
       const y = py + row * lh;
       if (y > bottom) return;             // nothing is drawn past the edge
       ctx.fillStyle = w.head ? "#ffffff" : "#9fb8a8";
-      ctx.fillText(w.text, ins.left + gap, y);
+      ctx.fillText(w.text, textX, y);
     });
 
     // A real close target. "Tap outside" was ambiguous, and it was what let a
@@ -735,7 +771,7 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
 
 export function r_drawMapScreen(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
-    const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    const u = uiUnit(W, H, _g.settings.uiScale);
     const ins = stage(W, _g.insets(), u);   // chrome in the column; graph pans free
     ctx.fillStyle = "rgba(4,7,6,0.97)";
     ctx.fillRect(0, 0, W, H);
@@ -798,11 +834,9 @@ export function r_drawLysis(_g: Game, W: number, H: number, p: Phase): void {
     ctx.restore();
   }
 
-  // The world is drawn centred on the player, so the remains are centred too.
-  // No camera lookup needed, and none exists to ask.
+  // The remains go where the cell was drawn: the camera's centre.
   const px = _g.zoom * TILE;
-  const cx = W / 2;
-  const cy = H / 2;
+  const { x: cx, y: cy } = _g.camCentre(W, H);
 
   // The remains, spreading.
   if (p.spill > 0) {

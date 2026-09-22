@@ -8,7 +8,7 @@
 // between them.
 
 import { drawClassPicker } from "./class_ui.js";
-import { drawClose, stage } from "./chrome.js";
+import { drawClose, stage, uiUnit } from "./chrome.js";
 import { drawSplash } from "./screens.js";
 import type { Game } from "./main.js";
 
@@ -17,7 +17,7 @@ export function r_drawPicker(_g: Game, W: number, H: number): void {
   if (slot === null) return;
   const ctx = _g.ctx;
 
-    const uu = Math.max(Math.min(W, H) / 420, 1);
+    const uu = uiUnit(W, H);
     drawClassPicker(ctx, W, H, _g.insets(), uu, _g.classRows,
                     slot);
     _g.closeBox = drawClose(ctx, W, _g.insets(), uu);
@@ -27,7 +27,7 @@ export function r_drawPicker(_g: Game, W: number, H: number): void {
 
 export function r_drawSplash(_g: Game, W: number, H: number): void {
   const ctx = _g.ctx;
-  _g.closeBox = drawSplash(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
-    Math.max(Math.min(W, H) / 420, 1), _g.slotBoxes, _g.lab);
+  _g.closeBox = drawSplash(ctx, W, H, stage(W, _g.insets(), uiUnit(W, H)),
+    uiUnit(W, H), _g.slotBoxes, _g.lab);
   _g.drawToasts(W, H);
 }

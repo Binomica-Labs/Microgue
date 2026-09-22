@@ -7,14 +7,14 @@
 // the frame past the state it reads. `r_drawModals` returns true when it has
 // taken the frame, so the caller stops.
 
-import { stage } from "./chrome.js";
+import { stage, uiUnit } from "./chrome.js";
 import { drawNotes, drawResearch } from "./screens.js";
 import type { Game } from "./main.js";
 
 export function r_drawModals(_g: Game, W: number, H: number): boolean {
   const ctx = _g.ctx;
   if (_g.showResearch) {
-    const u = Math.max(Math.min(W, H) / 420, 1);
+    const u = uiUnit(W, H);
     _g.closeBox = drawResearch(ctx, W, H, stage(W, _g.insets(), u), u,
       _g.genome.slots.flatMap((p) =>
         p?.kind === "gene" && p.id !== "ori"
@@ -26,8 +26,8 @@ export function r_drawModals(_g: Game, W: number, H: number): boolean {
     return true;
   }
   if (_g.showNotes) {
-    _g.closeBox = drawNotes(ctx, W, H, stage(W, _g.insets(), Math.max(Math.min(W, H) / 420, 1)),
-      Math.max(Math.min(W, H) / 420, 1), _g.run,
+    _g.closeBox = drawNotes(ctx, W, H, stage(W, _g.insets(), uiUnit(W, H)),
+      uiUnit(W, H), _g.run,
       (t, w) => _g.wrap(t, w));
     _g.drawToasts(W, H);
     return true;

@@ -15,11 +15,12 @@ import { t_visibleHostile } from "./turn.js";
 import { ellipsise } from "./screens.js";
 import { Dungeon } from "./dungeon.js";
 import type { Game } from "./main.js";
+import { uiUnit } from "./chrome.js";
 
 export function r_drawHud(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
     const ins = _g.insets();
-    const u = Math.max(Math.min(W, H) / 420, 1) * _g.settings.uiScale;
+    const u = uiUnit(W, H, _g.settings.uiScale);
     const pad = 8 * u;
     const left = ins.left + pad;
     const s = _g.level.stratum;
@@ -161,6 +162,11 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     // ABOVE its y. Sizing the panel to shown.length*lh left it exposed.
     const logH = shown.length > 0 ? (shown.length + 0.4) * lh + pad * 0.5 : 0;
     _g.logH = logH;
+    // The most the log can ever take. The buttons reserve THIS, not the log's
+    // current height: reserving the live height re-flowed the whole control
+    // strip every time a message arrived or faded, and the camera, which
+    // centres on the space the controls leave, jumped with it.
+    _g.logMaxH = (4 + 0.4) * lh + pad * 0.5;
 
     if (logH > 0) {
       ctx.fillStyle = "rgba(0,0,0,0.6)";

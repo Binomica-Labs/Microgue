@@ -52,7 +52,7 @@ import { SOURCES, cached, fetchAll, fetchOne, parseFasta, parseFirstId }
 import { launch, stepClouds, stepPackets, type Cloud, type Packet }
   from "../src/projectile.js";
 import { Toasts, guard } from "../src/toast.js";
-import { drawClose, inBox as inBoxChrome } from "../src/chrome.js";
+import { drawClose, inBox as inBoxChrome, uiUnit } from "../src/chrome.js";
 import { SUBSTRATES, addDrop, dropAt, itemColour, itemName, itemNote, removeDrop,
          rollPart, substratesAt, yieldOf, type Drop } from "../src/items.js";
 import * as say from "../src/flavour.js";
@@ -571,11 +571,33 @@ describe("plasmid ring geometry", () => {
   });
 });
 
+describe("the UI unit", () => {
+  it("is exactly 1 on every phone, portrait or landscape", () => {
+    for (const [W, H] of [[320, 640], [390, 844], [844, 390], [640, 320], [412, 915]] as const) {
+      expect(uiUnit(W, H), `${String(W)}x${String(H)}`).toBe(1);
+    }
+  });
+  it("grows with the screen, but slower than it, and stops at 2", () => {
+    const tablet = uiUnit(820, 1180), desk = uiUnit(1920, 1080), mon = uiUnit(2560, 1440);
+    expect(tablet).toBeGreaterThan(1);
+    expect(desk).toBeGreaterThan(tablet);
+    expect(mon).toBeGreaterThan(desk);
+    // The old linear rule put a 1440p monitor at 3.4x.
+    expect(mon).toBeLessThan(1440 / 420 * 0.6);
+    expect(uiUnit(7680, 4320)).toBe(2);
+  });
+  it("applies the player's scale on top, and survives nonsense", () => {
+    expect(uiUnit(390, 844, 1.5)).toBe(1.5);
+    expect(uiUnit(Number.NaN, 800)).toBe(1);
+    expect(uiUnit(0, 0, 2)).toBe(2);
+  });
+});
+
 describe("button layout", () => {
   it("stays inside the viewport and meets the 44pt target", () => {
     for (const [W, H] of [[1080, 2340], [720, 1600], [1179, 2556]] as const) {
       const bs = makeButtons();
-      const u = Math.max(Math.min(W, H) / 420, 1);
+      const u = uiUnit(W, H);
       layoutButtons(bs, W, H, { top: 40, right: 0, bottom: 48 }, u, 300);
       for (const b of bs) {
         expect(b.w, `${W}x${H}`).toBeGreaterThanOrEqual(44);
@@ -596,7 +618,7 @@ describe("button layout", () => {
   it("never overlaps the reserved log + status bar", () => {
     for (const [W, H] of [[1080, 2340], [720, 1600], [1179, 2556]] as const) {
       const bs = makeButtons();
-      const u = Math.max(Math.min(W, H) / 420, 1);
+      const u = uiUnit(W, H);
       const reserve = 340;
       layoutButtons(bs, W, H, { top: 40, right: 0, bottom: 48 }, u, reserve);
       for (const b of bs) {

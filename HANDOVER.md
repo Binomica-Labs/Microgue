@@ -1,3 +1,46 @@
+# v1.49.0 — the screen fits the device, not a phone blown up
+
+## Looked at first
+
+`npm run shots` gained three viewports it never had: a landscape phone
+(844x390), a small landscape phone (640x320) and a 2560x1440 monitor. What
+they showed:
+
+* The UI unit was `max(short / 420, 1)`, pasted into twenty places, linear
+  and uncapped. A 1440p monitor drew log and overlay text at 3.4x a phone's
+  size. Some copies applied `settings.uiScale` and some did not.
+* The camera centred the cell on the whole screen. In landscape the status
+  bar takes a quarter of the height and four columns of buttons a quarter of
+  the width, so the cell sat on the log with the open cave under the buttons.
+* The plasmid screen stacked ring over list. On a landscape phone the ring got
+  46% of 390px and the parts bin ran off the bottom of the glass.
+
+## What changed
+
+* `uiUnit(W, H, scale)` in chrome.ts is the one definition: `sqrt(short/420)`
+  clamped to [1, 2]. Every phone, either orientation, stays at exactly 1; a
+  tablet ~1.4, 1080p ~1.6, 1440p ~1.85, never past 2.
+* `Game.camCentre()` centres the cell in the space the HUD leaves (left of the
+  button strip, above the status bar), floored at 30% of each axis. The draw
+  translate, the fogged tile window, `toTile` and the lysis all use it, so taps
+  still land on the tile they are drawn over.
+* The buttons reserve the log's full four-line height (`logMaxH`), not its live
+  height. They used to re-flow whenever a message came or went, and the camera
+  would have jumped with them.
+* Plasmid screen: when width >= 1.25x height, the ring goes on the left and the
+  parts bin and notes on the right, level with the ring's top.
+
+## Proven
+
+The golden moved. With the camera put back on the screen centre and the live
+log reserve restored, the old hash came back exactly, so the move is those two
+changes only. The `uiUnit` swap and the plasmid split are pixel-neutral at 400x800.
+
+New tests: `uiUnit` is 1 on phones, monotone and capped; over all 11 layout
+viewports, the cell is clear of the buttons and bar and a tap on it reads as its
+own tile; the whole parts list is on screen; and the list is under OR beside the
+ring, never on it.
+
 # v1.48.0 — a mob turn scales with the floor, not its square
 
 ## Measured first

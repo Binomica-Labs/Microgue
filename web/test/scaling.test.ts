@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Plasmid } from "../src/plasmid.js";
 import { WILD_TYPE } from "../src/allele.js";
 import { PATHWAY_COLOUR, drawRing } from "../src/plasmid_ui.js";
+import { uiUnit } from "../src/chrome.js";
 
 /**
  * Layout across every form factor anyone will actually use.
@@ -247,7 +248,7 @@ describe("layout holds on every form factor", () => {
     // living world, so the trace also carries the status line and the log
     // underneath -- measuring the leftmost text of the whole frame measures
     // those, which is a false positive I hit before writing it this way.
-    const u = Math.max(Math.min(W, H) / 420, 1);
+    const u = uiUnit(W, H);
     const avail = W - 40;
     const padded = Math.max((avail - Math.min(avail, 470 * u)) / 2, 0);
     if (padded < 60) return;                    // narrow enough to fill legitimately
@@ -600,11 +601,57 @@ describe("text stays inside the thing it is drawn in", () => {
     g.startRun(0);
     g.openPlasmid(true);
     g.frame(100);
+    // Stacked (portrait) the list sits under the ring; side by side
+    // (landscape) it sits to its right. Either way, never ON it.
     const ringBottom = g.ring.cy + g.ring.rOuter;
+    const ringRight = g.ring.cx + g.ring.rOuter;
     for (const row of g.binRows) {
-      expect(row.box.y, `${name}: a bin row starts above the ring's bottom edge`)
-        .toBeGreaterThanOrEqual(ringBottom - 2);
+      const clear = row.box.y >= ringBottom - 2 || row.box.x >= ringRight - 2;
+      expect(clear, `${name}: a bin row at ${String(Math.round(row.box.x))},`
+        + `${String(Math.round(row.box.y))} is under the ring`).toBe(true);
     }
+  });
+
+  it.each(VIEWPORTS)("%s (%ix%i): the whole parts list is on screen", async (name, W, H) => {
+    // Stacked on a landscape phone, the list started below a ring sized to
+    // half the height and ran off the bottom: the parts were there, and not.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(100);
+    expect(g.binRows.length, `${name}: no bin rows drawn`).toBeGreaterThan(0);
+    for (const row of g.binRows) {
+      expect(row.box.y + row.box.h, `${name}: a bin row runs off the bottom`)
+        .toBeLessThanOrEqual(H + 1);
+      expect(row.box.x + row.box.w, `${name}: a bin row runs off the right`)
+        .toBeLessThanOrEqual(W + 1);
+    }
+  });
+});
+
+describe("the camera centres on the space the HUD leaves", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each(VIEWPORTS)("%s (%ix%i): the cell is clear of the controls and the status bar",
+    async (name, W, H) => {
+    // In landscape the status bar takes a quarter of the height and the
+    // controls a quarter of the width: centring on the glass put the cell
+    // on the log with the open side of the cave under the buttons.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.frame(100);
+    g.frame(116);                 // the HUD has laid out once
+    const c = g.camCentre(W, H);
+    const left = Math.min(...g.buttons.map((b) => b.x));
+    expect(c.x, `${name}: the cell is under the buttons`).toBeLessThan(left);
+    expect(c.y, `${name}: the cell is under the status bar`)
+      .toBeLessThan(H - g.barH);
+    // And a tap on the cell's own position reads as the cell's tile.
+    const tile = g.toTile(c.x, c.y);
+    expect(tile, `${name}: tap-to-tile disagrees with the camera`)
+      .toEqual({ x: g.player.x, y: g.player.y });
   });
 });
 

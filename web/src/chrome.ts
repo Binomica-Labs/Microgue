@@ -12,6 +12,23 @@ export const inBox = (b: Box, x: number, y: number): boolean =>
 
 export interface Insets { top: number; right: number; bottom: number; left: number; }
 
+/**
+ * The UI unit: how many CSS pixels one layout pixel of the phone design is.
+ *
+ * It was `max(short / 420, 1)` in twenty places, linear and uncapped, so a
+ * 2560x1440 monitor drew the log and every overlay at 3.4x a phone's size --
+ * 40px body text read from arm's length -- while the buttons, which have their
+ * own fit, stayed small beside it. A bigger screen is also a screen further
+ * from the eye, so the growth is sub-linear: a tablet ~1.4, a 1080p desktop
+ * ~1.6, a 1440p monitor ~1.85, and never past 2. Phones, portrait or
+ * landscape, stay at exactly 1, because it is keyed on the SHORT side.
+ */
+export function uiUnit(W: number, H: number, scale = 1): number {
+  const short = Math.min(W, H);
+  if (!Number.isFinite(short) || short <= 0) return scale;
+  return Math.min(Math.max(Math.sqrt(short / 420), 1), 2) * scale;
+}
+
 /** Backdrop for an overlay screen. */
 export function drawBackdrop(
   ctx: CanvasRenderingContext2D, w: number, h: number, alpha = 0.96,
