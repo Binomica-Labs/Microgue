@@ -127,6 +127,8 @@ class Game {
   barH = 0;
   logH = 0;
   logMaxH = 0;
+  /** The viewport `resize` last sized the canvas for. */
+  sizedFor = "";
   settings: Settings = DEFAULT_SETTINGS;
   /** @internal: public only because the turn engine lives in turn.ts */
   last = 0;
@@ -678,6 +680,13 @@ class Game {
 
   resize(): void {
     this.insetCache = null;
+    // The controls and the status bar were laid out for the OLD viewport, and
+    // the camera centres on the space they leave. Forget them until the HUD
+    // lays out again, or the first frame after a rotation centres the world
+    // on where the buttons used to be.
+    for (const b of this.buttons) b.w = 0;
+    this.barH = 0;
+    this.sizedFor = `${String(innerWidth)}x${String(innerHeight)}@${String(devicePixelRatio || 1)}`;
     // A map view framed for portrait is wrong in landscape, so drop it and
     // let the next open reframe against the real viewport.
     this.view = null;
@@ -695,6 +704,11 @@ class Game {
     // longer kill the loop permanently. Before this, one exception meant a
     // black screen with no way back short of a reload.
     try {
+      // A `resize` event is not dependable: iOS standalone can rotate without
+      // one, and moving a window to a monitor of another pixel density fires
+      // nothing at all. One string compare a frame catches both.
+      if (`${String(innerWidth)}x${String(innerHeight)}@${String(devicePixelRatio || 1)}`
+          !== this.sizedFor) this.resize();
       this.step_(t);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

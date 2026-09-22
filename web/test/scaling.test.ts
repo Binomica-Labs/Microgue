@@ -1047,3 +1047,111 @@ describe("snow and life stay within the frame budget", () => {
     expect(moteArcs(), "motes drawn on unseen floor").toBe(0);
   });
 });
+
+/**
+ * Sizes nobody designs for but browsers produce anyway: split-screen, a
+ * resized desktop window, a foldable's cover screen, an iframe that has not
+ * laid out yet. Nothing here has to look good. It has to not throw, not draw
+ * NaN, and not lose the cell or the taps.
+ */
+const EXTREMES: readonly (readonly [string, number, number])[] = [
+  ["split-screen landscape", 480, 250],
+  ["cover screen", 260, 512],
+  ["tiny window", 200, 150],
+  ["postage stamp", 100, 75],
+  ["sliver tall", 180, 1400],
+  ["sliver wide", 1600, 180],
+  ["4K", 3840, 2160],
+  ["super-ultrawide", 5120, 1440],
+  ["iframe before layout", 1, 1],
+];
+
+describe("extreme viewports degrade, they do not break", () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each(EXTREMES)("%s (%ix%i): every screen draws finite, without an error",
+    async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    for (const screen of ["", "plasmid", "map", "notes", "research"]) {
+      t.rects.length = 0; t.texts.length = 0; t.arcs.length = 0;
+      if (screen !== "") g.press(screen);
+      g.frame(100);
+      g.frame(116);
+      const errs = g.toasts.all().filter((x) => x.level === "error").map((x) => x.text);
+      expect(errs, `${name} ${screen}`).toEqual([]);
+      const bad = t.texts.filter((x) => !Number.isFinite(x.x) || !Number.isFinite(x.y));
+      expect(bad.map((x) => x.text).slice(0, 3), `${name} ${screen}: NaN text`).toEqual([]);
+      // A negative radius is an IndexSizeError in a real canvas.
+      const neg = t.arcs.filter((a) => !((a[2] ?? 0) >= 0));
+      expect(neg.length, `${name} ${screen}: negative or NaN arc radius`).toBe(0);
+      if (screen !== "") g.press(screen);
+    }
+  });
+
+  it.each(EXTREMES)("%s (%ix%i): the ring has a hole and the camera is on screen",
+    async (name, W, H) => {
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.frame(100);
+    g.frame(116);
+    const c = g.camCentre(W, H);
+    expect(c.x, `${name}: camera x`).toBeGreaterThanOrEqual(0);
+    expect(c.x, `${name}: camera x`).toBeLessThanOrEqual(W);
+    expect(c.y, `${name}: camera y`).toBeGreaterThanOrEqual(0);
+    expect(c.y, `${name}: camera y`).toBeLessThanOrEqual(H);
+    expect(g.toTile(c.x, c.y), `${name}: tap-to-tile`).toEqual({ x: g.player.x, y: g.player.y });
+    g.openPlasmid(true);
+    g.frame(132);
+    expect(g.ring.rInner, `${name}: ring hole`).toBeGreaterThan(0);
+    expect(g.ring.rOuter, `${name}: ring`).toBeGreaterThan(g.ring.rInner);
+  });
+
+  it.each(EXTREMES)("%s (%ix%i): the parts list stays inside the width",
+    async (name, W, H) => {
+    if (W < 200) return;                    // below any usable width
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(W, H, t);
+    g.startRun(0);
+    g.openPlasmid(true);
+    g.frame(100);
+    for (const row of g.binRows) {
+      expect(row.box.x + row.box.w, `${name}: a bin row runs off the right`)
+        .toBeLessThanOrEqual(W + 1);
+    }
+  });
+
+  it("a resize is picked up even when the event never arrives", async () => {
+    // iOS standalone and a window dragged between monitors both change the
+    // viewport without a dependable `resize`. The next frame has to notice.
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(390, 844, t);
+    g.startRun(0);
+    g.frame(100);
+    vi.stubGlobal("innerWidth", 844);
+    vi.stubGlobal("innerHeight", 390);
+    g.frame(116);
+    expect(g.canvas.width).toBe(844 * 2);
+    expect(g.canvas.height).toBe(390 * 2);
+  });
+
+  it("a rotation does not leave the camera on the old buttons for a frame", async () => {
+    const t: Trace = { rects: [], texts: [], arcs: [], gradients: 0 };
+    const g = await play(390, 844, t);
+    g.startRun(0);
+    g.frame(100);
+    g.frame(116);
+    vi.stubGlobal("innerWidth", 1366);
+    vi.stubGlobal("innerHeight", 1024);
+    g.resize();
+    // Before any frame at the new size the buttons still hold phone-width
+    // positions, all left of x=390: the camera must not centre on the space
+    // left of THEM on a 1366-wide screen.
+    const c = g.camCentre(1366, 1024);
+    const ins = g.insets();
+    expect(Math.abs(c.x - (ins.left + 1366 - ins.right) / 2)).toBeLessThan(1);
+    expect(Math.abs(c.y - (ins.top + 1024 - ins.bottom) / 2)).toBeLessThan(1);
+  });
+});

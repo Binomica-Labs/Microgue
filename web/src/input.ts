@@ -318,7 +318,9 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
         _g.dragBin = null;                 // it is a scroll, not an install
         _g.dragXY = null;
         _g.gesture = "none";
-        const rowPx = uiUnit(innerWidth, innerHeight) * 34;
+        // With the player's UI scale: the list is DRAWN with it, so without it
+        // the rows slid under the finger at any scale but 1.
+        const rowPx = uiUnit(innerWidth, innerHeight, _g.settings.uiScale) * 34;
         _g.binScroll = Math.min(Math.max(_g.binAnchor - dy / rowPx, 0),
                                 _g.binMaxScroll);
         return;

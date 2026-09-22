@@ -616,6 +616,17 @@ export function r_drawEmergency(_g: Game, msg: string): void {
     } catch { /* nothing left to try */ }
   }
 
+/**
+ * The ring's inner radius: a band `band` thick, or thinner when the ring is
+ * too small to afford it. `outer - band` went negative on any window under
+ * about 200x150, and a negative radius is an IndexSizeError from arc(), which
+ * the frame guard turned into an error screen every frame.
+ */
+export function ringHole(outer: number, band: number): number {
+  const r = Math.max(outer, 1);
+  return Math.max(r - band, r * 0.45);
+}
+
 export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
     const u = uiUnit(W, H, _g.settings.uiScale);
@@ -645,8 +656,8 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
       used: _g.genome.usableSlots,
       cx: x0 + ringW / 2,
       cy: (raw.top + H - raw.bottom) / 2,
-      rOuter: sideR,
-      rInner: sideR - Math.max(sideR * 0.26, 30 * u),
+      rOuter: Math.max(sideR, 1),
+      rInner: ringHole(sideR, Math.max(sideR * 0.26, 30 * u)),
       rot: _g.ring.rot,
     } : {
       // The ring is the REPLICON's, not the array's. Drawing all 24 on a
@@ -655,8 +666,8 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
       used: _g.genome.usableSlots,
       cx: W / 2,
       cy: ins.top + avail * 0.55 + 20 * u,
-      rOuter: avail * 0.42,
-      rInner: avail * 0.42 - Math.max(avail * 0.11, 30 * u),
+      rOuter: Math.max(avail * 0.42, 1),
+      rInner: ringHole(avail * 0.42, Math.max(avail * 0.11, 30 * u)),
       rot: _g.ring.rot,
     };
 
@@ -670,9 +681,12 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
 
   // Parts bin: everything you hold but have not installed.
   const gap = 8 * u;
+  // Bounded by the width it has, never by a floor: the list is full-width
+  // ROWS now, and a 44px cell floor left over from the old tile grid pushed
+  // the list off the right of anything under 320px.
   const cell = side
-    ? Math.max((paneW - 7 * gap) / 6, 20)
-    : Math.max(Math.min((W - ins.left - ins.right - 7 * 8 * u) / 6, 62 * u), 44);
+    ? Math.max((paneW - 7 * gap) / 6, 1)
+    : Math.max(Math.min((W - ins.left - ins.right - 7 * gap) / 6, 62 * u), 1);
   _g.bin = {
     x: side ? paneX + gap : ins.left + gap,
     y: side ? paneTop : _g.ring.cy + _g.ring.rOuter + 16 * u,

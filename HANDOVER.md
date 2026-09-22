@@ -1,3 +1,32 @@
+# v1.50.0 — the layout survives the sizes nobody designs for
+
+v1.49 was tested on real devices. This pass ran nine sizes that browsers
+produce anyway: split-screen (480x250), a fold's cover screen (260x512),
+200x150, 100x75, 180x1400, 1600x180, 4K, 5120x1440, and a 1x1 iframe that
+has not laid out yet. Each test below was run without its fix first and failed.
+
+* **The plasmid ring could have a negative inner radius.** `outer - band`
+  went negative under about 200x150. `arc()` throws on a negative radius, so the
+  frame guard showed an error screen every frame. `ringHole()` bounds it at
+  45% of the outer radius. Band sizes are unchanged, so the golden did not move.
+* **The parts list ran off the right under 320px.** A 44px minimum cell width,
+  left over from the tile grid the list replaced, forced 304px of list onto a
+  260px screen. The list is bounded by the width it has.
+* **A resize with no event was never seen.** iOS standalone can rotate without
+  firing `resize`, and a window moved to a monitor with a different pixel
+  density fires nothing. `frame()` compares the viewport and DPR string against
+  `sizedFor` and resizes when they differ.
+* **The first frame after a rotation used the old buttons.** `camCentre` read
+  button positions from the previous size. Going from phone to tablet put the
+  camera left of centre for a frame. `resize()` now clears the button layout
+  and `barH`.
+* The parts-bin drag scrolled without `uiScale` while the list was drawn with
+  it, so rows slid under the finger at any scale but 1.
+
+Tests: `extreme viewports degrade, they do not break` in scaling.test.ts. It
+checks for no error toast, no NaN text, no negative arc radius, a camera on
+screen, correct tap-to-tile, a ring with a hole and a list inside the width.
+
 # v1.49.0 — the screen fits the device, not a phone blown up
 
 ## Looked at first
