@@ -1,3 +1,19 @@
+# v1.42.0 — the Lua tree is gone
+
+The repo root held the original LÖVE prototype: `main.lua`, `concord/`,
+`jumper/`, `gamera.lua`, `sprites/`, a `.love` bundle -- 38 files, none of
+it run, and the first thing anyone opening the repo saw. The README still
+said "written in Lua via Love2D". Removed; the root README now describes the
+TypeScript game in `web/` and says how to recover the prototype from
+c25b9e9 (v1.41.0).
+
+Nothing in `web/` referenced any of it -- checked by grep, and `verify` is
+green without it.
+
+**Tags had lapsed.** The release flow says tag and cut a GitHub release on
+every version; the last tag was v0.92.0. Resumed from v1.42.0. The versions
+in between are recoverable by commit message (`git log --grep '^v1.3'`).
+
 # v1.41.0 — mobs lose interest; pursuit was a ratchet
 
 Reported: "crazily populated all of a sudden" -- a mixed knot of six mobs
@@ -5423,7 +5439,7 @@ rough order of value:
    number tuned against observed play was tuned against a broken curve. The
    assertions in `spec` bound the shape; the feel is untested.
 
-6. **Delete or recover the Lua tree at the repo root.** It is the old,
+6. **(Done in v1.42.0.)** Delete or recover the Lua tree at the repo root. It is the old,
    pre-fix state, it is not what runs, and `jumper/` is the pathfinder
    `path.ts` replaced. Right now it is the first thing anyone opening the repo
    sees.
