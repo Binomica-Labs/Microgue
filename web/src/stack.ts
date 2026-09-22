@@ -89,8 +89,11 @@ export function rescueStranded(
       const free = p.slots.findIndex((s, k) => s === null && k < from);
       if (free >= 0) p.slots[free] = part;
       else p.bin.push(part);
-    } else {
-      p.stash(part);
+    } else if (!p.stash(part).ok) {
+      // A full bin: back onto a free position on the ring that remains,
+      // rather than dropped. The result of `stash` used to be ignored.
+      const free = p.slots.findIndex((s, k) => s === null && k < from);
+      if (free >= 0) p.slots[free] = part;
     }
   }
 }

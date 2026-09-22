@@ -92,12 +92,23 @@ export function b_install(_p: Plasmid, binIndex: number, slot: number): Result {
         (s, i) => i !== slot && s?.kind === "gene" && s.id === part.id);
       if (dup >= 0) return b_install(_p, binIndex, dup);
     }
+    // The displaced part needs somewhere to go. Taking the last copy of a row
+    // frees that row; taking one off a STACK does not, and with the bin full
+    // the displaced part was dropped by an ignored `stash` while install
+    // still reported success. Refuse up front instead: nothing is lost.
+    const freesRow = part.kind !== "gene" || (part.count ?? 1) <= 1;
+    if (displaced && !freesRow && _p.bin.length >= BIN_CAP) {
+      return { ok: false, err: "parts bin is full -- nowhere to put what that slot holds" };
+    }
     // ONE copy off the stack, not the whole row. Splicing the row out put
     // three copies onto a single position and lost two of them.
     const one = _p.takeOne(binIndex);
     if (!one) return { ok: false, err: "no such part" };
     _p.put(slot, one);
-    if (displaced) _p.stash(displaced);
+    if (displaced) {
+      const back = _p.stash(displaced);
+      if (!back.ok) _p.bin.push(displaced);    // unreachable after the check above
+    }
     return { ok: true };
   }
 /** Ring -> bin. */

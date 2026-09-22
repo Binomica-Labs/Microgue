@@ -4676,3 +4676,69 @@ describe("rotating bodies stay legal through a whole descent", () => {
     expect(errs, "a body ended the descent in an impossible place").toEqual([]);
   });
 });
+
+describe("items and abilities: the audit of v1.45", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const mkGame = async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    g.level.mobs.length = 0;
+    g.player.atp = 999;
+    // Four floor tiles in a row to dash along.
+    const grid = g.level.grid;
+    outer: for (let y = 1; y < grid.h - 1; y++) {
+      for (let x = 1; x < grid.w - 5; x++) {
+        if ([0, 1, 2, 3].every((k) => grid.isFloor(x + k, y))) {
+          g.player.x = x; g.player.y = y; break outer;
+        }
+      }
+    }
+    return g;
+  };
+
+  it("a dash stops at a barrier instead of passing through it", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await mkGame();
+    g.genome.expression = (id) => (id === "flhD" ? 1 : 0);
+    const x0 = g.player.x;
+    g.level.barriers = [{ x: x0 + 1, y: g.player.y, id: "chitin", work: 0 }];
+    castAbility(g, "dash", 1, 0);
+    expect(g.player.x, "dashed through a barrier").toBe(x0);
+  });
+
+  it("your own sulfide goes through hurt: clamped at zero, and blamed", async () => {
+    const { castAbility } = await import("../src/cast.js");
+    const g = await mkGame();
+    g.genome.expression = (id) => (id === "dsrA" ? 1 : 0);
+    g.player.hp = 1;
+    g.lastAttacker = null;
+    castAbility(g, "sulfide");
+    expect(g.player.hp, "hp went below zero").toBeGreaterThanOrEqual(0);
+    expect(g.lastAttacker, "the ledger did not blame the sulfide").toBe("your own sulfide");
+  });
+
+  it("eating an offered cassette eats THAT copy, not a better one beside it", async () => {
+    const { addDrop, dropAt } = await import("../src/items.js");
+    const g = await mkGame();
+    const epic = { ...WILD_TYPE, kcat: 1.4, stability: 1.4, rarity: "epic" as const };
+    const { x, y } = g.player;
+    g.drops.length = 0;
+    addDrop(g.drops, x, y, [{ kind: "cassette", gene: "katG", allele: epic },
+                            { kind: "cassette", gene: "katG", allele: WILD_TYPE }]);
+    g.offer = { part: { kind: "gene", id: "katG", level: 1, mods: [], allele: WILD_TYPE },
+                at: { x, y } };
+    g.eatOffered();
+    const left = dropAt(g.drops, x, y)?.items ?? [];
+    expect(left.length).toBe(1);
+    const kept = left[0];
+    expect(kept?.kind === "cassette" ? kept.allele.rarity : null,
+           "the epic copy was eaten").toBe("epic");
+  });
+});

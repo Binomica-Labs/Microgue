@@ -15,6 +15,8 @@ import { addDrop, substratesAt } from "./items.js";
 import { ABILITY_BY_ID, ready, spend, type Ability } from "./abilities.js";
 import { apply as applyStatus } from "./status.js";
 import type { Game } from "./main.js";
+import { barrierAt } from "./barrier.js";
+import { hurt } from "./turn.js";
 
 /** A secreted enzyme on a tile. Damages a mob that stands on it each turn. */
 export interface Secretion {
@@ -107,8 +109,11 @@ export function castAbility(
       }
       // Sulfide hurts you too, unless you route it: sqr.
       if (a.id === "sulfide" && _g.genome.expression("sqr", d) <= 0) {
-        _g.player.hp -= Math.ceil(power / 2);
-        _g.note(`Your own sulfide burns you for ${String(Math.ceil(power / 2))}.`);
+        // Through `hurt`, like every other source: a bare subtraction skipped
+        // cold hardening, took hp below zero, and left the ledger blaming
+        // whatever hit you before.
+        const took = hurt(_g, Math.ceil(power / 2), "your own sulfide");
+        _g.note(`Your own sulfide burns you for ${String(took)}.`);
       }
       _g.note(`${a.name}: ${String(hits)} hit.`);
       break;
@@ -122,12 +127,18 @@ export function castAbility(
           const x = _g.player.x + sx, y = _g.player.y + sy;
           if (!_g.level.grid.isFloor(x, y)) break;
           if (_g.dungeon.mobAt(x, y, _g.level)?.alive) break;
+          // A barrier is floor you have to digest through, gated only in
+          // `t_step`. Dashing straight over one put you inside a sealed
+          // cache without the enzyme that opens it.
+          if (barrierAt(_g.level.barriers, x, y)) break;
           _g.player.x = x; _g.player.y = y;
           moved++;
         }
         if (moved === 0) return "Nowhere to dash.";
         _g.note(`You dash ${String(moved)} tiles.`);
         _g.look();
+        // Landing is arriving: pick up what is here and enter the room.
+        _g.onTile(_g.player.x, _g.player.y);
       } else {
         _g.surge = { armour: a.power, until: t + a.linger };
         _g.note(`${a.name}: incoming damage halved for ${String(a.linger)} turns.`);

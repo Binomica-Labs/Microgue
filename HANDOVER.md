@@ -1,3 +1,28 @@
+# v1.45.0 — items and abilities, audited
+
+The last batch from the sweep. Five new tests, all failing on v1.44.
+
+- **An install could destroy a part.** Taking one copy off a STACK frees no
+  bin row, so with the bin full the displaced part went to a `stash` whose
+  failure was ignored, and install returned ok. That covers the v1.40.1
+  duplicate swap and any drag of a stacked part onto an occupied slot.
+  Refused up front now. `rescueStranded` had the same ignored result and
+  falls back to a free ring position.
+- **Dash went through barriers.** Barriers are floor and were gated only in
+  `t_step`, so a dash could land you inside a sealed cache. It stops at them
+  now, and landing calls `onTile` (pickup, room entry) the way a step does.
+- **Self-sulfide skipped `hurt()`,** the function whose own comment names
+  "your own sulfide" as a source it handles. So no surge halving, hp below
+  zero, and the ledger blamed the previous attacker.
+- **Catabolising an offer ate the wrong copy.** The floor copy was matched
+  by gene only, so tapping a common katG beside an epic one ate the epic
+  one, paid out the common value, and left the common one lying there.
+  Matched by allele now.
+
+Not fixed: `plasmid.ts` restoring the origin onto a full ring still drops
+the displaced part when the bin is also full. That needs a corrupt ring and
+a full bin at once, and there is nowhere left to put the part.
+
 # v1.44.0 — mob life, audited
 
 The second batch from the sweep: the mob-turn loop in `combat.ts`. Six new

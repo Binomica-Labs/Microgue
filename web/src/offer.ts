@@ -37,8 +37,16 @@ export function t_eatOffered(_g: Game): void {
   // And take it off the floor: it has been eaten.
   const drop = dropAt(_g.drops, offer.at.x, offer.at.y);
   if (drop) {
-    const i = drop.items.findIndex(
-      (x) => x.kind === "cassette" && x.gene === part.id);
+    // The copy that was OFFERED, by allele. Matching the gene alone ate the
+    // first cassette of that gene -- an epic one, while you were paid for
+    // the common one you tapped, which stayed on the floor.
+    const same = (x: (typeof drop.items)[number]): boolean =>
+      x.kind === "cassette" && x.gene === part.id;
+    const exact = drop.items.findIndex((x) => same(x)
+      && x.kind === "cassette" && x.allele === part.allele);
+    const equal = drop.items.findIndex((x) => same(x)
+      && x.kind === "cassette" && JSON.stringify(x.allele) === JSON.stringify(part.allele));
+    const i = exact >= 0 ? exact : equal;
     if (i >= 0) drop.items.splice(i, 1);
     if (drop.items.length === 0) removeDrop(_g.drops, drop);
   }

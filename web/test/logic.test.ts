@@ -10511,3 +10511,45 @@ describe("mob life: the audit of v1.44", () => {
     expect(lvl.mobs[0]!.bored, "boredom ran at half speed").toBe(0);
   });
 });
+
+describe("an install never destroys a part (audit of v1.45)", () => {
+  const gene = (id: string, allele = WILD_TYPE): Part =>
+    ({ kind: "gene", id, level: 1, mods: [], allele }) as Part;
+  const tally = (p: Plasmid): number => p.slots.filter((x) => x !== null).length
+    + p.bin.reduce((n, x) => n + (x.kind === "gene" ? x.count ?? 1 : 1), 0);
+  const epic = { ...WILD_TYPE, kcat: 1.4, stability: 1.4, rarity: "epic" as const };
+
+  it("a stacked part into an occupied slot, with the bin full", () => {
+    // Taking one copy off a stack frees no bin row, so the displaced part
+    // had nowhere to go and `stash` failing was ignored: 22 parts became 21
+    // and install said ok.
+    const ids = Object.keys(bio.GENES).filter((x) => x !== "ori");
+    const p = new Plasmid();
+    const A = ids[0]!;
+    p.stash(gene(A, epic)); p.stash(gene(A, epic));
+    let k = 1;
+    while (p.bin.length < BIN_CAP) p.stash(gene(ids[k++]!));
+    const occ = p.slots.findIndex((s) => s !== null && !(s.kind === "gene" && s.id === "ori"));
+    expect(occ, "no occupied slot to displace").toBeGreaterThanOrEqual(0);
+    const before = tally(p);
+    const r = p.install(p.bin.findIndex((x) => x.kind === "gene" && x.id === A), occ);
+    expect(tally(p), `a part was destroyed (install said ${JSON.stringify(r)})`).toBe(before);
+  });
+
+  it("the duplicate swap, with the bin full", () => {
+    const ids = Object.keys(bio.GENES).filter((x) => x !== "ori");
+    const p = new Plasmid();
+    const A = ids[0]!;
+    const empty = p.slots.findIndex((s, i) => s === null && p.usable(i));
+    p.stash(gene(A));
+    p.install(p.bin.findIndex((x) => x.kind === "gene" && x.id === A), empty);
+    p.stash(gene(A, epic)); p.stash(gene(A, epic));
+    let k = 1;
+    while (p.bin.length < BIN_CAP) p.stash(gene(ids[k++]!));
+    const before = tally(p);
+    const target = p.slots.findIndex((s, i) => s === null && p.usable(i));
+    const r = p.install(p.bin.findIndex((x) => x.kind === "gene" && x.id === A),
+                        target >= 0 ? target : 0);
+    expect(tally(p), `a part was destroyed (install said ${JSON.stringify(r)})`).toBe(before);
+  });
+});
