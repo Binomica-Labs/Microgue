@@ -9,10 +9,10 @@
 // whether `applySave` reads it back. That has been forgotten three times, and
 // each time the symptom was a setting or an inventory that silently reset.
 
-import { SCHEMA, writeSave, type SaveData } from "./save.js";
+import { SCHEMA, type SaveData } from "./save.js";
 
-/** The pre-slot save key. Still written so a build from before slots
- *  existed can be recovered by `migrateLegacy`. */
+/** The pre-slot save key. Read only, by `migrateLegacy` and `load`: writing
+ *  it as a mirror of the live slot made every reload overwrite slot 0. */
 export const SAVE_KEY = "microgue:v1";
 import { saveSlot } from "./saves.js";
 import { strainLevel } from "./strain.js";
@@ -61,7 +61,6 @@ export function p_save(_g: Game): void {
              bestiary: [..._g.run.bestiary], library: [..._g.run.library] },
       settings: _g.settings,
     };
-    writeSave(SAVE_KEY, data);
     // Say so ONCE if the write fails. Every turn would be unusable noise, and
     // saying nothing at all is how a whole run disappears on tab close. The
     // game keeps running either way: refusing to play is not an improvement

@@ -133,7 +133,9 @@ export function drawNotes(
     `${String(seen.length)}/${String(bio.MICROBES.length)} recorded · ` +
     // F, not D: `run.deepest` is a FLOOR (1..24) and everything else in the
     // game prints floors as F. "D24" is not a stratum that exists.
-    `deepest F${String(run.deepest)} · ${String(run.deaths)} lysis events`, W);
+    // Kills, not `run.deaths`: a run ends at its first death and `newRun`
+    // zeroes the counter, so that figure could only ever print 0.
+    `deepest F${String(run.deepest)} · ${String(run.killed)} lysed`, W);
 
   const maxW = W - ins.left - ins.right - 28 * u;
   const floor = H - ins.bottom - 60 * u;

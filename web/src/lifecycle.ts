@@ -22,7 +22,7 @@ import { Dungeon } from "./dungeon.js";
 import { addDrop, rollPart, substratesAt } from "./items.js";
 import type { Item } from "./items.js";
 import { noStations } from "./lab_level.js";
-import { readLab } from "./lab_save.js";
+import { readLab, writeLab } from "./lab_save.js";
 import { Plasmid } from "./plasmid.js";
 import { capacityAt, describeStock, restockAmount } from "./production.js";
 import { makeRng } from "./rng.js";
@@ -245,6 +245,10 @@ export function g_startRun(
     if (_g.lab.heirloom.length > 0) {
       _g.note(`Generation ${String(_g.lab.generation)}. `
         + `${String(_g.lab.heirloom.length)} constructs inherited.`);
+      // Spent. It is one strain's inheritance, not a stockpile: left in the
+      // lab, every new slot would be handed the same parts again.
+      _g.lab.heirloom = [];
+      writeLab(_g.lab);
     }
 
     // Its opening operon, laid down as a WORKING unit -- promoter, genes,

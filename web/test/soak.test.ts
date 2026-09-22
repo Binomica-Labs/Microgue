@@ -4454,23 +4454,78 @@ describe("release soak: lineage across real deaths", () => {
   });
 
   it("the heir actually starts with the inherited parts in its bin", async () => {
+    // Read from what the lab held at DEATH, not after `startRun`: this used to
+    // read `g.lab.heirloom` after the next run had re-read the lab, which
+    // always loaded it empty -- so the loop checked nothing, and an early
+    // return on "nothing inherited" made the test unable to fail twice over.
+    const g = await mkGame();
+    let willInherit: string[] = [];
+    for (let tries = 0; tries < 6 && willInherit.length === 0; tries++) {
+      g.startRun(0, "heterotroph");
+      for (const id of ["cbbL", "katG", "sodA", "celA", "groL", "recA"] as const) {
+        g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      g.press("wait");
+      g.player.hp = 0;
+      g.die();
+      willInherit = g.lab.heirloom.flatMap((p) => (p.kind === "gene" ? [p.id] : []));
+    }
+    expect(willInherit.length, "six deaths and not one gene inherited").toBeGreaterThan(0);
+    g.startRun(1, "heterotroph");
+    // Bin OR ring: an inherited gene the class operon also uses is assembled
+    // onto the ring from the bin.
+    for (const id of willInherit) {
+      expect(g.genome.inBin(id as bio.GeneId) || g.genome.has(id as bio.GeneId),
+             `inherited ${id} is not on the heir`).toBe(true);
+    }
+    // And spent: a second new strain is not handed the same parts again.
+    expect(g.lab.heirloom, "the heirloom was not consumed").toEqual([]);
+  });
+
+  it("succession written at death reaches the next strain's floors", async () => {
+    // Through `die` and `startRun`, which re-reads the lab from storage. The
+    // succession is a Map, and a Map stringifies to `{}`: it was written and
+    // read back as nothing, every time.
     const g = await mkGame();
     g.startRun(0, "heterotroph");
-    for (const id of ["cbbL", "katG", "sodA", "celA", "groL", "recA"] as const) {
-      g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
-    }
+    g.run.killed = 30;
+    g.player.hp = 0;
+    g.die();
+    const { traceOf } = await import("../src/succession.js");
+    const before = traceOf(g.lab.succession, 1).grazed;
+    expect(before, "death left no trace on its floor").toBeGreaterThan(0);
+    g.startRun(1, "heterotroph");
+    expect(traceOf(g.lab.succession, 1).grazed, "the trace did not survive startRun")
+      .toBeCloseTo(before, 5);
+    expect(g.dungeon.influence.mobs, "the next strain's F1 was not thinned")
+      .toBeLessThan(1);
+  });
+
+  it("a reload never copies the live run over slot 0", async () => {
+    // Every save also wrote the pre-slot key, and every boot migrated it into
+    // slot 0 as "recovered": another strain overwritten on reload.
+    const { listSlots } = await import("../src/saves.js");
+    const g = await mkGame();
+    g.startRun(0, "heterotroph", "Alice");
+    g.press("wait");
+    g.startRun(2, "phototroph", "Bob");
+    g.press("wait");
+    await mkGame();                                   // the page reloads
+    const names = listSlots().map((s) => s?.name ?? null);
+    expect(names[0], "slot 0 was overwritten on reload").toBe("Alice");
+    expect(names[2]).toBe("Bob");
+  });
+
+  it("a reload does not resurrect a strain that died", async () => {
+    const { listSlots } = await import("../src/saves.js");
+    const g = await mkGame();
+    g.startRun(2, "phototroph", "Bob");
     g.press("wait");
     g.player.hp = 0;
     g.die();
-    const willInherit = g.lab.heirloom.length;
-    if (willInherit === 0) return;           // unlucky roll; nothing to assert
-    g.startRun(1, "heterotroph");
-    const binIds = g.genome.bin.filter((b) => b.kind === "gene").map((b) => b.id);
-    const inherited = g.lab.heirloom.filter((p) => p.kind === "gene");
-    //  is already filtered to genes, so p.id is a GeneId here.
-    for (const p of inherited) {
-      expect(binIds, `inherited ${p.id} is not in the heir's bin`).toContain(p.id);
-    }
+    await mkGame();
+    expect(listSlots().filter((s) => s !== null), "a dead strain came back as a slot")
+      .toEqual([]);
   });
 
   it("succession thins a farmed floor and the game still plays", async () => {

@@ -34,7 +34,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  the status line -- which real Chrome showed running off the right edge of
  *  every phone -- or a fill in Nitzschia's pigment, from the striae its sprite
  *  had been missing. */
-const GOLDEN = "238c908c4f2940e0";
+const GOLDEN = "f17abe05e62b0367";
 
 const trace: string[] = [];
 

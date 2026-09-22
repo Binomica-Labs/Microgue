@@ -11,7 +11,9 @@ import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
 import { MAX_STRAIN } from "./strain.js";
 import { LEDGER_CAP, newLab, stockCap, type Lab, type RunRecord } from "./lab.js";
 import { MAX_FLOOR } from "./dungeon.js";
-import { newSuccession } from "./succession.js";
+import { parseSuccession, successionEntries } from "./succession.js";
+import { parsePart } from "./save.js";
+import { BIN_CAP, SLOTS, type Part } from "./plasmid.js";
 
 export const LAB_KEY = "microgue:lab:v1";
 
@@ -67,14 +69,16 @@ export function parseLab(raw: unknown): Lab {
       : [],
     startSites,
     startStrain: Math.min(Math.max(Math.round(num(raw["startStrain"], 1)), 1), MAX_STRAIN),
-    // The heirloom is parts, and parts are validated by the plasmid loader;
-    // rather than duplicate that here a lab loads with an EMPTY heirloom and
-    // the next death refills it. One generation of inheritance is lost
-    // across a reload, which is a fair price for not having a second,
-    // divergent part parser.
-    heirloom: [],
+    // Through the same part parser a save uses. This used to load as `[]`,
+    // on the theory that one generation lost across a reload was a fair
+    // price -- but `startRun` re-reads the lab, so EVERY heir started with
+    // nothing and the lineage did not exist in play.
+    heirloom: Array.isArray(raw["heirloom"])
+      ? (raw["heirloom"] as unknown[]).map(parsePart)
+          .filter((p): p is Part => p !== null).slice(0, SLOTS + BIN_CAP)
+      : [],
     generation: Math.max(Math.round(num(raw["generation"], 1)), 1),
-    succession: newSuccession(),   // regrows from play; not persisted
+    succession: parseSuccession(raw["succession"], MAX_FLOOR),
   };
 }
 
@@ -87,7 +91,9 @@ export function readLab(): Lab {
 
 export function writeLab(lab: Lab): boolean {
   try {
-    localStorage.setItem(LAB_KEY, JSON.stringify(lab));
+    localStorage.setItem(LAB_KEY, JSON.stringify({
+      ...lab, succession: successionEntries(lab.succession),
+    }));
     return true;
   } catch { return false; }
 }

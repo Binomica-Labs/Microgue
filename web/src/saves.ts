@@ -119,6 +119,15 @@ export function migrateLegacy(): boolean {
   try {
     const raw = localStorage.getItem("microgue:v1");
     if (raw === null) return false;
+    // A build WITH slots also wrote this key, every turn, as a mirror of
+    // whichever run was live. Migrating that copied the latest run over
+    // slot 0 as "recovered" on every boot -- overwriting a different strain,
+    // and resurrecting a dead one, since death never cleared the mirror. A
+    // real pre-slot save exists only where no slot index was ever written.
+    if (localStorage.getItem(INDEX_KEY) !== null) {
+      localStorage.removeItem("microgue:v1");
+      return false;
+    }
     const data = parseSave(JSON.parse(raw) as unknown);
     // Only discard the legacy payload once it has been successfully carried
     // over. Removing it first meant a save this build cannot read was deleted

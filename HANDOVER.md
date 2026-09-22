@@ -1,3 +1,56 @@
+# v1.43.0 — the lineage actually reaches the heir
+
+An audit sweep (the four questions under "Next") over the meta-loop. Every
+finding below was reproduced through the real `Game` before it was fixed,
+and each new test fails on v1.42.0.
+
+## Inheritance and succession were still no-ops
+
+v1.38 moved `writeLab` after the lineage was banked, and the generation
+counter started advancing. Nothing else did. `parseLab` loaded the heirloom
+as `[]` on purpose ("one generation lost across a reload is a fair price")
+-- but `startRun` calls `readLab()` EVERY time, so every heir, reload or not,
+started with nothing. And `succession` is a `Map`, which `JSON.stringify`
+writes as `{}`: the column's memory was written and read back empty.
+
+Now the heirloom goes through `save.ts`'s own `parsePart` (exported, not
+duplicated), the succession is stored as entries and parsed back through
+`leaveTrace` so its clamps apply, and the heirloom is SPENT when a new strain
+takes it -- otherwise every slot started afterwards got the same parts.
+
+**The test that "covered" this could not fail, twice.** It read
+`g.lab.heirloom` after `startRun` (always empty, so the loop checked nothing)
+and returned early when nothing was inherited. It now captures the heirloom at
+death, retries until something is inherited, and fails if nothing ever is.
+
+## A reload overwrote slot 0, and resurrected the dead
+
+`p_save` still wrote the pre-slot key `microgue:v1` every turn "so an old
+build can be recovered", and every boot ran `migrateLegacy`, which copied it
+into slot 0 as "recovered". Alice in slot 0, Bob in slot 2, reload: slot 0 is
+Bob. Death never cleared that key, so a dead strain came back after a reload.
+
+The mirror is no longer written, and migration only runs where no slot index
+exists (a genuine pre-slot device). Anywhere else the stale key is deleted.
+
+## Two labels
+
+The slot list printed the STRATUM as `F7` for a strain on floor 20 (now `D7`,
+as the continue screen already said). The notebook's "N lysis events" read
+`run.deaths`, which is zeroed per run and a run ends at its first death: it
+could only print 0. It shows kills now. The golden hash moved for that line
+alone -- checked by reverting it.
+
+## Queued from the same sweep
+
+Mob life: sessile mobs get bored at range and then ignore you adjacent;
+ranged hits never reset the boredom clock; elites and bosses divide (and the
+copy holds the boss gate shut); a cell can divide once, ever, because nothing
+heals mobs; cooldown bodies age their timers at half speed. Items: an install
+into a full bin with a stacked part destroys the displaced part; dash passes
+barriers; self-sulfide bypasses `hurt()`; catabolising an offered cassette
+eats the wrong allele.
+
 # v1.42.0 — the Lua tree is gone
 
 The repo root held the original LÖVE prototype: `main.lua`, `concord/`,

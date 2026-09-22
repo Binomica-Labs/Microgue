@@ -142,7 +142,9 @@ export function drawMenu(
       const box: Box = { x: rx, y: top + 20 * u + i * (rowH + gap), w: rw, h: rowH };
       if (s) {
         row(ctx, box, u, s.name,
-            `F${String(s.depth)} \u00b7 ${String(s.genes)} loci`, true);
+            // D, not F: `SlotInfo.depth` is the STRATUM (1-8). Printed as F, a
+            // strain on floor 20 was listed as "F7".
+            `D${String(s.depth)} \u00b7 ${String(s.genes)} loci`, true);
         // Continue lists a delete tab on each used slot; New Game does not --
         // its whole job is to write, and overwrite is warned at the tap.
         if (mode === "continue") {

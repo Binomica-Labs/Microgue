@@ -56,6 +56,30 @@ export function leaveTrace(
   });
 }
 
+/** The succession as JSON can carry it. A Map stringifies to `{}`, which is
+ *  how the whole column forgot itself on every death: written, then read back
+ *  as nothing. */
+export function successionEntries(s: Succession): [number, Trace][] {
+  return [...s];
+}
+
+/** Read stored entries back, through `leaveTrace` so the same clamps apply
+ *  to a stored trace as to one made in play. */
+export function parseSuccession(raw: unknown, maxFloor: number): Succession {
+  const s = newSuccession();
+  if (!Array.isArray(raw)) return s;
+  for (const e of raw as unknown[]) {
+    if (!Array.isArray(e) || e.length !== 2) continue;
+    const [f, t] = e as [unknown, unknown];
+    if (typeof f !== "number" || f < 1 || f > maxFloor) continue;
+    if (typeof t !== "object" || t === null) continue;
+    const r = t as Record<string, unknown>;
+    const n = (k: string): number => (typeof r[k] === "number" ? r[k] : 0);
+    leaveTrace(s, f, { grazed: n("grazed"), fouled: n("fouled"), settled: n("settled") });
+  }
+  return s;
+}
+
 /**
  * Decay every floor by one generation's worth.
  *

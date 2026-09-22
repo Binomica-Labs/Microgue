@@ -149,7 +149,7 @@ function parseAllele(v: unknown): Allele {
   };
 }
 
-function parsePart(v: unknown): Part | null {
+export function parsePart(v: unknown): Part | null {
   if (!isRecord(v)) return null;
   const kind = v["kind"];
 
