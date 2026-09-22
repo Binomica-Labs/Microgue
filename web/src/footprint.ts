@@ -16,17 +16,22 @@ export const FOOTPRINT_TILES: Readonly<Record<Footprint, number>> = {
   single: 1, line2: 2, line3: 3, block2: 4,
 };
 
-/** Unit step for the nearest of eight compass directions. */
+/** The eight compass steps, built once: this is on every occupancy test,
+ *  and rebuilding the table per call was most of what one cost. */
+const DIRS: readonly Point[] = Object.freeze([
+  { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: -1, y: 1 },
+  { x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+].map((d) => Object.freeze(d)));
+const EAST = DIRS[0] ?? { x: 1, y: 0 };
+
+/** Unit step for the nearest of eight compass directions. Shared and frozen:
+ *  read it, never keep or mutate it. */
 function axisStep(heading: number | null): Point {
-  if (heading === null || !Number.isFinite(heading)) return { x: 1, y: 0 };
+  if (heading === null || !Number.isFinite(heading)) return EAST;
   const a = snap8(heading);
   const step = TAU / 8;
   const k = Math.round(a / step);
-  const dirs: readonly Point[] = [
-    { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: -1, y: 1 },
-    { x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
-  ];
-  return dirs[((k % 8) + 8) % 8] ?? { x: 1, y: 0 };
+  return DIRS[((k % 8) + 8) % 8] ?? EAST;
 }
 
 /**
@@ -65,7 +70,29 @@ export function covers(
   fp: Footprint, ax: number, ay: number, heading: number | null,
   x: number, y: number,
 ): boolean {
-  return tilesOf(fp, ax, ay, heading).some((t) => t.x === x && t.y === y);
+  // `tilesOf(...).some(...)` without building the tiles: this is asked for
+  // every body on every tile a move considers. The anchor is clamped exactly
+  // as tilesOf clamps it, so the two cannot disagree about a broken body.
+  const lim = 1e6;
+  const cx = Number.isFinite(ax) ? Math.min(Math.max(ax, -lim), lim) : 0;
+  const cy = Number.isFinite(ay) ? Math.min(Math.max(ay, -lim), lim) : 0;
+  switch (fp) {
+    case "single":
+      return x === cx && y === cy;
+    case "line2": {
+      if (x === cx && y === cy) return true;
+      const d = axisStep(heading);
+      return x === cx + d.x && y === cy + d.y;
+    }
+    case "line3": {
+      if (x === cx && y === cy) return true;
+      const d = axisStep(heading);
+      return (x === cx - d.x && y === cy - d.y)
+        || (x === cx + d.x && y === cy + d.y);
+    }
+    case "block2":
+      return (x === cx || x === cx + 1) && (y === cy || y === cy + 1);
+  }
 }
 
 /** Bounding box in tiles, for rendering and for stretch. */

@@ -84,7 +84,9 @@ export function saveSlot(
 
   if (!writeSave(slotKey(slot), data)) return false;   // nothing written at all
 
-  const list = listSlots();
+  // A copy of the index read above, not a second parse of it: writeSave only
+  // touched the slot's own key, so the index cannot have changed since.
+  const list = [...previousIndex];
   list[slot] = {
     slot, name: name.slice(0, 18) || "unnamed",
     depth: data.depth, genes, updated: Date.now(),

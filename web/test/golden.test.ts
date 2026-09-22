@@ -134,7 +134,10 @@ describe("golden render trace", () => {
     // into view -- and a golden is meant to exercise the drawing code, not
     // simulate a plausible session. This must happen BEFORE descending: the
     // deeper floors in this seed have no barriers to draw.
+    // Every writer of `seen` keeps `seenCount` true, and the minimap caches
+    // on it -- a bare fill here drew a map the game itself never could.
     g.level.sight.seen.fill(1);
+    g.level.sight.seenCount = g.level.sight.seen.length;
     g.level.sight.visible.fill(1);
     g.frame(700);
 
@@ -147,6 +150,7 @@ describe("golden render trace", () => {
       g.frame(2000 + f * 16);
     }
     g.level.sight.seen.fill(1);
+    g.level.sight.seenCount = g.level.sight.seen.length;
     g.level.sight.visible.fill(1);
     g.frame(3000);
 

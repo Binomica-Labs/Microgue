@@ -1,3 +1,73 @@
+# v1.48.0 — a mob turn scales with the floor, not its square
+
+## Measured first
+
+A headless harness (the soak test's stubs, the real Game, `--cpu-prof`)
+timed the turn and the frame on floor 1, then on the same floor packed to
+250 mobs. A turn cost 1.0 ms at 46 mobs and **8.8 ms at 250**: a dropped
+frame on every keypress, getting worse faster than the floor filled.
+
+Almost all of it was one predicate. `occupancy()` answered "is this tile
+taken?" by scanning every mob, and a mob asks it for each tile of its
+footprint on every candidate step, on the combat path and the agenda path
+alike. Fission's "kin within two tiles" and the swarm's ally list were two
+more scans of the whole floor per mob.
+
+## What changed
+
+* `bodies.ts`, new. `BodyIndex` is a tile -> body-count array; `AnchorIndex`
+  buckets bodies by anchor tile for "who is within r?". `microbeTurn` builds
+  both once and keeps them current through every move (one `moveTo`),
+  death and division. Occupancy is an array read, less the asker's own
+  coverage. Counts, not owners, so an overlap is never hidden; off-grid
+  tiles fall back to the old scan, so it is exact everywhere.
+* Kin and allies come from the anchor buckets, re-sorted into the scan's
+  order, so the swarm's floating-point crowd sum is bit-for-bit the same.
+* `axisStep` rebuilt its eight-direction table on every call. It is a frozen
+  constant. `covers()` no longer builds a tile array to test one point.
+* The overlap invariant keys on tile index instead of a string per tile.
+* `miniView` scanned all 8800 tiles every frame to find the explored box.
+  It is memoised on `seenCount`, which only rises when `seen` does. The two
+  `seen.fill(1)` sites (lab, intro) never bumped it; they do now.
+* `saveSlot` parsed the slot index twice per save. Once.
+
+## Proven unchanged
+
+The harness hashes every mob's full state and the player's, every turn,
+across four floors, both at natural density and packed to 150. Identical
+digests before and after, for every step above.
+
+The golden render trace moved at first, and the diff was read before
+anything else: the test did `seen.fill(1)` without `seenCount`, a state the
+game itself cannot reach, so the new cache kept the old box. With the test
+honouring the contract, old and new code draw the same 93,833 calls and
+still match the recorded hash. The constant did not change.
+
+## Numbers
+
+| | before | after |
+|---|---|---|
+| turn, 46 mobs | 1.0 ms | 0.39 ms |
+| turn, 250 mobs | 8.8 ms | 0.98 ms |
+| audit, 250 mobs | 266 us | 130 us |
+| frame, 46 mobs | 236 us | 106 us |
+| frame, 250 mobs | 427 us | 216 us |
+
+## Guards
+
+`test/perf.test.ts`: `covers()` against `tilesOf().some()` over broken
+anchors and headings; `BodyIndex` against a brute-force count through 600
+random adds and removes; `AnchorIndex.near` never misses. And a RATIO test:
+8x the mobs must cost under 8x the time. The scan-based turn read 19.5x on
+it, the indexed one 2.7x. Checked by restoring the old `combat.ts`.
+
+## Left alone, deliberately
+
+`rawExpression` is not memoised. It is bounded by ring size, not by the
+floor, and it reads `supply`, dosage and burden, a stale-cache risk this
+codebase has paid for before. Saving every turn stays too: it is the crash
+safety, and it costs 15 us here.
+
 # v1.47.0 — katG does what its card says; the heir keeps its class
 
 ## Oxidative stress had no counter

@@ -9,6 +9,7 @@ import { ageAgenda, agendaStep, newAgenda } from "./agenda.js";
 import { canStrike, chebyshev, decideStep, senseRange, SIZES } from "./behaviour.js";
 import { speedOf, tick as speedTick } from "./speed.js";
 import { covers, tilesOf } from "./footprint.js";
+import { AnchorIndex, BodyIndex } from "./bodies.js";
 import type { Mob } from "./dungeon.js";
 import type { Grid, Point } from "./mapgen.js";
 import type { Rng } from "./rng.js";
@@ -104,6 +105,31 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
   const events: TurnEvent[] = [];
   const born: Mob[] = [];
   const alive = w.mobs.filter((o) => o.alive).length;
+  // Every body on the floor, indexed by tile, and kept current as they move,
+  // die and divide below. See bodies.ts: the occupancy scan it replaces was
+  // the entire cost of a turn.
+  const idx = new BodyIndex(w.grid.w, w.grid.h);
+  // ...and every living cell by where it is anchored, for the kin and ally
+  // counts. `order` is its place in the turn -- daughters after everyone --
+  // so a list rebuilt from the buckets comes back in the order the scan
+  // produced, and the swarm's float sums do not shift.
+  const near = new AnchorIndex<Mob>(w.grid.w, w.grid.h);
+  const order = new Map<Mob, number>();
+  w.mobs.forEach((o, i) => {
+    order.set(o, i);
+    if (!o.alive) return;
+    idx.add(SIZES[o.size].footprint, o.x, o.y, o.heading);
+    near.add(o.x, o.y, o);
+  });
+  const moveTo = (o: Mob, x: number, y: number, heading: number): void => {
+    const f = SIZES[o.size].footprint;
+    idx.remove(f, o.x, o.y, o.heading);
+    near.remove(o.x, o.y, o);
+    o.heading = heading;
+    o.x = x; o.y = y;
+    idx.add(f, o.x, o.y, o.heading);
+    near.add(o.x, o.y, o);
+  };
 
   for (const m of w.mobs) {
     if (!m.alive) continue;
@@ -126,10 +152,10 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     }
     // Kin within two tiles: the contact-inhibition term. Counted here
     // rather than in fission.ts because it needs the world.
-    const kin = w.mobs.filter((o) => o.alive && o !== m && o.id === m.id
-      && chebyshev(o.x, o.y, m.x, m.y) <= 2).length
-      + born.filter((o) => o.id === m.id
-          && chebyshev(o.x, o.y, m.x, m.y) <= 2).length;
+    let kin = 0;
+    near.near(m.x, m.y, 2, (o) => {
+      if (o !== m && o.id === m.id && chebyshev(o.x, o.y, m.x, m.y) <= 2) kin++;
+    });
     // Never an elite. `{ ...m }` copies `elite`, the name and the grown
     // stats, so a boss that divided left a second boss holding the floor's
     // gate shut, and an elite floor gained elites (and their loot) the
@@ -138,7 +164,7 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
                 { population: alive + born.length, founding: w.founding ?? alive,
                   calm: m.calm, kin },
                 w.rng, w.fissionChance ?? undefined)) {
-      const spot = freeNeighbour(m, w, born);
+      const spot = freeNeighbour(m, w, born, idx);
       if (spot) {
         const share = partition(m.maxhp);
         m.hp = share.parent;
@@ -149,7 +175,10 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
                          ax: spot.x, ay: spot.y, hp: share.daughter,
                          calm: 0, seenHp: share.daughter, banked: 0, status: [],
                          agenda: newAgenda(m.behaviour, w.rng) };
+        order.set(d, w.mobs.length + born.length);
         born.push(d);
+        idx.add(SIZES[d.size].footprint, d.x, d.y, d.heading);
+        near.add(d.x, d.y, d);
         events.push({ kind: "divide", mob: m, at: spot });
       }
     }
@@ -161,6 +190,8 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       m.hp = Math.max(m.hp - selfDmg, 0);
       if (m.hp <= 0) {
         m.alive = false;
+        idx.remove(SIZES[m.size].footprint, m.x, m.y, m.heading);
+        near.remove(m.x, m.y, m);
         events.push({ kind: "died", mob: m });
         continue;
       }
@@ -172,8 +203,10 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // Distance from the NEAREST tile of the body: a three-tile filament can
     // reach you from either end.
     const fp = SIZES[m.size].footprint;
-    const dist = Math.min(...tilesOf(fp, m.x, m.y, m.heading)
-      .map((t) => chebyshev(t.x, t.y, w.player.x, w.player.y)));
+    let dist = Infinity;
+    for (const t of tilesOf(fp, m.x, m.y, m.heading)) {
+      dist = Math.min(dist, chebyshev(t.x, t.y, w.player.x, w.player.y));
+    }
     // Out of sense range, a mob used to be SKIPPED entirely -- it did not
     // move, did not age its agenda, did nothing at all until the player
     // walked close enough. That is the freeze the agenda layer exists to
@@ -233,13 +266,11 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       const steps = speedTick(budget,
         speedOf(m.behaviour, m.size) * w.mobSpeed, haste(m.status));
       m.banked = budget.banked;
-      const occupied = occupancy(w, m, born);
+      const occupied = occupancy(w, m, born, idx);
       for (let s = 0; s < steps; s++) {
         const act = agendaMove(m, w, occupied, fp);
         if (!act) break;
-        const nh = Math.atan2(act.y - m.y, act.x - m.x);
-        m.heading = nh;
-        m.x = act.x; m.y = act.y;
+        moveTo(m, act.x, act.y, Math.atan2(act.y - m.y, act.x - m.x));
         events.push({ kind: "move", mob: m });
       }
       continue;
@@ -323,8 +354,13 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
       speedOf(m.behaviour, m.size) * w.mobSpeed, haste(m.status));
     m.banked = budget.banked;
 
-    const allyList = w.mobs.filter(
-      (o) => o.alive && o !== m && o.id === m.id && chebyshev(o.x, o.y, m.x, m.y) <= 3);
+    // Living cells already on the floor, not this turn's daughters.
+    const allyList: Mob[] = [];
+    near.near(m.x, m.y, 3, (o) => {
+      if (o !== m && o.id === m.id && (order.get(o) ?? 0) < w.mobs.length
+          && chebyshev(o.x, o.y, m.x, m.y) <= 3) allyList.push(o);
+    });
+    allyList.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
     const allies = allyList.length;
     // One occupancy test, shared by the combat decision and the agenda --
     // two copies would drift and a mob would walk through another.
@@ -332,7 +368,7 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // moment they are born, but they are not in `w.mobs` until the loop
     // ends. Without them here, a cell that moved later in the same turn
     // walked straight onto a newborn.
-    const occupied = occupancy(w, m, born);
+    const occupied = occupancy(w, m, born, idx);
     for (let s = 0; s < steps; s++) {
     const step = decideStep(
       m.behaviour, { x: m.x, y: m.y },
@@ -357,8 +393,7 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // Only a COMBAT step has a posture worth announcing. A cell wandering
     // toward a substrate patch is not "circling you".
     const intent = step ? intentOf(m, dBefore, dAfter) : null;
-    m.heading = Math.atan2(act.y - m.y, act.x - m.x);
-    m.x = act.x; m.y = act.y;
+    moveTo(m, act.x, act.y, Math.atan2(act.y - m.y, act.x - m.x));
     events.push({ kind: "move", mob: m });
     if (intent !== null && intent !== m.lastIntent) {
       m.lastIntent = intent;
@@ -421,7 +456,9 @@ const REGROW_AFTER = 6;
  * daughter's far tile inside rock. The occupancy predicate is the shared
  * one, so stairs and newborns are covered here too.
  */
-function freeNeighbour(m: Mob, w: TurnWorld, born: readonly Mob[]): Point | null {
+function freeNeighbour(
+  m: Mob, w: TurnWorld, born: readonly Mob[], idx: BodyIndex,
+): Point | null {
   const fp = SIZES[m.size].footprint;
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2;
@@ -439,9 +476,19 @@ function freeNeighbour(m: Mob, w: TurnWorld, born: readonly Mob[]): Point | null
     // Allochromatium overlap" was. Stairs count too -- the agenda path
     // learned that and fission had the same hole, one floor further on.
     let clash = false;
-    const taken = occupancy(w, m, born);
+    const taken = occupancy(w, m, born, idx);
     for (const t of tilesOf(fp, x, y, m.heading)) {
       if (taken(t.x, t.y)) { clash = true; break; }
+      // Anyone at all, the parent included -- a daughter cannot be born
+      // inside the cell she is splitting from.
+      if (idx.inBounds(t.x, t.y)) {
+        if (idx.count(t.x, t.y) > 0
+            || (t.x === w.player.x && t.y === w.player.y)) {
+          clash = true;
+          break;
+        }
+        continue;
+      }
       if (w.mobs.some((o) => o.alive
             && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, t.x, t.y))
           || born.some((o) =>
@@ -554,12 +601,22 @@ function agendaMove(
  * waiting for whichever copy gets updated alone.
  */
 function occupancy(
-  w: TurnWorld, self: Mob, born: readonly Mob[],
+  w: TurnWorld, self: Mob, born: readonly Mob[], idx: BodyIndex,
 ): (x: number, y: number) => boolean {
-  return (x, y) => (x === w.player.x && y === w.player.y)
-    || w.stairs?.some((s) => s.x === x && s.y === y) === true
-    || w.mobs.some((o) => o.alive && o !== self
+  const own = SIZES[self.size].footprint;
+  return (x, y) => {
+    if (x === w.player.x && y === w.player.y) return true;
+    if (w.stairs?.some((s) => s.x === x && s.y === y) === true) return true;
+    if (idx.inBounds(x, y)) {
+      // Everyone on the tile, less this mob itself if it is one of them.
+      const mine = self.alive && covers(own, self.x, self.y, self.heading, x, y)
+        ? 1 : 0;
+      return idx.count(x, y) - mine > 0;
+    }
+    // Off the grid the index holds nothing, so ask the long way.
+    return w.mobs.some((o) => o.alive && o !== self
          && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y))
-    || born.some((o) => o !== self
+      || born.some((o) => o !== self
          && covers(SIZES[o.size].footprint, o.x, o.y, o.heading, x, y));
+  };
 }

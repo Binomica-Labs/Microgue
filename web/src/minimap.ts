@@ -63,16 +63,7 @@ export interface MiniView { scale: number; ox: number; oy: number;
  * uses the whole box from the first room onward.
  */
 export function miniView(grid: Grid, sight: Sight, box: MiniBox): MiniView {
-  let x0 = grid.w, y0 = grid.h, x1 = 0, y1 = 0;
-  for (let y = 0; y < grid.h; y++) {
-    for (let x = 0; x < grid.w; x++) {
-      if (!isSeen(sight, x, y)) continue;
-      if (x < x0) x0 = x;
-      if (y < y0) y0 = y;
-      if (x > x1) x1 = x;
-      if (y > y1) y1 = y;
-    }
-  }
+  let { x0, y0, x1, y1 } = seenBounds(grid, sight);
   if (x1 < x0 || y1 < y0) {          // nothing seen yet
     x0 = 0; y0 = 0; x1 = grid.w - 1; y1 = grid.h - 1;
   }
@@ -89,6 +80,37 @@ export function miniView(grid: Grid, sight: Sight, box: MiniBox): MiniView {
     oy: box.y + (box.h - spanY * scale) / 2,
     x0, y0, x1, y1,
   };
+}
+
+/**
+ * The box around everything seen, recomputed only when more has been seen.
+ *
+ * It was a scan of the whole map -- 8800 tiles -- every frame, the single
+ * largest cost in drawing one, to find almost always the same four numbers.
+ * `seen` only ever gains tiles and every write bumps `seenCount`, so an
+ * unchanged count is an unchanged box.
+ */
+interface Bounds { x0: number; y0: number; x1: number; y1: number }
+const boundsMemo = new WeakMap<Sight, Bounds & { count: number; w: number; h: number }>();
+
+function seenBounds(grid: Grid, sight: Sight): Bounds {
+  const hit = boundsMemo.get(sight);
+  if (hit?.count === sight.seenCount && hit.w === grid.w && hit.h === grid.h) {
+    return hit;
+  }
+  let x0 = grid.w, y0 = grid.h, x1 = 0, y1 = 0;
+  for (let y = 0; y < grid.h; y++) {
+    for (let x = 0; x < grid.w; x++) {
+      if (!isSeen(sight, x, y)) continue;
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  }
+  const b = { x0, y0, x1, y1, count: sight.seenCount, w: grid.w, h: grid.h };
+  boundsMemo.set(sight, b);
+  return b;
 }
 
 /** Grid coordinates to a point inside the box. */

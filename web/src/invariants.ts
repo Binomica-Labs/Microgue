@@ -213,14 +213,23 @@ export const INVARIANTS: Readonly<Record<string, Check>> = {
   },
 
   "no two bodies share a tile": (w) => {
-    const seen = new Map<string, Mob>();
+    // Keyed by tile index on the grid -- this runs every turn, and a string
+    // per tile per body was most of its cost. Anything off the grid (which
+    // another invariant reports) still gets checked, by the string key.
+    const { w: gw, h: gh } = w.level.grid;
+    const onGrid = new Map<number, Mob>();
+    const offGrid = new Map<string, Mob>();
     for (const m of w.level.mobs) {
       if (!m.alive) continue;
       for (const t of tilesOf(SIZES[m.size].footprint, m.x, m.y, m.heading)) {
-        const k = `${String(t.x)},${String(t.y)}`;
-        const other = seen.get(k);
-        if (other) return `${m.name} overlaps ${other.name} at ${k}`;
-        seen.set(k, m);
+        const inside = Number.isInteger(t.x) && Number.isInteger(t.y)
+          && t.x >= 0 && t.y >= 0 && t.x < gw && t.y < gh;
+        const k = inside ? "" : `${String(t.x)},${String(t.y)}`;
+        const other = inside ? onGrid.get(t.y * gw + t.x) : offGrid.get(k);
+        if (other) {
+          return `${m.name} overlaps ${other.name} at ${String(t.x)},${String(t.y)}`;
+        }
+        if (inside) onGrid.set(t.y * gw + t.x, m); else offGrid.set(k, m);
       }
     }
     return null;

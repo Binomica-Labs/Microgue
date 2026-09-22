@@ -27,7 +27,10 @@ export function t_look(_g: Game): void {
     // The lab has the lights on. Recomputing FOV there would re-fog a room
     // that is lit, and a lab drawn dark looks like the column with a white
     // palette -- the one thing it exists not to look like.
-    if (_g.intro) { s.visible.fill(1); s.seen.fill(1); }
+    if (_g.intro) {
+      s.visible.fill(1); s.seen.fill(1);
+      s.seenCount = s.seen.length;     // kept true: the minimap keys on it
+    }
     else {
       // A symbiont can sharpen or dull the senses: a magnetosome sees far, a
       // capsule muffles the cell.

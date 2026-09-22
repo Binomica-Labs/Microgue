@@ -21,6 +21,7 @@ import type { Game } from "./main.js";
 function litSight(grid: { w: number; h: number }): Sight {
   const s = makeSight(grid.w, grid.h);
   s.seen.fill(1);
+  s.seenCount = s.seen.length;       // kept true: the minimap keys on it
   s.visible.fill(1);
   return s;
 }
