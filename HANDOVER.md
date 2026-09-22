@@ -1,3 +1,39 @@
+# v1.47.0 — katG does what its card says; the heir keeps its class
+
+## Oxidative stress had no counter
+
+Every playtest strain on v1.45 died on F1, and Oxidative stress (from
+Nitzschia and Synechococcus: 35% per hit, stacking magnitude) was the
+leading cause. katG's own card says "the oxic zone is corrosive without
+it", yet nothing on the plasmid reduced the status at all.
+
+`detox()` in status.ts: expressed katG clears half of oxidative damage and
+sodA another 0.3; sqr clears 0.6 of sulfide. The total is capped at 0.8,
+so detox means resistance, never immunity. Only the PLAYER'S status tick
+uses it. Mobs keep plain `tick`.
+
+Detox makes damage fractional, and the fraction now CARRIES to the next
+turn (`statusCarry`, transient). Rounding each tick turned katG's half of a
+1-point tick straight back into 1, so it would have done nothing against a
+light dose, which is the case the test pins.
+
+Bot, 4 seeds per class (these runs still die; the bot attacks everything,
+including passive drifters a person walks past, so I did not retune F1
+damage from it): heterotroph, no katG, died at T12-112; phototroph, which
+starts with katG, at T118-165. F1 balance is still an open question, and
+it needs a better bot or a human, not this one.
+
+## A big inheritance erased the class kit (regression from v1.43)
+
+Once the heirloom actually persisted, `startRun` stashed it BEFORE the class
+kit into an 18-row bin, ignoring results. A deep lineage passes on 20+
+parts, so the kit bounced off a full bin: a phototroph started without psbA
+and katG, and its opening operon failed. Room is now reserved for the kit
+and the lab stock, and the note says how many inherited parts did not fit.
+
+This was mine, found by asking "who else writes to that bin" of my own
+v1.43 change. The heir test only ever used six genes.
+
 # v1.46.0 — the snow stays put; the surge reaches the hits that matter
 
 ## Marine snow followed the player

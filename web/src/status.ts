@@ -73,12 +73,18 @@ export function clear(list: Status[], id: StatusId): void {
   if (i >= 0) list.splice(i, 1);
 }
 
-/** Advance one turn. Returns total damage; expired effects are removed. */
-export function tick(list: Status[]): number {
+/**
+ * Advance one turn. Returns total damage; expired effects are removed.
+ *
+ * `kept` is the fraction of each status's damage that gets through, 0..1 --
+ * a detox gene clearing what it clears. Omitted, everything lands.
+ */
+export function tick(list: Status[], kept: (id: StatusId) => number = () => 1): number {
   let dmg = 0;
   for (const s of list) {
     const def = STATUS[s.id];
-    dmg += def.dmg * s.magnitude;
+    const k = kept(s.id);
+    dmg += def.dmg * s.magnitude * (Number.isFinite(k) ? Math.min(Math.max(k, 0), 1) : 1);
     if (def.growth > 0) s.magnitude = Math.min(s.magnitude + def.growth, MAX_MAGNITUDE);
     s.turns -= 1;
   }
@@ -87,6 +93,26 @@ export function tick(list: Status[]): number {
     if (s && s.turns <= 0) list.splice(i, 1);
   }
   return dmg;
+}
+
+/**
+ * How much of a status a strain's own genes clear, 0..1 (0.8 at most: a
+ * detox enzyme outpaces the damage, it does not make you immune).
+ *
+ * Oxidative stress killed every playtest strain on F1 and NOTHING countered
+ * it -- katG's own card says "the oxic zone is corrosive without it", and
+ * carrying it changed nothing. Catalase and superoxide dismutase clear
+ * reactive oxygen; sulfide:quinone reductase routes H2S into the quinone
+ * pool, which is what `sqr` already does for your own sulfide release.
+ */
+export function detox(id: StatusId, expressed: (gene: "katG" | "sodA" | "sqr") => number): number {
+  const e = (g: "katG" | "sodA" | "sqr"): number => {
+    const v = expressed(g);
+    return Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
+  };
+  if (id === "oxidative") return Math.min(0.5 * e("katG") + 0.3 * e("sodA"), 0.8);
+  if (id === "sulfide") return Math.min(0.6 * e("sqr"), 0.8);
+  return 0;
 }
 
 /** Combined action-rate multiplier. Never zero, so nothing is permanently frozen. */

@@ -282,7 +282,7 @@ import { firstViolation, type WorldView } from "./invariants.js";
 import { MODIFIERS, RARITY } from "./parts.js";
 import { dropAt, itemName, removeDrop, yieldOf, type Item } from "./items.js";
 import { ROOM_STYLE, roomAt } from "./rooms.js";
-import { STATUS, apply as applyStatus, tick as tickStatus } from "./status.js";
+import { STATUS, apply as applyStatus, detox, tick as tickStatus } from "./status.js";
 import { WEAPONS } from "./weapons.js";
 import { microbeTurn } from "./combat.js";
 import { nextAction, type Action } from "./pursuit.js";
@@ -473,7 +473,15 @@ export function t_mobTurn(_g: Game): void {
     // so a status that killed you on its last turn was already gone by the
     // time it was named -- every such death read "killed by an affliction".
     const causes = _g.player.status.map((s) => STATUS[s.id].name);
-    const selfDmg = tickStatus(_g.player.status);
+    const depth = _g.dungeon.depth;
+    const raw = tickStatus(_g.player.status, (id) =>
+      1 - detox(id, (gene) => _g.genome.expression(gene, depth)));
+    // Detox makes damage fractional. The fraction CARRIES to the next turn:
+    // rounding each tick made half of a 1-point tick round back up to 1, so
+    // katG alone did nothing at all against a light dose.
+    const owed = raw + _g.statusCarry;
+    const selfDmg = Math.floor(owed);
+    _g.statusCarry = _g.player.status.length > 0 ? owed - selfDmg : 0;
     if (selfDmg > 0) {
       const cause = causes.length > 0 ? causes.join(" and ") : "an affliction";
       _g.trace.push(_g.clock.turn, "status",

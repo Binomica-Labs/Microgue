@@ -10581,3 +10581,16 @@ describe("an install never destroys a part (audit of v1.45)", () => {
     expect(tally(p), `a part was destroyed (install said ${JSON.stringify(r)})`).toBe(before);
   });
 });
+
+describe("detox genes clear the statuses they are named for", () => {
+  it("katG and sodA cut oxidative stress, sqr cuts sulfide, nothing gives immunity", async () => {
+    const { detox } = await import("../src/status.js");
+    const none = () => 0, all = () => 1;
+    expect(detox("oxidative", none)).toBe(0);
+    expect(detox("oxidative", (g) => (g === "katG" ? 1 : 0))).toBeCloseTo(0.5);
+    expect(detox("oxidative", all), "detox made a strain immune").toBeLessThanOrEqual(0.8);
+    expect(detox("sulfide", (g) => (g === "sqr" ? 1 : 0))).toBeGreaterThan(0);
+    expect(detox("phage", all), "catalase cured a phage").toBe(0);
+    expect(detox("oxidative", () => NaN)).toBe(0);
+  });
+});

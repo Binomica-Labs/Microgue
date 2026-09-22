@@ -153,6 +153,9 @@ class Game {
   cooldowns: Cooldowns = new Map<string, number>();
   secretions: Secretion[] = [];
   surge: Surge | null = null;
+  /** Fractional status damage owed to next turn, once detox has made it
+   *  fractional. See the status tick in turn.ts. */
+  statusCarry = 0;
   /** The ability the player has selected and is aiming, if it needs a
    *  direction (bolt, dash). Null when nothing is armed. */
   aiming: string | null = null;

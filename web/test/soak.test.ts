@@ -1764,7 +1764,9 @@ describe("state that should persist, does", () => {
     musicAt: "music voicing throttle", musicThreat: "throttled threat for the music",
     biofilm: "territory on the current floor; cleared on descent",
     cooldowns: "ability recharge, per run", secretions: "lingering enzyme tiles",
-    surge: "a timed self-effect", aiming: "which ability is armed",
+    surge: "a timed self-effect",
+    statusCarry: "under one hp of status damage owed to next turn",
+    aiming: "which ability is armed",
     abilitySlots: "hit boxes, per frame",
     naming: "the strain being named, between class and inoculation",
     nameField: "the DOM text input, built at boot", nameBoxes: "hit boxes, per frame",
@@ -4486,6 +4488,25 @@ describe("release soak: lineage across real deaths", () => {
     expect(g.lab.heirloom, "the heirloom was not consumed").toEqual([]);
   });
 
+  it("a huge inheritance never crowds out the class's own operon", async () => {
+    // A deep lineage passes on more than the bin holds. Stashed first with
+    // results ignored, it filled the bin and the class kit bounced off it.
+    const { writeLab, readLab } = await import("../src/lab_save.js");
+    const { CLASSES } = await import("../src/classes.js");
+    const lab = readLab();
+    const kit = CLASSES.phototroph.genes;
+    lab.heirloom = (Object.keys(bio.GENES) as bio.GeneId[])
+      .filter((x) => x !== "ori" && !kit.includes(x)).slice(0, 24)
+      .map((id) => ({ kind: "gene" as const, id, level: 1, mods: [], allele: WILD_TYPE }));
+    writeLab(lab);
+    const g = await mkGame();
+    g.startRun(0, "phototroph");
+    for (const id of kit) {
+      expect(g.genome.has(id), `the class operon is missing ${id}`).toBe(true);
+    }
+    expect(g.genome.bin.length).toBeGreaterThan(5);        // and it did inherit
+  });
+
   it("succession written at death reaches the next strain's floors", async () => {
     // Through `die` and `startRun`, which re-reads the lab from storage. The
     // succession is a Map, and a Map stringifies to `{}`: it was written and
@@ -4786,5 +4807,40 @@ describe("mob hits go where hurt goes", () => {
     expect(halved.length).toBeGreaterThan(3);
     const avg = (a: number[]) => a.reduce((p, q) => p + q, 0) / a.length;
     expect(avg(halved), "the surge did not halve melee").toBeLessThan(avg(plain) * 0.7);
+  });
+});
+
+describe("oxidative stress has a counter", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a strain expressing katG takes far less from the same dose, even a light one", async () => {
+    // Every playtest strain died on F1 to oxidative stress and nothing on the
+    // plasmid could stop it. A light dose matters most: rounding per tick
+    // used to turn katG's half of a 1-point tick straight back into 1.
+    const { Game } = await import("../src/main.js");
+    const taken = (withKatG: boolean): number => {
+      const g = new Game({
+        width: 400, height: 800, style: {} as CSSStyleDeclaration,
+        getContext: () => stubContext({ calls: 0 }),
+        addEventListener: () => undefined,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+      } as unknown as HTMLCanvasElement);
+      g.startRun(0, "heterotroph");
+      g.level.mobs.length = 0;
+      const real = g.genome.expression.bind(g.genome);
+      g.genome.expression = (id, d) => (id === "katG" ? (withKatG ? 1 : 0) : real(id, d));
+      let lost = 0;
+      for (let i = 0; i < 20; i++) {
+        g.player.status.length = 0;
+        g.player.status.push({ id: "oxidative", turns: 3, magnitude: 1 });
+        g.player.hp = g.player.maxhp;
+        g.press("wait");
+        lost += g.player.maxhp - g.player.hp;
+      }
+      return lost;
+    };
+    const bare = taken(false), guarded = taken(true);
+    expect(bare, "the dose did nothing -- the test is not testing").toBeGreaterThan(10);
+    expect(guarded, "katG did not cut a light dose").toBeLessThan(bare * 0.7);
   });
 });

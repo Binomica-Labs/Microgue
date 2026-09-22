@@ -23,7 +23,7 @@ import { addDrop, rollPart, substratesAt } from "./items.js";
 import type { Item } from "./items.js";
 import { noStations } from "./lab_level.js";
 import { readLab, writeLab } from "./lab_save.js";
-import { Plasmid } from "./plasmid.js";
+import { BIN_CAP, Plasmid } from "./plasmid.js";
 import { capacityAt, describeStock, restockAmount } from "./production.js";
 import { makeRng } from "./rng.js";
 import { CONDITIONS, rollCondition } from "./conditions.js";
@@ -179,6 +179,7 @@ export function g_startRun(
   _g.cooldowns.clear();
   _g.secretions = [];
   _g.surge = null;
+  _g.statusCarry = 0;
   _g.aiming = null;
   _g.introStations = noStations();
   _g.exploring = false;
@@ -241,10 +242,22 @@ export function g_startRun(
 
     // The inheritance, before the class kit: what the lineage passes down is
     // the strain's history, and the class kit is this strain's own start.
-    for (const part of _g.lab.heirloom) _g.genome.stash(part);
+    //
+    // Room is RESERVED for what follows. A deep lineage passes on more parts
+    // than the bin holds, and with the heirloom stashed first -- results
+    // ignored -- the class kit found the bin full: a phototroph started
+    // without psbA and katG and its opening operon failed to assemble.
+    const reserve = def.genes.length + _g.lab.stock.length;
+    let took = 0;
+    for (const part of _g.lab.heirloom) {
+      if (_g.genome.bin.length >= BIN_CAP - reserve) break;
+      if (_g.genome.stash(part).ok) took++;
+    }
     if (_g.lab.heirloom.length > 0) {
+      const spilled = _g.lab.heirloom.length - took;
       _g.note(`Generation ${String(_g.lab.generation)}. `
-        + `${String(_g.lab.heirloom.length)} constructs inherited.`);
+        + `${String(took)} constructs inherited`
+        + (spilled > 0 ? `; ${String(spilled)} did not fit the bin.` : "."));
       // Spent. It is one strain's inheritance, not a stockpile: left in the
       // lab, every new slot would be handed the same parts again.
       _g.lab.heirloom = [];
