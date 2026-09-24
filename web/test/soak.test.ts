@@ -4013,26 +4013,39 @@ describe("bulk loot: take all and eat all", () => {
     expect(r.taken + r.left, "items vanished").toBe(4);
   });
 
-  it("eat all digests every cassette for hp and ATP, leaves the substrate", async () => {
+  it("eat all digests EVERYTHING, food molecules included", async () => {
     const { eatAll } = await import("../src/bulk_loot.js");
     const { g, d } = await withDrop();
     g.player.hp = 5; g.player.atp = 10;
     const r = eatAll(g, d);
-    expect(r.taken, "no cassette was digested").toBe(3);
+    // "Eat all" that leaves the glucose behind is a lie: the player still
+    // has to tap the leftovers. A cell handed a heap of organic matter does
+    // not sort it by category. Everything goes except a symbiont, which is
+    // alive and is not a snack.
+    expect(r.taken, "not everything was digested").toBe(4);
     expect(g.player.hp, "eating gave no hp").toBeGreaterThan(5);
     expect(g.player.atp, "eating gave no ATP").toBeGreaterThan(10);
-    expect(d.items.every((it) => it.kind === "substrate"),
-           "eat all ate a substrate").toBe(true);
-    expect(d.items.length).toBe(1);
+    expect(d.items.length, "something was left on the tile").toBe(0);
   });
 
-  it("eat all on a drop with no cassettes does nothing and says so", async () => {
+  it("a symbiont is never eaten by a bulk button", async () => {
+    // The one thing that must survive "eat all". A living endosymbiont is a
+    // landmark find, and losing one to a button you pressed to clear a tile
+    // is exactly the loss a bulk action must not be able to cause.
     const { eatAll } = await import("../src/bulk_loot.js");
     const { g, d } = await withDrop();
-    d.items = d.items.filter((it) => it.kind === "substrate");
-    const hp = g.player.hp;
+    d.items = [{ kind: "symbiont", id: "hydrogenosome" }];
     const r = eatAll(g, d);
-    expect(r.taken).toBe(0);
+    expect(r.taken, "a symbiont was digested").toBe(0);
+    expect(d.items.length, "the symbiont was destroyed").toBe(1);
+  });
+
+  it("eat all on an empty drop does nothing and says so", async () => {
+    const { eatAll } = await import("../src/bulk_loot.js");
+    const { g, d } = await withDrop();
+    d.items = [];
+    const hp = g.player.hp;
+    expect(eatAll(g, d).taken).toBe(0);
     expect(g.player.hp).toBe(hp);
   });
 

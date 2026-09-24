@@ -8,7 +8,8 @@
 // reduction and re-enters at sulfur oxidation. A list cannot show that.
 
 import { GENES } from "./biology.js";
-import { EDGES, MODULES, NODES, graphBounds, moduleState, type Edge, type Module }
+import { EDGES, MODULES, NODES, graphBounds, missingGenes, moduleState,
+  type Edge, type Module }
   from "./kegg.js";
 import type { Plasmid } from "./plasmid.js";
 import { PATHWAY_COLOUR } from "./plasmid_ui.js";
@@ -286,18 +287,76 @@ export function drawGraph(
   }
 
   // Module captions, which double as the build targets.
+  //
+  // These used to be a name and a binary colour: done, or not. Nothing said
+  // how CLOSE you were, which is the only thing that makes a long goal pull
+  // -- 4/5 is a reason to keep looking and "incomplete" is not. Each caption
+  // now carries a fill bar for held/total, its pathway's colour, and the
+  // name of the next gene it wants.
   for (const box of boxes) {
     const st = moduleState(box.module, carried);
     const a = toScreen(v, box.x, box.y);
     const w = box.w * s, h = 22 * s;
-    ctx.fillStyle = st.complete ? "rgba(40,90,55,0.92)" : "rgba(0,0,0,0.72)";
-    ctx.strokeStyle = st.complete ? "#7fe0a4" : "rgba(255,255,255,0.2)";
-    ctx.lineWidth = Math.max(1.4 * s, 1);
+    const tint = PATHWAY_COLOUR[box.module.pathway];
+    const frac = st.total > 0 ? st.held / st.total : 0;
+
+    ctx.fillStyle = "rgba(0,0,0,0.78)";
     ctx.beginPath();
     ctx.roundRect(a.x, a.y, w, h, 4 * s);
     ctx.fill();
+
+    // The progress fill, in the pathway's own colour, behind the label.
+    if (frac > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(a.x, a.y, w, h, 4 * s);
+      ctx.clip();
+      ctx.globalAlpha = st.complete ? 0.55 : 0.26;
+      ctx.fillStyle = tint;
+      ctx.fillRect(a.x, a.y, w * frac, h);
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = st.complete ? tint : "rgba(255,255,255,0.22)";
+    ctx.lineWidth = Math.max((st.complete ? 2.2 : 1.4) * s, 1);
+    ctx.beginPath();
+    ctx.roundRect(a.x, a.y, w, h, 4 * s);
     ctx.stroke();
-    ctx.fillStyle = st.complete ? "#ffffff" : "rgba(255,255,255,0.5)";
+
+    // A complete module gets a halo, because finishing one should be a
+    // moment on the screen and not a colour swap you might miss.
+    if (st.complete) {
+      ctx.strokeStyle = tint;
+      ctx.globalAlpha = 0.32;
+      ctx.lineWidth = Math.max(5 * s, 2);
+      ctx.beginPath();
+      ctx.roundRect(a.x - 2 * s, a.y - 2 * s, w + 4 * s, h + 4 * s, 6 * s);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // held/total, and what it wants next -- an actionable goal rather than
+    // a mystery. Only when there is room to read it.
+    if (s > 0.45) {
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.font = `${Math.max(9 * s, 6)}px ui-monospace,monospace`;
+      ctx.fillStyle = st.complete ? tint : "rgba(255,255,255,0.55)";
+      ctx.fillText(`${String(st.held)}/${String(st.total)}`,
+                   a.x + w - 5 * s, a.y + h / 2);
+      if (!st.complete) {
+        const want = missingGenes(box.module, carried)[0];
+        if (want !== undefined) {
+          ctx.textAlign = "left";
+          ctx.font = `${Math.max(8 * s, 6)}px ui-monospace,monospace`;
+          ctx.fillStyle = "rgba(255,255,255,0.4)";
+          ctx.fillText(`needs ${GENES[want].name}`, a.x + 5 * s, a.y + h + 8 * s);
+        }
+      }
+    }
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = st.complete ? "#ffffff" : "rgba(255,255,255,0.62)";
     ctx.font = `${Math.max(9.5 * s, 6.5)}px ui-monospace,monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

@@ -22,7 +22,8 @@
 
 import type { GeneId } from "./biology.js";
 
-export type AbilityKind = "secrete" | "bolt" | "burst" | "surge";
+export type AbilityKind = "secrete" | "bolt" | "burst" | "surge"
+  | "steal" | "purge";
 
 export interface Ability {
   readonly id: string;
@@ -41,9 +42,18 @@ export interface Ability {
   readonly note: string;
   /** Glyph for the bar. */
   readonly glyph: string;
+  /**
+   * Strain level required, 1..MAX_STRAIN.
+   *
+   * The second axis. A gene GRANTS an ability; the strain's level decides
+   * whether the cell is developed enough to run it. Levelling gave slots and
+   * ATP -- more room and more fuel -- and nothing you could DO, so the
+   * reward for a long run was invisible in play. These are the payoff.
+   */
+  readonly minStrain?: number;
 }
 
-export const ABILITIES: readonly Ability[] = [
+const BASE: readonly Ability[] = [
   {
     id: "cellulase", name: "cellulase field", gene: "celA", kind: "secrete",
     cost: 6, cooldown: 4, power: 3, range: 1, linger: 4, glyph: "\u2591",
@@ -92,14 +102,70 @@ export const ABILITIES: readonly Ability[] = [
   },
 ];
 
+/**
+ * Abilities that unlock with the strain, not just with a gene.
+ *
+ * Each is a real thing a bacterium does, chosen so the ladder teaches
+ * something rather than escalating a damage number:
+ *
+ *   L2 flash        bioluminescence as a weapon -- blind what is next to you
+ *   L3 efflux       the multidrug pump, run in reverse: purge every status
+ *   L5 conjugation  extend a pilus and STEAL a gene from an adjacent cell
+ *   L7 sporulation  become an endospore: untouchable, immobile, repairing
+ */
+const LEVELLED: readonly Ability[] = [
+  {
+    id: "flash", name: "luminous flash", gene: "luxAB", kind: "burst",
+    cost: 6, cooldown: 5, power: 1, range: 2, linger: 0, glyph: "\u2739",
+    minStrain: 2,
+    note: "Fire every luciferase at once. Anything in two tiles is blinded "
+      + "and loses track of you. Real bioluminescence is a startle display "
+      + "before it is anything else.",
+  },
+  {
+    id: "efflux", name: "efflux purge", gene: "acrB", kind: "purge",
+    cost: 12, cooldown: 9, power: 1, range: 0, linger: 0, glyph: "\u21BB",
+    minStrain: 3,
+    note: "Run the multidrug pump flat out. Every status on you is expelled "
+      + "-- poison, chelation, infection, all of it -- at a steep price in "
+      + "ATP, because that is what the pump costs a real cell.",
+  },
+  {
+    id: "conjugate", name: "conjugation", gene: "comA", kind: "steal",
+    cost: 14, cooldown: 12, power: 1, range: 1, linger: 0, glyph: "\u26AD",
+    minStrain: 5,
+    note: "Extend a pilus into an adjacent cell and pull a gene across. "
+      + "Horizontal transfer, taken rather than waited for -- this is how "
+      + "resistance actually spreads.",
+  },
+  {
+    id: "spore", name: "sporulation", gene: "otsA", kind: "surge",
+    cost: 18, cooldown: 20, power: 0, range: 0, linger: 5, glyph: "\u25CF",
+    minStrain: 7,
+    note: "Commit to an endospore. Nothing touches you for five turns and "
+      + "you repair while it lasts -- but you cannot act either. The oldest "
+      + "survival strategy there is, and the most total.",
+  },
+];
+
+export const ABILITIES: readonly Ability[] = [...BASE, ...LEVELLED];
+
 export const ABILITY_BY_ID: Readonly<Record<string, Ability>> =
   Object.fromEntries(ABILITIES.map((a) => [a.id, a]));
 
-/** The abilities a genome grants: those whose gene is expressed here. */
+/**
+ * The abilities available right now: gene expressed here AND the strain
+ * developed enough to run it.
+ *
+ * `strain` defaults to MAX so a caller that does not track levels (a test, a
+ * tool) sees everything its genes grant rather than silently nothing.
+ */
 export function grantedAbilities(
-  expression: (g: GeneId) => number,
+  expression: (g: GeneId) => number, strain = 8,
 ): Ability[] {
-  return ABILITIES.filter((a) => expression(a.gene) > 0);
+  const lvl = Number.isFinite(strain) ? strain : 8;
+  return ABILITIES.filter((a) =>
+    expression(a.gene) > 0 && lvl >= (a.minStrain ?? 1));
 }
 
 /** Per-ability cooldown state, keyed by id. Turn number when it is next usable. */

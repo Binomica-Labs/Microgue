@@ -19,7 +19,7 @@ export function drawAbilityBar(
 ): AbilitySlot[] {
   const ctx = _g.ctx;
   const d = _g.dungeon.depth;
-  const list = grantedAbilities((g) => _g.genome.expression(g, d));
+  const list = grantedAbilities((g) => _g.genome.expression(g, d), _g.genome.strain);
   if (list.length === 0) return [];
 
   const size = 40 * u, gap = 8 * u;

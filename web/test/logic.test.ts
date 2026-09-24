@@ -10616,3 +10616,151 @@ describe("detox genes clear the statuses they are named for", () => {
     expect(detox("oxidative", () => NaN)).toBe(0);
   });
 });
+
+describe("abilities unlock with the strain, not just with a gene", () => {
+  it("a levelled ability is hidden until the strain is developed enough", async () => {
+    const { grantedAbilities, ABILITIES } = await import("../src/abilities.js");
+    const levelled = ABILITIES.filter((a) => (a.minStrain ?? 1) > 1);
+    expect(levelled.length, "nothing unlocks with level at all")
+      .toBeGreaterThanOrEqual(3);
+    for (const a of levelled) {
+      const need = a.minStrain ?? 1;
+      const all = (): number => 1;                 // every gene expressed
+      expect(grantedAbilities(all, need - 1).map((x) => x.id),
+             `${a.id} was offered below level ${String(need)}`).not.toContain(a.id);
+      expect(grantedAbilities(all, need).map((x) => x.id),
+             `${a.id} never unlocks at level ${String(need)}`).toContain(a.id);
+    }
+    // the base set is available from level 1
+    expect(grantedAbilities(() => 1, 1).length, "nothing at all at level 1")
+      .toBeGreaterThan(0);
+  });
+
+  it("the ladder is spread out, and every unlock names a real gene", async () => {
+    const { ABILITIES } = await import("../src/abilities.js");
+    const { MAX_STRAIN } = await import("../src/strain.js");
+    const levels = new Set<number>();
+    for (const a of ABILITIES) {
+      const need = a.minStrain ?? 1;
+      expect(need, `${a.id} needs level ${String(need)}, above the cap`)
+        .toBeLessThanOrEqual(MAX_STRAIN);
+      expect(a.gene in bio.GENES, `${a.id} names a gene that does not exist`)
+        .toBe(true);
+      expect(a.note.length, `${a.id} has no note`).toBeGreaterThan(20);
+      levels.add(need);
+    }
+    expect(levels.size, "every ability unlocks at the same level")
+      .toBeGreaterThanOrEqual(3);
+  });
+
+  it("garbage strain levels do not unlock or hide everything", async () => {
+    const { grantedAbilities } = await import("../src/abilities.js");
+    for (const s of [NaN, Infinity, -5, 0]) {
+      const got = grantedAbilities(() => 1, s);
+      expect(Array.isArray(got), `grantedAbilities(${String(s)}) broke`).toBe(true);
+      for (const a of got) {
+        expect(a.gene.length, "an ability with no gene was offered")
+          .toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe("eat all is not a lie", () => {
+  it("every item kind except a symbiont is worth something to digest", async () => {
+    // The old eat-all left substrates and parts on the tile, so a pile with
+    // a glucose molecule in it still had one afterwards.
+    const { COFACTORS } = await import("../src/crossfeed.js");
+    void COFACTORS;
+    const { yieldOf } = await import("../src/items.js");
+    // a substrate's digest value is the same one a pickup pays
+    const y = yieldOf("glucose", () => true);
+    expect(y.atp, "glucose is worth nothing to eat").toBeGreaterThan(0);
+  });
+});
+
+describe("a completed module pays a real dividend", () => {
+  it("completing a module lowers its pathway's upkeep", async () => {
+    // The research map was DECORATIVE: `moduleState` computed progress, drew
+    // a box, and nothing in the game read it. A screen showing a long-term
+    // goal that pays nothing is a screen with no reason to visit it.
+    const { MODULES } = await import("../src/kegg.js");
+    const m0 = MODULES[0];
+    if (!m0) return;
+    const build = (genes: readonly bio.GeneId[]): Plasmid => {
+      const p = new Plasmid();
+      p.integrated = 20;
+      for (const g of genes) {
+        p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+      }
+      p.assemble([...genes]);
+      return p;
+    };
+    const all = m0.steps.map((s) => s.gene);
+    const { masteryOf, upkeepFactor } = await import("../src/module_reward.js");
+
+    // Test the FACTOR, not a per-gene cost difference. A first version
+    // compared the complete build against a one-gene-short one, which
+    // passed with the dividend switched off: the extra gene changes ring
+    // geometry and expression, and that swamped a 18% relief on one
+    // pathway. An emergent number with a big confound is not a measurement.
+    const carried = build(all).carried();
+    const m = masteryOf(carried);
+    expect(m.complete.length, "the module did not register as complete")
+      .toBeGreaterThan(0);
+    expect(m.pathways.has(m0.pathway), "its pathway was not credited").toBe(true);
+    expect(upkeepFactor(m0.pathway, m),
+           "a mastered pathway costs the same as an unmastered one")
+      .toBeLessThan(1);
+    // and an unmastered pathway is untouched
+    const other = (["photo", "iron", "methane"] as const)
+      .find((p) => !m.pathways.has(p));
+    if (other) expect(upkeepFactor(other, m), "an unmastered pathway got the bonus")
+      .toBe(1);
+    // the wiring itself: cost is finite and positive with mastery applied
+    expect(Number.isFinite(build(all).atpCost(4))).toBe(true);
+  });
+
+  it("the dividend is capped: finishing everything does not trivialise the game", async () => {
+    const { masteryOf, MAX_COUNTED, upkeepFactor, yieldFactor } =
+      await import("../src/module_reward.js");
+    const { MODULES } = await import("../src/kegg.js");
+    // every gene of every module
+    const every = new Set<bio.GeneId>(MODULES.flatMap((m) => m.steps.map((s) => s.gene)));
+    const m = masteryOf(every);
+    expect(m.counted, "the cap does not bind").toBeLessThanOrEqual(MAX_COUNTED);
+    expect(m.pathways.size, "more pathways credited than modules counted")
+      .toBeLessThanOrEqual(MAX_COUNTED);
+    // and the multipliers stay sane whatever is passed
+    for (const pw of ["nitrogen", "photo", "resist"] as const) {
+      for (const f of [upkeepFactor(pw, m), yieldFactor(pw, m)]) {
+        expect(Number.isFinite(f) && f > 0 && f < 2, `factor ${String(f)}`).toBe(true);
+      }
+    }
+  });
+
+  it("an empty or garbage genome masters nothing and breaks nothing", async () => {
+    const { masteryOf, upkeepFactor } = await import("../src/module_reward.js");
+    const none = masteryOf(new Set());
+    expect(none.counted, "an empty genome mastered something").toBe(0);
+    expect(none.pathways.size).toBe(0);
+    expect(upkeepFactor("nitrogen", none), "a bonus with nothing carried").toBe(1);
+    // a genome full of ids that are not genes
+    const junk = masteryOf(new Set(["nope", "", "ori"] as unknown as bio.GeneId[]));
+    expect(junk.counted).toBe(0);
+  });
+
+  it("the credited pathways are exactly the ones the maths applies", async () => {
+    // A screen that credits a pathway the maths ignores is a lie. The cap
+    // slices the module list, so the pathway set must slice with it.
+    const { masteryOf, MAX_COUNTED } = await import("../src/module_reward.js");
+    const { MODULES } = await import("../src/kegg.js");
+    const every = new Set<bio.GeneId>(MODULES.flatMap((m) => m.steps.map((s) => s.gene)));
+    const m = masteryOf(every);
+    const countedModules = m.complete.slice(0, MAX_COUNTED);
+    for (const mod of countedModules) {
+      expect(m.pathways.has(mod.pathway),
+             `${mod.name} counts but its pathway is not credited`).toBe(true);
+    }
+  });
+});

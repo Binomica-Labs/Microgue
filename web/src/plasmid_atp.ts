@@ -13,6 +13,7 @@ import { alleleEffect } from "./allele.js";
 import { TERMINATORS } from "./parts.js";
 import { copyBurden } from "./chromosome.js";
 import { SYMBIONTS } from "./symbiont.js";
+import { masteryOf, upkeepFactor } from "./module_reward.js";
 import type { Plasmid } from "./plasmid.js";
 
 /** ATP drawn per action. Memoised: it depends only on the ring and the
@@ -28,12 +29,19 @@ export function p_atpCost(_p: Plasmid, depth: number): number {
 
 export function p_computeAtpCost(_p: Plasmid, depth: number): number {
   let c = 0;
+  const mastery = masteryOf(_p.carried());
   for (const p of _p.slots) {
     if (p?.kind !== "gene") continue;
     const mods = modEffect(p.mods);
     const allele = alleleEffect(p.allele);
+    // A completed KEGG module makes its pathway cheaper to run: the whole
+    // route exists, so no intermediate is a dead end. Computed once outside
+    // the loop -- `masteryOf` walks every module and the loop walks every
+    // slot, and doing both together is the sort of quadratic that only
+    // shows up on a full ring. See module_reward.ts.
     c += _p.rawExpression(p.id, depth) * GENES[p.id].kb * COST_PER_KB
-      * mods.upkeep * allele.upkeep;
+      * mods.upkeep * allele.upkeep
+      * upkeepFactor(GENES[p.id].pathway, mastery);
   }
   // Replicating the plasmid is most of what carrying one costs, and a
   // high-copy origin costs proportionally more.

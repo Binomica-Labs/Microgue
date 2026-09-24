@@ -1,20 +1,21 @@
+# Microgue
 
-## TypeScript, enforced
+A microbiology roguelike. You are a bacterial strain descending a water
+column: build a plasmid out of real genes, eat what you can metabolise, and
+outlive what lives at each depth.
 
-`npm run verify` gates the build. It runs, in order:
+**Play:** https://binomica-labs.github.io/Microgue/
 
-| | |
-|---|---|
-| `guard` | fails if any `.js` appears under `src/` or `test/` |
-| `check` | `tsc --noEmit` at maximum strictness |
-| `lint`  | ESLint `strictTypeChecked` with every escape hatch as an error |
-| `test`  | 45 assertions |
+The game is TypeScript and lives in [`web/`](web/). Build, test and deploy
+notes are in [`web/README.md`](web/README.md) and [`web/INSTALL.md`](web/INSTALL.md);
+the design history is in [`HANDOVER.md`](HANDOVER.md).
 
-`any`, `@ts-ignore`, `@ts-nocheck`, non-null `!`, unsafe member access on
-`any`, `==`, and implicit coercion are all **errors**, not warnings. `index.html`
-carries no inline script. `public/microgue.js` is build output — never edited,
-never read.
+```sh
+cd web
+npm ci
+npm run verify   # typecheck, lint, full test suite
+npm run build    # verify, then bundle into web/public
+```
 
-Two deliberate relaxations: numbers in template literals are allowed (idiomatic,
-not unsound), and `!` is permitted in `test/` (a wrong assertion there fails the
-test; it cannot reach a user).
+The original Lua/LÖVE prototype was removed in v1.42.0. It is still in git
+history: `git checkout c25b9e9 -- main.lua concord jumper` and so on (c25b9e9 is v1.41.0, the last commit that has it).

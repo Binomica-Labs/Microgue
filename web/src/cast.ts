@@ -8,6 +8,7 @@
 // a reason on refusal, because a silent no on a deliberate action is the
 // worst UI.
 
+import { WILD_TYPE } from "./allele.js";
 import { yieldsCofactor } from "./crossfeed.js";
 import { play } from "./audio.js";
 import { makeRng } from "./rng.js";
@@ -46,6 +47,12 @@ export function castAbility(
   const d = _g.dungeon.depth;
   const expr = _g.genome.expression(a.gene, d);
   if (expr <= 0) return `${a.name} needs ${a.gene} expressed here.`;
+  // The level gate, enforced HERE as well as on the bar -- the bar is a
+  // picture, and a picture is not a permission check.
+  const need = a.minStrain ?? 1;
+  if (_g.genome.strain < need) {
+    return `${a.name} needs a level ${String(need)} strain.`;
+  }
   if (!ready(_g.cooldowns, a.id, _g.clock.turn)) {
     const left = (_g.cooldowns.get(a.id) ?? 0) - _g.clock.turn;
     return `${a.name} recharging: ${String(left)} turn${left === 1 ? "" : "s"}.`;
@@ -118,6 +125,44 @@ export function castAbility(
       _g.note(`${a.name}: ${String(hits)} hit.`);
       break;
     }
+    case "purge": {
+      // Every status off at once. The pump does not discriminate, which is
+      // exactly why a real efflux system is such a broad resistance
+      // mechanism -- and why it costs so much to run.
+      const n = _g.player.status.length;
+      if (n === 0) return "Nothing to purge.";
+      _g.player.status.length = 0;
+      _g.fx.add({ kind: "ring", t0: _g.now, dur: 520, x: px, y: py,
+                  colour: "#b8c4cc", r: 1.6 });
+      _g.note(`The pump runs flat out. ${String(n)} `
+        + `affliction${n === 1 ? "" : "s"} expelled.`);
+      break;
+    }
+    case "steal": {
+      // Conjugation: a pilus into a neighbour, and a gene comes back. Takes
+      // from what that organism actually carries, so what you can steal
+      // depends on what you are standing next to.
+      const near = _g.level.mobs.filter((m) => m.alive
+        && Math.max(Math.abs(m.x - px), Math.abs(m.y - py)) <= a.range);
+      if (near.length === 0) return "Nothing adjacent to conjugate with.";
+      const rng = makeRng(_g.turnSeed++);
+      const donor = near[rng.int(near.length)];
+      if (!donor) return "Nothing adjacent to conjugate with.";
+      const have = _g.genome.carried();
+      const pool = donor.genes.filter((g) => !have.has(g));
+      if (pool.length === 0) {
+        return `The ${donor.name} carries nothing you lack.`;
+      }
+      const got = pool[rng.int(pool.length)];
+      if (!got) return "The pilus finds nothing.";
+      _g.genome.stash({ kind: "gene", id: got, level: 1, mods: [],
+                        allele: WILD_TYPE });
+      _g.fx.add({ kind: "bolt", t0: _g.now, dur: 300, colour: "#8e6cf0",
+                  seed: _g.now, from: { x: px, y: py },
+                  to: { x: donor.x, y: donor.y } });
+      _g.note(`A pilus finds the ${donor.name}. ${got} crosses over.`);
+      break;
+    }
     case "surge": {
       if (a.id === "dash") {
         if (dx === 0 && dy === 0) return "Pick a direction to dash.";
@@ -139,6 +184,12 @@ export function castAbility(
         _g.look();
         // Landing is arriving: pick up what is here and enter the room.
         _g.onTile(_g.player.x, _g.player.y);
+      } else if (a.id === "spore") {
+        // An endospore: nothing touches you, and you cannot act. `armour: 0`
+        // is total immunity -- every damage path multiplies through it.
+        _g.surge = { armour: 0, until: t + a.linger };
+        _g.note(`You commit to a spore coat. Untouchable for `
+          + `${String(a.linger)} turns -- and unable to act.`);
       } else {
         _g.surge = { armour: a.power, until: t + a.linger };
         _g.note(`${a.name}: incoming damage halved for ${String(a.linger)} turns.`);

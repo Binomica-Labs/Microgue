@@ -1,3 +1,110 @@
+# START HERE — restoring a working tree
+
+The container loses everything between sessions. Do NOT rebuild from the
+newest tarball in the sandbox: that is only the newest tarball THIS session
+produced, and the repo has usually moved on. It once left a session ten
+versions behind with nothing to signal it.
+
+    bash <(curl -sL https://raw.githubusercontent.com/Binomica-Labs/Microgue/main/web/tools/bootstrap.sh)
+
+or, equivalently:
+
+    git clone --depth 1 https://github.com/Binomica-Labs/Microgue.git /home/claude/Microgue
+    cd /home/claude/Microgue/web && npm ci
+
+`web/tools/` is committed, so nothing is ever rebuilt from memory:
+
+    tools/bootstrap.sh   clone (or pull), install, typecheck, lint
+    tools/pack.sh        lint-gated tarball into /mnt/user-data/outputs
+
+Release loop: edit → `npx vitest run` → `npm run build` → `bash
+tools/pack.sh` → the user runs `~/sync.sh "message"` to push. The tarball is
+only an egress channel out of the sandbox; GitHub is the source of truth.
+
+---
+
+# v1.53.0 — the research map pays
+
+## It was decorative
+
+`moduleState` computed how many steps of a KEGG pathway you held, drew a
+box, and NOTHING in the game read it. Completing denitrification changed a
+caption's colour. A screen that shows a long-term goal and pays nothing for
+reaching it is a screen with no reason to open.
+
+A completed module is a whole metabolic route the cell can actually run, so
+the dividend is metabolic: that pathway's genes get cheaper to express
+(x0.82 upkeep), because the intermediates stop being dead ends. Capped at
+five counted modules -- the map has enough that an uncapped bonus would
+eventually dominate every other decision, and a research screen that
+trivialises the game is worse than one that does nothing.
+
+`masteryOf` is hoisted out of the cost loop: it walks every module and the
+loop walks every slot, and doing both together is the sort of quadratic that
+only shows up on a full ring.
+
+## It now shows how close you are
+
+Captions were a name and a binary colour. Nothing said how CLOSE you were,
+which is the only thing that makes a long goal pull -- 4/5 is a reason to
+keep looking and "incomplete" is not. Each caption now carries a progress
+fill in its pathway's colour, `held/total`, a halo when complete, and the
+NAME of the next gene it wants, so a target is actionable rather than a
+mystery.
+
+## A test that passed with the feature switched off
+
+The first version compared a complete module's per-gene cost against a
+one-gene-short build. It passed with the dividend disabled: the extra gene
+changes ring geometry and expression, and that swamped an 18% relief on one
+pathway. An emergent number with a confound that large is not a measurement.
+It tests the FACTOR directly now -- mastered pathway below 1, unmastered
+exactly 1 -- which is three failures when the relief is removed.
+
+
+# v1.52.0 — bulk loot means bulk; abilities unlock with the strain
+
+## Eat all eats everything
+
+It digested cassettes and left substrates and parts where they lay, so a
+pile with a glucose molecule in it still had one afterwards and the player
+had to tap the leftovers. A cell handed a heap of organic matter does not
+sort it by category. Everything now goes, each for what it is worth:
+cassettes for hp and ATP, substrates for the SAME yield a pickup pays (or
+one route is strictly better and the other is a trap), parts for a little.
+
+One exception, deliberate: a SYMBIONT is never eaten. It is alive and it is
+a landmark find, and losing one to a button pressed to clear a tile is
+exactly the loss a bulk action must not be able to cause. `spec` pins it.
+
+## Take all no longer leaves a modal behind
+
+`take` pops a "catabolise this or leave it?" offer when the bin is full.
+Right for one deliberate pickup, wrong for a bulk button: it fired once per
+refused item and left a stale modal hanging over a tile the player had
+finished with. A bulk action answers its own questions -- takes what fits,
+leaves what does not, and says which.
+
+## Abilities unlock with the strain
+
+Levelling gave slots and ATP -- more room, more fuel -- and nothing you
+could DO, so a long run's reward was invisible in play. Abilities now gate
+on strain level as well as gene:
+
+    L2 flash        bioluminescence as a startle display: blind what is adjacent
+    L3 efflux       the multidrug pump in reverse -- purge every status
+    L5 conjugation  a pilus into a neighbour, and a gene comes across
+    L7 sporulation  an endospore: untouchable, repairing, and unable to act
+
+Conjugation takes from what that organism ACTUALLY carries, so what you can
+steal depends on what you are standing next to -- horizontal transfer taken
+rather than waited for. Sporulation is total: `armour: 0` is complete
+immunity, and you cannot act either.
+
+The gate is enforced in `castAbility`, not only on the bar. A bar is a
+picture, and a picture is not a permission check.
+
+
 # v1.51.0 — every part has a symbol
 
 ## What changed
