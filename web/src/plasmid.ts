@@ -14,10 +14,11 @@
 // Everything else -- substrate gating, oxygen lability, codon optimisation --
 // carries over from the previous flat model.
 
-import { satisfied } from "./crossfeed.js";
 import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
 import { p_atpBalance, p_atpCost, p_atpGain, p_wastedTranscription }
   from "./plasmid_atp.js";
+import { p_computeExpression, p_computePower, p_computeVitality }
+  from "./plasmid_reads.js";
 import { p_transact } from "./plasmid_tx.js";
 import { b_install, b_stash, b_takeOne, b_uninstall } from "./bin.js";
 import { COMPLEXES, GENES, HAZARDS, stratum,
@@ -521,6 +522,28 @@ export class Plasmid {
    *  computation and shares this cache -- see that module. */
   memoAtp = new Map<string, number>();
 
+  /**
+   * A hard ceiling on the memo.
+   *
+   * Keys carry a depth and a bucketed `supply`, and `supply` is rewritten
+   * every turn by the energy division WITHOUT invalidating -- so across a
+   * long run the map accumulates a row per (gene, depth, bucket) that will
+   * never be read again. Measured at 845 entries after four thousand supply
+   * values, climbing. A cache with no eviction is a leak wearing a hat.
+   *
+   * Clearing wholesale on overflow is the right trade here: a miss costs
+   * microseconds, the overflow is rare, and the alternative (LRU tracking)
+   * costs more per hit than it saves.
+   */
+  private static readonly MEMO_CAP = 512;
+
+  /** @internal set a memo entry, evicting wholesale if it has grown too far. */
+  private memo(key: string, value: number): number {
+    if (this.memoAtp.size >= Plasmid.MEMO_CAP) this.memoAtp.clear();
+    this.memoAtp.set(key, value);
+    return value;
+  }
+
   /** Drop every memoised read. No origin check: the non-ring inputs
    *  (depth, inducers, strain) cannot lose it. */
   private invalidate(): void {
@@ -645,21 +668,15 @@ export class Plasmid {
   }
 
   expression(id: GeneId, depth: number): number {
-    // A symbiont can VETO a gene: the operon is there, but the symbiont shuts
-    // down the route it replaces -- a hydrogenosome kills the aerobic chain.
-    // This is the cost that makes a symbiont a choice, not a stat.
-    if (this.symbiont !== null
-        && SYMBIONTS[this.symbiont].vetoes.includes(id)) return 0;
-    // Cross-feeding: a few deep genes need a cofactor only one organism
-    // makes. The gene installs and transcribes; it simply produces nothing
-    // until you have lysed the thing that supplies it. See crossfeed.ts.
-    if (!satisfied(id, this._cofactors)) return 0;
-    // `supply` is public and set from an ATP division. Clamping it here means
-    // one bad frame cannot make every downstream number NaN for the rest of
-    // the run -- expression, power, vitality and combat all read through this.
-    const s = Number.isFinite(this.supply) ? Math.min(Math.max(this.supply, 0), 1) : 1;
-    return this.rawExpression(id, depth) * s;
+    // The hottest read in the game: the ring screen calls it once per gene,
+    // so roughly twenty times a frame, and it was recomputing every time.
+    // Same memo, same invalidation, same supply bucket as `power`.
+    const key = `ex${id}:${String(depth)}:${String(this.supplyBucket())}`;
+    const hit = this.memoAtp.get(key);
+    if (hit !== undefined) return hit;
+    return this.memo(key, p_computeExpression(this, id, depth));
   }
+
 
   atpCost(depth: number): number { return p_atpCost(this, depth); }
   wastedTranscription(depth: number): number { return p_wastedTranscription(this, depth); }
@@ -774,26 +791,34 @@ export class Plasmid {
    * stratum could two-shot a fully built cell.
    */
   vitality(depth: number): number {
-    let expressed = 0;
-    for (const s of this.slots) {
-      if (s?.kind !== "gene" || s.id === "ori") continue;
-      if (this.rawExpression(s.id, depth) > 0) expressed++;
-    }
-    const complexes = this.complexes(depth).length;
-    return Math.round(Math.min(20 + expressed * 3.5 + complexes * 5, 92));
+    const key = `vt${String(depth)}:${String(this.supplyBucket())}`;
+    const hit = this.memoAtp.get(key);
+    if (hit !== undefined) return hit;
+    return this.memo(key, p_computeVitality(this, depth));
   }
+
 
   /** Total output, which is what combat scales from. */
   power(depth: number): number {
-    let a = 0;
-    for (const p of this.slots) {
-      if (p?.kind !== "gene") continue;
-      a += this.expression(p.id, depth) * GENES[p.id].tier;
-    }
-    for (const c of this.complexes(depth)) {
-      if (c.effect.kind === "power") a *= c.effect.mult;
-    }
-    if (this.symbiont !== null) a *= SYMBIONTS[this.symbiont].power;
-    return a;
+    // Memoised on the SAME map as the ATP figures, so there is one cache to
+    // invalidate rather than two. This and `vitality` were the only hot
+    // reads recomputing every call -- 19us and 15us per frame, both read by
+    // the HUD every frame, for values that change only when the ring does.
+    // `supply` is a public field the energy division writes every turn with
+    // no invalidation, and expression reads it -- so it MUST be part of the
+    // key. Quantised to 1/64ths: a raw float would make every brownout tick
+    // a distinct key and the memo would grow without ever hitting.
+    const key = `pw${String(depth)}:${String(this.supplyBucket())}`;
+    const hit = this.memoAtp.get(key);
+    if (hit !== undefined) return hit;
+    return this.memo(key, p_computePower(this, depth));
   }
+
+  /** `supply` in 64 steps, so a memo key is stable across tiny drifts. */
+  private supplyBucket(): number {
+    const s = Number.isFinite(this.supply)
+      ? Math.min(Math.max(this.supply, 0), 1) : 1;
+    return Math.round(s * 64);
+  }
+
 }

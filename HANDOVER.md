@@ -23,6 +23,55 @@ only an egress channel out of the sandbox; GitHub is the source of truth.
 
 ---
 
+# v1.54.0 — the per-frame reads were not cached
+
+Profiled before touching anything. The mob turn is fine -- linear at ~7us
+per mob, the spatial index doing its job, and it runs per TURN not per
+frame, so optimising it is effort nobody would feel. The cost was somewhere
+else entirely.
+
+## Three reads the HUD makes every frame, none of them cached
+
+    power(4)        18.90 us  ->  0.15 us
+    vitality(4)     14.50 us  ->  0.15 us
+    expression()     3.05 us  ->  0.20 us   (called once per ring gene)
+
+    full frame of plasmid reads:  ~70 us  ->  2.85 us
+
+`atpCost` had been memoised for ages; these three simply never were. They
+join the SAME map, so there is one cache to invalidate rather than two --
+a second cache is a second thing to forget to clear.
+
+## Two correctness bugs the work exposed
+
+**The first key ignored `supply`**, which is a public field the energy
+division rewrites every turn WITHOUT invalidating. The existing brownout
+test failed the moment the memo went in -- exactly as it should, because a
+cached `power` would have reported full strength during a blackout. `supply`
+is in the key now, bucketed to 64 steps: keyed raw, every tick would be a
+distinct entry and the memo would grow for ever while never hitting.
+
+**Then the memo leaked anyway** -- 845 entries and climbing, caught by a
+test written for this release. Keys carry a depth and a bucket, neither of
+which invalidates, so a long run accumulates rows that will never be read
+again. A cache with no eviction is a leak wearing a hat. Capped at 512 with
+wholesale eviction: a miss costs microseconds, overflow is rare, and LRU
+bookkeeping would cost more per hit than it saves.
+
+## Room for later
+
+render.ts (886) and plasmid.ts (860) had almost no headroom under the
+900-line ceiling, which is a problem for a codebase about to grow.
+`plasmid_screen.ts` takes the whole plasmid UI out of render.ts (a screen
+that draws no tiles, no mobs and no effects, and never runs on the same
+frame as them); `plasmid_reads.ts` takes the three heavy computation bodies
+out of plasmid.ts, leaving the accessors as four lines of memo each. Both
+are pure refactors -- 1341 tests unchanged across them -- and render.ts is
+no longer in the top four.
+
+132 modules, zero TODO/FIXME/ts-ignore/eslint-disable anywhere in src.
+
+
 # v1.53.0 — the research map pays
 
 ## It was decorative

@@ -24,7 +24,8 @@ import { SAVE_KEY, p_applySave, p_save } from "./persist.js";
 import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
-         r_drawPlasmid, r_drawScreenFx, r_drawToasts } from "./render.js";
+         r_drawScreenFx, r_drawToasts } from "./render.js";
+import { r_drawPlasmid } from "./plasmid_screen.js";
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
          i_pointerMove, i_pointerUp, i_press } from "./input.js";
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,

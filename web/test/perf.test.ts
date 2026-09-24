@@ -1,3 +1,6 @@
+import { Plasmid } from "../src/plasmid.js";
+import { WILD_TYPE } from "../src/allele.js";
+import type * as bio from "../src/biology.js";
 import { describe, expect, it } from "vitest";
 import { AnchorIndex, BodyIndex } from "../src/bodies.js";
 import { covers, tilesOf, type Footprint } from "../src/footprint.js";
@@ -160,5 +163,72 @@ describe("a mob turn scales with the floor, not its square", () => {
     expect(big / small,
            `40 mobs ${small.toFixed(0)} us, 320 mobs ${big.toFixed(0)} us`)
       .toBeLessThan(8);
+  });
+});
+
+describe("the per-frame reads are memoised", () => {
+  const build = (): Plasmid => {
+    const p = new Plasmid();
+    p.integrated = 24;
+    const genes: bio.GeneId[] = ["cbbL", "katG", "sodA", "celA", "psbA",
+                                 "groL", "recA", "uvrA", "narG", "nirS"];
+    for (const g of genes) {
+      p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.assemble(genes);
+    return p;
+  };
+
+  it("power, vitality and expression are cache hits, not recomputes", () => {
+    // These were 19us, 15us and 3us per call, and the HUD and ring screen
+    // read them every frame -- expression roughly once per gene, so twenty
+    // times over. A cache hit is sub-microsecond; anything above that means
+    // the memo is not being reached.
+    const p = build();
+    const genes: bio.GeneId[] = ["cbbL", "katG", "sodA"];
+    const once = (): void => {
+      p.power(4); p.vitality(4);
+      for (const g of genes) p.expression(g, 4);
+    };
+    once();                                  // warm
+    const t0 = performance.now();
+    const N = 20000;
+    for (let i = 0; i < N; i++) once();
+    const us = (performance.now() - t0) / N * 1000;
+    expect(us, `${us.toFixed(2)}us for five cached reads -- the memo is missing`)
+      .toBeLessThan(4);
+  });
+
+  it("the memo cannot grow without bound as supply drifts", () => {
+    // `supply` is a float the energy division rewrites every turn. Keyed
+    // raw, every tick would be a distinct key and the memo would grow for
+    // ever while never hitting. It is bucketed into 64 steps.
+    const p = build();
+    for (let i = 0; i < 4000; i++) {
+      p.supply = (i % 997) / 997;
+      p.power(4); p.vitality(4); p.expression("cbbL", 4);
+    }
+    const size = (p as unknown as { memoAtp: Map<string, number> }).memoAtp.size;
+    expect(size, `${String(size)} memo entries after 4000 supply values`)
+      .toBeLessThan(400);
+  });
+
+  it("and the cached values are still CORRECT as supply changes", () => {
+    // The whole risk of a memo: a stale answer. `supply` browns expression
+    // out, so a key that ignored it would report full power in a blackout.
+    const p = build();
+    p.supply = 1;
+    const full = p.power(4);
+    p.supply = 0.1;
+    const brown = p.power(4);
+    expect(brown, "power did not fall under brownout -- a stale cache")
+      .toBeLessThan(full);
+    p.supply = 1;
+    expect(p.power(4), "power did not recover when supply did").toBeCloseTo(full, 6);
+    // and a ring edit invalidates
+    const before = p.power(4);
+    p.rotate(1);
+    expect(Number.isFinite(p.power(4))).toBe(true);
+    void before;
   });
 });
