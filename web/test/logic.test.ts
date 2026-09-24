@@ -10850,3 +10850,43 @@ describe("the bench tree", () => {
     expect(Number.isFinite(l.rootX) && Number.isFinite(l.forkY)).toBe(true);
   });
 });
+
+describe("the tree grows into the space it has", () => {
+  it("fills the height on a tall phone, not a fifth of it", async () => {
+    // It was laid out with `reach = min(verticalRoom, w * 0.46)`, and on a
+    // tall narrow phone the WIDTH term won by miles: the tree used 20% of
+    // the screen and left 65% empty above it. Reach comes from the height
+    // now, and the fan narrows if that would push a branch off the sides.
+    const { layout } = await import("../src/bench_tree.js");
+    const genes = [{ id: "psbA" as bio.GeneId, level: 1 },
+                   { id: "katG" as bio.GeneId, level: 1 }];
+    for (const [w, h] of [[1080, 2400], [393, 852], [320, 560]] as const) {
+      const u = Math.max(Math.min(w, h) / 420, 1);
+      const l = layout(genes, w, h, u);
+      const highest = Math.min(...l.nodes.map((n) => n.y),
+                               ...l.branches.map((b) => b.tipY));
+      const used = (l.rootY - highest) / h;
+      expect(used, `${String(w)}x${String(h)}: the tree uses only `
+        + `${(used * 100).toFixed(0)}% of its space`).toBeGreaterThan(0.5);
+      // ...and still fits
+      for (const b of l.branches) {
+        expect(b.tipX >= 0 && b.tipX <= w,
+               `${String(w)}x${String(h)}: a branch tip left the screen`).toBe(true);
+        expect(b.tipY >= 0, "a branch tip went off the top").toBe(true);
+      }
+    }
+  });
+
+  it("many pathways narrow the fan rather than running off the sides", async () => {
+    const { layout } = await import("../src/bench_tree.js");
+    const POOL: bio.GeneId[] = ["psbA", "cbbL", "groL", "katG", "fliC",
+                                "sodA", "recA", "dsrA"];
+    const genes = POOL.map((id, i) => ({ id, level: 1 + (i % 4) }));
+    const l = layout(genes, 320, 560, 1);
+    for (const nd of l.nodes) {
+      expect(nd.x - nd.r >= 0 && nd.x + nd.r <= 320,
+             `${nd.id} off the side with ${String(l.branches.length)} branches`)
+        .toBe(true);
+    }
+  });
+});

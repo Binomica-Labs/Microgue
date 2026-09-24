@@ -64,6 +64,39 @@ intent of v1.25.0. Which one is correct is the owner's call, not a thing to
 change silently.
 
 
+## v1.57.1 — the tree was laid out for the wrong axis
+
+Shipped a tree that used 20% of the screen and left 65% of it empty above.
+The cause, measured rather than eyeballed:
+
+    reach = min(verticalRoom, w * 0.46)
+
+On a 1080x2400 phone the WIDTH term won by miles -- 497px of reach against
+1800px of vertical room -- so the whole tree crouched at the bottom. Reach
+comes from the height now, and the FAN narrows to fit instead: a branch phi
+off vertical extends `reach*sin(phi)` sideways, so the widest half-angle
+that still fits is `asin(halfWidth / reach)`. 60% of the screen used, and
+`spec` fails below 50% at three screen sizes.
+
+Limbs also ran to a fixed 92% of reach regardless of where their last node
+sat, so a one-gene branch was mostly empty stick. They end just past their
+last node.
+
+**I should have caught this before shipping.** The layout tests checked that
+nothing lands OFF the screen -- a bound in one direction only. Nothing
+checked that the tree USES the screen, so a tree collapsed into a corner
+passed everything. A test that only forbids overflow will happily accept a
+layout that fits in a postage stamp.
+
+## The plasmid screen was showing the world through it
+
+Its backdrop was `rgba(0,0,0,0.93)`, so 7% of the world came through: the
+HUD text and the minimap frame were legible behind the ring, and world
+sprites read as unexplained grey blobs floating around the plasmid. A modal
+that is *almost* opaque is not atmospheric, it is noise a player has to
+learn to ignore. Opaque now.
+
+
 # v1.57.0 — THE BENCH as a tree
 
 A list of rows says nothing about what it is listing: a list of genes looks

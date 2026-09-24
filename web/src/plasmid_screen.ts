@@ -18,7 +18,12 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const { ctx } = _g;
     const u = uiUnit(W, H, _g.settings.uiScale);
     const ins = stage(W, _g.insets(), u);
-    ctx.fillStyle = "rgba(0,0,0,0.93)";
+    // OPAQUE. At 0.93 the world showed through at 7%: the HUD text and the
+    // minimap frame were legible behind the ring, and world sprites read as
+    // unexplained grey blobs floating around the plasmid. A modal that is
+    // almost opaque is not atmospheric, it is noise the player has to learn
+    // to ignore.
+    ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, W, H);
 
     // Landscape splits the screen: ring on the left, parts and notes on the

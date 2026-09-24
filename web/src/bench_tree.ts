@@ -78,8 +78,21 @@ export function layout(
   const paths = [...byPath.keys()].sort();
   const n = paths.length;
 
-  const reach = Math.min(h - (h - forkY) - 30 * u, w * 0.46);
-  const spread = Math.min(Math.PI * 0.82, 0.42 * Math.max(n - 1, 1) + 0.5);
+  // Reach is set by the VERTICAL room, not the width.
+  //
+  // It was `min(forkY - 30u, w * 0.46)`, and on a tall narrow phone the
+  // width term won by miles: the tree used 20% of the screen and left 65%
+  // of it empty above. A tree should grow into the space it has.
+  //
+  // So: reach fills the height, and the FAN narrows if that would push a
+  // branch off the sides. A branch `phi` off vertical extends
+  // `reach*sin(phi)` sideways and `reach*cos(phi)` up, so the widest
+  // half-angle that still fits is `asin(halfWidth / reach)`.
+  const reach = Math.max(forkY - 24 * u, 40 * u);
+  const halfW = Math.max(w / 2 - 34 * u, 20 * u);
+  const fits = Math.asin(Math.min(halfW / Math.max(reach, 1), 1));
+  const wanted = Math.min(Math.PI * 0.41, 0.21 * Math.max(n - 1, 1) + 0.25);
+  const spread = Math.min(wanted, fits) * 2;
   const nodes: TreeNode[] = [];
   const branches: {
     pathway: Pathway; angle: number; thickness: number;
@@ -98,7 +111,7 @@ export function layout(
     list.forEach((g, k) => {
       // Spaced along the branch, nearest the fork first, leaving room at the
       // tip so a long branch does not run off the top.
-      const step = list.length === 1 ? 0.62 : 0.34 + (k / (list.length - 1)) * 0.52;
+      const step = list.length === 1 ? 0.62 : 0.30 + (k / (list.length - 1)) * 0.56;
       const d = reach * step;
       const x = rootX + Math.cos(angle) * d;
       const y = forkY + Math.sin(angle) * d;
@@ -114,7 +127,12 @@ export function layout(
       });
     });
 
-    const tipD = reach * 0.92;
+    // The limb ends just past its LAST node, not at a fixed 92% of reach.
+    // A branch that runs on into empty space is a limb pointing at nothing,
+    // and with one gene on it that was most of the branch.
+    const lastStep = list.length === 0 ? 0.3
+      : list.length === 1 ? 0.62 : 0.86;
+    const tipD = reach * Math.min(lastStep + 0.1, 0.95);
     branches.push({ pathway: p, angle, thickness,
                     tipX: rootX + Math.cos(angle) * tipD,
                     tipY: forkY + Math.sin(angle) * tipD });
