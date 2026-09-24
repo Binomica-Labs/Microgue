@@ -67,6 +67,7 @@ export function t_onTile(_g: Game, x: number, y: number): void {
     }
     // More than one: open it rather than swallowing it blind.
     _g.openDrop = d;
+    _g.dropPick = 0;        // a new pile starts at its first card
     _g.walk = null;
   }
 

@@ -465,7 +465,7 @@ export function r_draw(_g: Game): void {
       _g.containerBoxes = drawContainer(
         ctx, W, H, stage(W, _g.insets(), uiUnit(W, H)),
         uiUnit(W, H), _g.openDrop, _g.dropBoxes,
-        (t, w) => _g.wrap(t, w));
+        (t, w) => _g.wrap(t, w), _g.dropPick);
     }
     _g.drawToasts(W, H);
     const u = uiUnit(W, H, _g.settings.uiScale);

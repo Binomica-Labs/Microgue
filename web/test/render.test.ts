@@ -215,3 +215,49 @@ describe("the bench shows what you can actually buy", () => {
     }
   });
 });
+
+describe("a loot card cannot print across its neighbours", () => {
+  it("the card label is the SHORT name, never the decorated allele", async () => {
+    // "psychrophilic psaA of tight coupling" is 35 characters. At the
+    // smallest legible size it is still wider than a 60px tile, so it
+    // printed straight over the cards beside it -- `fitInto` shrinks to fit
+    // but floors at 6px, and no floor is small enough for that string. A
+    // card says WHICH gene and HOW GOOD; the adjectives go in the inspector.
+    const { itemName, itemShortName } = await import("../src/items.js");
+    const { WILD_TYPE } = await import("../src/allele.js");
+    // A REAL rolled allele, not invented affix ids -- `itemName` looks the
+    // affixes up, so made-up ones crash it and the test measures nothing.
+    const { rollAllele } = await import("../src/allele.js");
+    const { makeRng } = await import("../src/rng.js");
+    let allele = WILD_TYPE;
+    for (let s = 0; s < 200; s++) {
+      const a = rollAllele(makeRng(s), 6);
+      if (a.prefix !== null || a.suffix !== null) { allele = a; break; }
+    }
+    const it = { kind: "cassette" as const, gene: "psbA" as never, allele };
+    const short = itemShortName(it);
+    expect(short, "the card label is not the bare gene name").toBe("psbA");
+    expect(short.length, "the card label is too long for a tile")
+      .toBeLessThanOrEqual(8);
+    // the full name still exists, for the panel that has room for it
+    expect(itemName(it).length, "the decorated name was lost")
+      .toBeGreaterThan(short.length);
+  });
+
+  it("every item kind yields a short name that fits a tile", async () => {
+    const { itemShortName } = await import("../src/items.js");
+    const { WILD_TYPE } = await import("../src/allele.js");
+    const items = [
+      { kind: "cassette" as const, gene: "cbbL" as never, allele: WILD_TYPE },
+      { kind: "substrate" as const, id: "glucose" as never },
+      { kind: "promoter" as const, id: "j23106" as never, rarity: "common" as never },
+      { kind: "terminator" as const, id: "hairpin" as never, rarity: "common" as never },
+    ];
+    for (const it of items) {
+      const n = itemShortName(it);
+      expect(n.length, `${it.kind} short name "${n}" is ${String(n.length)} chars`)
+        .toBeLessThanOrEqual(14);
+      expect(n.length, `${it.kind} has no short name`).toBeGreaterThan(0);
+    }
+  });
+});

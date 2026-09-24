@@ -1771,6 +1771,7 @@ describe("state that should persist, does", () => {
     naming: "the strain being named, between class and inoculation",
     nameField: "the DOM text input, built at boot", nameBoxes: "hit boxes, per frame",
     containerBoxes: "hit boxes, per frame",
+    dropPick: "which loot card is being inspected",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",

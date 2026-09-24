@@ -172,6 +172,8 @@ class Game {
   nameBoxes: NameBoxes | null = null;
   /** The container's bulk buttons, per frame. */
   containerBoxes: ContainerBoxes | null = null;
+  /** Which loot card is being inspected. See screens.ts. */
+  dropPick = 0;
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;

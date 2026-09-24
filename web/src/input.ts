@@ -60,8 +60,16 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
       if (i >= 0) {
         const d = _g.openDrop;
         const it = d.items[i];
-        if (it && _g.take(it)) {
+        // First tap INSPECTS, second tap on the same card takes it. One-tap
+        // take meant you could not read what a thing was without picking it
+        // up, and a mis-tap on a crowded tile filled the bin with something
+        // you did not want. Two taps costs nothing when the card is already
+        // selected -- the second tap is the one you meant either way.
+        if (it && _g.dropPick !== i) {
+          _g.dropPick = i;
+        } else if (it && _g.take(it)) {
           d.items.splice(i, 1);
+          _g.dropPick = Math.min(i, d.items.length - 1);
           if (d.items.length === 0) { removeDrop(_g.drops, d); _g.openDrop = null; }
         }
       } else {

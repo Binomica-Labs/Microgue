@@ -64,6 +64,85 @@ intent of v1.25.0. Which one is correct is the owner's call, not a thing to
 change silently.
 
 
+# v1.57.0 — THE BENCH as a tree
+
+A list of rows says nothing about what it is listing: a list of genes looks
+like a list of anything, and two thirds of the screen was empty below it.
+
+A cell's genes are not a list. They belong to PATHWAYS, the game already
+colours those twelve ways, and pathways are exactly what a player chooses
+between when they spend ATP. So: a trunk for the chromosome, a branch per
+pathway carried, a node per gene along it.
+
+* **The shape IS the build.** A branch thickens with the levels it carries
+  and a node grows with its own, so a strain that poured everything into one
+  pathway LOOKS specialised. No row of numbers can do that.
+* **Affordable nodes pulse** in their pathway colour. "What can I buy right
+  now" is the question this screen exists to answer, and on a tree it is
+  answered at a glance rather than row by row.
+* A ring arc round each node carries its level without a number.
+
+Layout is a PURE function of (genes, size), so it is tested without a
+canvas and the renderer never decides where anything goes. `spec` pins that
+nothing lands off screen at 320x560 through 1024x700 with one to twenty
+genes, and that **levelling a gene does not reshuffle the tree** -- a tree
+that rearranges when you buy something is one you cannot learn, and the node
+you were aiming at moves out from under your finger.
+
+## The list is backed up, whole
+
+`bench_list.ts` holds the previous design verbatim, compiling. Set
+`BENCH_MODE` to "list" in modal_render.ts and it returns. The v1.55.0 work
+-- affordability colours, pips, the x1.22 -> x1.44 delta -- was not the
+problem and should not be lost to a redesign that might not land.
+
+The chromosome and trait purchases stay as a strip under the header. They
+are one-off buys, not a ladder, and forcing them onto a tree would be a
+shape that lied about what they are. A test caught them missing when the
+first version dropped them.
+
+## A flag the linter would not allow
+
+`const BENCH_TREE = true` narrows to always-truthy and the strict build
+calls the fallback dead code; `const BENCH_TREE: boolean = true` is
+"trivially inferred". The two rules contradict each other for a literal
+flag. A two-valued union read through a function satisfies both and keeps
+the fallback genuinely reachable.
+
+
+# v1.56.0 — the looting screen
+
+## Text printing across its neighbours
+
+A loot card drew the full decorated allele name --
+"psychrophilic psaA of tight coupling", thirty-five characters -- in a 60px
+tile. `fitInto` shrinks a label to fit but floors at 6px, and no floor is
+small enough for that string, so it overflowed and printed over the cards
+beside it. The fix comment in the code already said a fixed size had
+overflowed once; shrinking was the wrong answer to it.
+
+Two changes, because one alone would have been a patch:
+
+* **`itemShortName`** -- a card shows the bare gene name, its rarity and its
+  symbol. WHICH gene and HOW GOOD. The adjectives belong in a panel with
+  room for them, and the full name is drawn there now.
+* **Every cell is CLIPPED.** Whatever a label turns out to be, it cannot
+  leave its own tile. Fitting text to a box is a preference; clipping is a
+  guarantee, and the bug was a preference being treated as one.
+
+## Tap to inspect, tap again to take
+
+One tap took the item, so you could not read what a thing WAS without
+picking it up, and a mis-tap on a crowded tile filled the bin with something
+you did not want. The first tap now selects -- bright ring, halo, and the
+detail panel switches to it -- and a second tap on the same card takes it.
+The second tap is the one you meant either way, so it costs nothing.
+
+The detail panel followed `items[0]` for ever regardless of what was
+tapped, which meant the description had no relationship to what the player
+was looking at. It follows the selection.
+
+
 # v1.55.0 — THE BENCH, which is the screen I should have done last time
 
 I improved the KEGG map in v1.53.0. The "research tab" meant THE BENCH --

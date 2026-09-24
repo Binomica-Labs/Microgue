@@ -10764,3 +10764,89 @@ describe("a completed module pays a real dividend", () => {
     }
   });
 });
+
+describe("the bench tree", () => {
+  const genes = [
+    { id: "psbA" as bio.GeneId, level: 3 }, { id: "cbbL" as bio.GeneId, level: 2 },
+    { id: "groL" as bio.GeneId, level: 1 }, { id: "katG" as bio.GeneId, level: 3 },
+    { id: "fliC" as bio.GeneId, level: 1 },
+  ];
+
+  it("one branch per pathway, and a specialised strain has a thicker branch", async () => {
+    // The shape IS the build: a list of rows cannot show that you have
+    // poured everything into one pathway, and a tree can.
+    const { layout } = await import("../src/bench_tree.js");
+    const l = layout(genes, 393, 760, 1.86);
+    const paths = new Set(genes.map((g) => bio.GENES[g.id].pathway));
+    expect(l.branches.length, "not one branch per pathway").toBe(paths.size);
+    expect(l.nodes.length, "not one node per gene").toBe(genes.length);
+    // stress carries groL(1) + katG(3) = 4 levels; motility carries fliC(1)
+    const stress = l.branches.find((b) => b.pathway === "stress");
+    const moto = l.branches.find((b) => b.pathway === "motility");
+    if (stress && moto) {
+      expect(stress.thickness, "levels do not thicken a branch")
+        .toBeGreaterThan(moto.thickness);
+    }
+  });
+
+  it("nothing is laid out off the screen, at any size or gene count", async () => {
+    const POOL = ["psbA", "cbbL", "groL", "katG", "fliC", "sodA", "recA", "dsrA"];
+    const { layout } = await import("../src/bench_tree.js");
+    for (const [w, h] of [[320, 560], [393, 760], [1024, 700]] as const) {
+      for (const n of [1, 2, 5, 12, 20]) {
+        const many = Array.from({ length: n }, (_, i) => ({
+          id: (POOL[i % POOL.length] ?? "psbA") as bio.GeneId,
+          level: 1 + (i % 5),
+        }));
+        const l = layout(many, w, h, Math.max(Math.min(w, h) / 420, 1));
+        for (const nd of l.nodes) {
+          expect(nd.x - nd.r >= 0 && nd.x + nd.r <= w,
+                 `${String(w)}x${String(h)} n=${String(n)}: ${nd.id} off horizontally`)
+            .toBe(true);
+          expect(nd.y - nd.r >= 0 && nd.y + nd.r <= h,
+                 `${String(w)}x${String(h)} n=${String(n)}: ${nd.id} off vertically`)
+            .toBe(true);
+        }
+      }
+    }
+  });
+
+  it("the layout is stable: levelling a gene does not reshuffle the tree", async () => {
+    // A tree that rearranges when you buy something is a tree you cannot
+    // learn, and the node you were aiming at moves out from under your
+    // finger.
+    const { layout } = await import("../src/bench_tree.js");
+    const before = layout(genes, 393, 760, 1.86);
+    const after = layout(genes.map((g) =>
+      g.id === "groL" ? { ...g, level: g.level + 1 } : g), 393, 760, 1.86);
+    for (const nd of before.nodes) {
+      const match = after.nodes.find((o) => o.id === nd.id);
+      expect(match, `${nd.id} vanished after a level-up`).toBeDefined();
+      if (match && nd.id !== "groL") {
+        expect(match.x, `${nd.id} moved horizontally`).toBeCloseTo(nd.x, 3);
+        expect(match.y, `${nd.id} moved vertically`).toBeCloseTo(nd.y, 3);
+      }
+    }
+  });
+
+  it("tapping a node finds it, and empty space finds nothing", async () => {
+    const { layout, nodeAt } = await import("../src/bench_tree.js");
+    const l = layout(genes, 393, 760, 1.86);
+    for (const nd of l.nodes) {
+      expect(nodeAt(l, nd.x, nd.y)?.id, `${nd.id} is not tappable at its centre`)
+        .toBe(nd.id);
+    }
+    expect(nodeAt(l, 5, 5), "empty space hit a node").toBeNull();
+    for (const bad of [NaN, Infinity, -1e9]) {
+      expect(() => nodeAt(l, bad, bad), `nodeAt(${String(bad)}) threw`).not.toThrow();
+    }
+  });
+
+  it("an empty ring lays out without breaking", async () => {
+    const { layout } = await import("../src/bench_tree.js");
+    const l = layout([], 393, 760, 1.86);
+    expect(l.nodes).toEqual([]);
+    expect(l.branches).toEqual([]);
+    expect(Number.isFinite(l.rootX) && Number.isFinite(l.forkY)).toBe(true);
+  });
+});

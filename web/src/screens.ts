@@ -19,7 +19,7 @@ import { describeLevel } from "./strain.js";
 import { describeLab, type Lab, type Offer } from "./lab.js";
 import { drawGlyph, glyphOfItem } from "./part_glyph.js";
 import { PATHWAY_COLOUR } from "./plasmid_ui.js";
-import { SUBSTRATES, itemColour, itemName, itemNote, rarityOf, type Drop }
+import { SUBSTRATES, itemColour, itemName, itemNote, itemShortName, rarityOf, type Drop }
   from "./items.js";
 import { BUILD, VERSION } from "./version.js";
 
@@ -490,6 +490,8 @@ export interface ContainerBoxes { takeAll: Box; eatAll: Box }
 export function drawContainer(
   ctx: CanvasRenderingContext2D, W: number, H: number,
   ins: Insets, u: number, d: Drop, boxes: Box[], wrap: Wrap,
+  /** Which card is being inspected. -1 for none. */
+  selected = 0,
 ): ContainerBoxes {
                     
     ctx.fillStyle = "rgba(4,7,6,0.86)";
@@ -548,16 +550,39 @@ export function drawContainer(
       ctx.strokeStyle = edge;
       ctx.lineWidth = Math.max(1.6 * u, 1.4);
       ctx.stroke();
+      // The inspected card is unmistakable: a brighter ring and a halo. A
+      // selection you cannot see is a selection the player does not know
+      // they made, and the second tap then looks like a random take.
+      if (i === selected) {
+        ctx.strokeStyle = "#d8ffe8";
+        ctx.lineWidth = Math.max(2.2 * u, 1.6);
+        ctx.beginPath();
+        ctx.roundRect(bx, by, cell, cell, 7 * u);
+        ctx.stroke();
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = Math.max(5 * u, 2);
+        ctx.beginPath();
+        ctx.roundRect(bx - 2 * u, by - 2 * u, cell + 4 * u, cell + 4 * u, 9 * u);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       const gs = cell * 0.5;
       drawGlyph(ctx, glyphOfItem(it), bx + (cell - gs) / 2, by + cell * 0.07, gs, ink);
 
+      // CLIPPED to its own cell. `fitInto` shrinks a label to fit, but it
+      // floors at 6px, and a thirty-character allele name is wider than the
+      // tile even there -- so it overflowed and printed across the cards
+      // beside it. A clip makes that impossible whatever the text.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bx, by, cell, cell);
+      ctx.clip();
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      // Fitted to the tile. Allele names run to "psbA of fast folding" now, and
-      // a fixed size overflowed the tile and printed across its neighbours.
-      fitInto(ctx, itemName(it), cell - 6 * u, Math.max(cell * 0.17, 9), 6);
-      ctx.fillText(itemName(it), bx + cell / 2, by + cell * 0.69);
+      const label = itemShortName(it);
+      fitInto(ctx, label, cell - 8 * u, Math.max(cell * 0.19, 9), 7);
+      ctx.fillText(label, bx + cell / 2, by + cell * 0.69);
       // Rarity only: the symbol already says promoter, terminator, gene or
       // modifier. "uncommon terminator" is 19 characters and ran across the
       // next tile on every phone.
@@ -565,19 +590,32 @@ export function drawContainer(
       const kind = it.kind === "substrate" ? SUBSTRATES[it.id].formula
         : it.kind === "symbiont" ? "symbiont"
         : RARITY[rarityOf(it)].name;
-      fitInto(ctx, kind, cell - 6 * u, Math.max(cell * 0.12, 7), 5);
+      fitInto(ctx, kind, cell - 8 * u, Math.max(cell * 0.13, 7), 6);
       ctx.fillText(kind, bx + cell / 2, by + cell * 0.86);
+      ctx.restore();
     });
 
-    const first = d.items[0];
+    // The INSPECTED item, not always the first. Tapping a card selected
+    // nothing and the panel described item zero for ever, so the detail
+    // text had no relationship to what the player was looking at.
+    const first = d.items[Math.min(Math.max(selected, 0), d.items.length - 1)]
+      ?? d.items[0];
     if (first) {
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
       ctx.fillStyle = "#8fa89a";
       ctx.font = `${9.5 * u}px ui-monospace,monospace`;
-      const y = py0 + panelH - 22 * u;
+      // The FULL name here, where there is room for it -- this is where
+      // "psychrophilic psaA of tight coupling" belongs.
+      const y = py0 + panelH - 34 * u;
+      ctx.fillStyle = "#d8ffe8";
+      ctx.font = `${10.5 * u}px ui-monospace,monospace`;
+      ctx.fillText(ellipsise(ctx, itemName(first), panelW - 28 * u),
+                   px0 + 14 * u, y);
+      ctx.fillStyle = "#8fa89a";
+      ctx.font = `${9.5 * u}px ui-monospace,monospace`;
       wrap(itemNote(first), panelW - 28 * u).slice(0, 2)
-        .forEach((l, i) => { ctx.fillText(l, px0 + 14 * u, y + i * 12 * u); });
+        .forEach((l, i) => { ctx.fillText(l, px0 + 14 * u, y + 14 * u + i * 12 * u); });
     }
 
     // Bulk actions under the panel. One tap per item was a decision you had

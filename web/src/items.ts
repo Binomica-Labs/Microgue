@@ -118,6 +118,19 @@ export interface Drop {
   items: Item[];
 }
 
+/**
+ * The name that fits a 60px tile.
+ *
+ * `itemName` gives the full decorated allele -- "psychrophilic psaA of tight
+ * coupling" -- which is the right thing for a detail panel and impossible on
+ * a loot card: at the smallest legible size it is still wider than the cell,
+ * so it printed straight across its neighbours. A card shows WHICH gene and
+ * HOW GOOD; the adjectives belong in the inspector.
+ */
+export function itemShortName(it: Item): string {
+  return it.kind === "cassette" ? GENES[it.gene].name : itemName(it);
+}
+
 export function itemName(it: Item): string {
   switch (it.kind) {
     case "cassette":    return alleleName(it.gene, it.allele);
