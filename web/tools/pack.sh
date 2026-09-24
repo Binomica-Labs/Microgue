@@ -15,9 +15,24 @@ npx tsc --noEmit >/dev/null 2>&1 || { echo "!! tsc fails -- NOT packaging"; exit
 ROOT=$(cd .. && pwd)
 STAGE=$(mktemp -d)
 cp -r "$ROOT/web" "$STAGE/microgue-web"
-for f in HANDOVER.md LICENSE README.md .gitignore; do
+# Root files that belong in the package -- but NOT .gitignore.
+#
+# The repo has two: /.gitignore (tooling checked out inside the repo) and
+# /web/.gitignore (generated bundles). Copying the root one INTO the web
+# directory clobbered web/.gitignore, so the packaged tree shipped a
+# .gitignore that did not ignore public/microgue.js, and CI failed on a test
+# that was right. Two files with the same name and different jobs: the copy
+# has to name which one it means.
+# LICENSE is NOT copied either, for the same reason and with worse stakes:
+# /LICENSE is MIT and /web/LICENSE is CC BY-NC-SA, so copying the root one
+# in replaced the restrictive licence with a permissive one in the shipped
+# tree. CI read MIT and failed a test that was right.
+for f in HANDOVER.md README.md; do
   [ -f "$ROOT/$f" ] && cp "$ROOT/$f" "$STAGE/microgue-web/" || true
 done
+# The root .gitignore travels under its own name, so sync.sh can restore it
+# to the root without touching web/.gitignore.
+[ -f "$ROOT/.gitignore" ] && cp "$ROOT/.gitignore" "$STAGE/microgue-web/.gitignore.root" || true
 [ -d "$ROOT/.github" ] && cp -r "$ROOT/.github" "$STAGE/microgue-web/" || true
 rm -rf "$STAGE/microgue-web/node_modules"
 rm -f /mnt/user-data/outputs/*.tar.gz

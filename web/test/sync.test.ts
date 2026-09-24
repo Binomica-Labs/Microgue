@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,18 +18,42 @@ import { describe, expect, it } from "vitest";
  * whichever directory held them; a clean checkout made it an ENOENT that
  * looked like a broken test rather than a path assumption. Try both roots.
  */
-function readEither(...paths: string[]): string {
-  for (const p of paths) {
-    for (const base of ["", "../"]) {
-      try { return readFileSync(base + p, "utf8"); } catch { /* next */ }
-    }
-  }
-  return "";
+/**
+ * Read a file relative to the WEB directory, whatever the cwd.
+ *
+ * The previous version tried the bare path and then "../", returning
+ * whichever it found first. That is a guess, and it guessed wrong the moment
+ * two files shared a name: the repo has /.gitignore AND /web/.gitignore with
+ * different jobs, and the helper silently read the root one. The test then
+ * asserted against a file it did not mean, and a real packaging bug (pack.sh
+ * clobbering web/.gitignore) sailed past it into CI.
+ *
+ * Anchored to this file's own location instead, so "web/x" and "root/x" are
+ * distinct things a caller has to choose between.
+ */
+const WEB = fileURLToPath(new URL("..", import.meta.url));
+
+function readWeb(rel: string): string {
+  try { return readFileSync(join(WEB, rel), "utf8"); } catch { return ""; }
 }
 
-const SRC = readEither("sync.sh");
+function readRoot(rel: string): string {
+  try { return readFileSync(join(WEB, "..", rel), "utf8"); } catch { return ""; }
+}
 
-describe("sync.sh", () => {
+/**
+ * sync.sh is NOT in the repo -- it lives on the device that runs it. These
+ * assertions passed in the sandbox only because a copy happened to be
+ * lying around there, which is worse than not running: a green result that
+ * proves nothing about the checkout CI actually tests.
+ *
+ * Skipped explicitly when it is absent, so its absence reads as "not
+ * applicable here" rather than as a pass.
+ */
+const SRC = readRoot("sync.sh");
+const HAVE_SYNC = SRC.length > 0;
+
+describe.skipIf(!HAVE_SYNC)("sync.sh", () => {
   it("is syntactically valid", () => {
     const dir = mkdtempSync(join(tmpdir(), "syn-"));
     const p = join(dir, "sync.sh");
@@ -183,7 +208,9 @@ describe("build identity", () => {
 });
 
 describe("generated artefacts are not committed", () => {
-  const ignore = readEither(".gitignore");
+  // web/.gitignore -- the one that covers the generated bundles. The root
+  // .gitignore is a different file with a different job.
+  const ignore = readWeb(".gitignore");
 
   it("the bundles and BUILD are ignored, because CI regenerates them", () => {
     for (const f of ["public/microgue.js", "public/sw.js", "public/BUILD"]) {

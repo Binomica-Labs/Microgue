@@ -23,6 +23,47 @@ only an egress channel out of the sandbox; GitHub is the source of truth.
 
 ---
 
+## v1.54.1 — the packager was overwriting two files it should not touch
+
+CI failed on `.gitignore` not ignoring `public/microgue.js` and on the
+LICENSE test. Both were `tools/pack.sh`, copying root files INTO the web
+directory:
+
+    for f in HANDOVER.md LICENSE README.md .gitignore; do
+      cp "$ROOT/$f" "$STAGE/microgue-web/"
+
+The repo has TWO of each of those last two, with different jobs:
+
+* `/.gitignore` ignores tooling checked out inside the repo;
+  `/web/.gitignore` ignores the generated bundles. The copy clobbered the
+  second, so the shipped tree did not ignore `public/microgue.js`.
+* **`/LICENSE` is MIT and `/web/LICENSE` is CC BY-NC-SA.** The copy replaced
+  the restrictive licence with the permissive one in the packaged tree. CI
+  read MIT and failed a test that was correct to fail.
+
+Neither is copied now; the root `.gitignore` travels as `.gitignore.root`.
+
+## A helper that guessed, and hid the bug
+
+`readEither(p)` tried `p` then `../p` and returned whichever it found
+first. That is a guess, and it guessed wrong the moment two files shared a
+name -- the test asserted against the root `.gitignore` while meaning the
+web one, so a real packaging bug sailed past it. Reads are anchored to the
+test file's own location now (`readWeb` / `readRoot`), so the two are
+distinct things a caller has to choose between.
+
+And `sync.sh` is not in the repo at all -- it lives on the device. Its
+twelve assertions were passing in the sandbox only because a copy happened
+to be lying there, which is worse than not running: a green result proving
+nothing about the checkout CI tests. They skip explicitly when it is absent.
+
+**FLAGGED, not fixed: the repo carries two contradictory licences.** GitHub
+shows the root one, so Microgue currently presents as MIT -- unlimited
+commercial use, no share-alike -- which is the opposite of the CC BY-NC-SA
+intent of v1.25.0. Which one is correct is the owner's call, not a thing to
+change silently.
+
+
 # v1.54.0 — the per-frame reads were not cached
 
 Profiled before touching anything. The mob turn is fine -- linear at ~7us
