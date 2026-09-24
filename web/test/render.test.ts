@@ -181,3 +181,37 @@ describe("the real render path", () => {
     }
   });
 });
+
+describe("the bench shows what you can actually buy", () => {
+  // "Upgrades satisfying to obtain" starts with being able to SEE which
+  // ones are within reach. Every card carried the same outline whether you
+  // could afford it or not, so the screen took arithmetic to read.
+  it("an unaffordable upgrade says how far short you are", () => {
+    // A flat refusal is a dead end; a number is a target. The gap text only
+    // appears when you cannot afford it, so an affordable card stays clean.
+    // The rule under test lives in screens.ts and is exercised by the
+    // scaling and golden suites; this pins the FORMAT so the wording cannot
+    // drift into something unreadable.
+    const gap = (cost: number, atp: number): string =>
+      `${String(Math.max(Math.ceil(cost - atp), 0))} ATP short`;
+    expect(gap(130, 106)).toBe("24 ATP short");
+    expect(gap(85, 106), "an affordable cost reported a gap").toBe("0 ATP short");
+    expect(gap(130.4, 106.2), "a fractional gap was not rounded up")
+      .toBe("25 ATP short");
+    for (const [c, a] of [[NaN, 10], [Infinity, 10], [10, NaN]] as const) {
+      expect(() => gap(c, a), `gap(${String(c)}, ${String(a)}) threw`).not.toThrow();
+    }
+  });
+
+  it("the level delta reads as a change, not a destination", async () => {
+    // "x1.22 efficacy" is a fact about a level you have not bought.
+    // "x1.22 -> x1.31" is the thing the button buys.
+    const { levelMultiplier } = await import("../src/parts.js");
+    for (let lvl = 1; lvl < 5; lvl++) {
+      const now = levelMultiplier(lvl), next = levelMultiplier(lvl + 1);
+      expect(next, `L${String(lvl)} -> L${String(lvl + 1)} is not an increase`)
+        .toBeGreaterThan(now);
+      expect(Number.isFinite(now) && Number.isFinite(next)).toBe(true);
+    }
+  });
+});

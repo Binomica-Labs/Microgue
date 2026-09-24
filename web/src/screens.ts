@@ -4,6 +4,7 @@
 // Extracted so main.ts stops being the only place a screen can live, and so
 // each is callable from a test without constructing a game.
 
+import { raisedCard } from "./relief.js";
 import { CREDIT_LONG } from "./credits.js";
 import * as bio from "./biology.js";
 import { drawClose, drawHeader, type Box, type Insets } from "./chrome.js";
@@ -246,8 +247,21 @@ export function drawResearch(
     const can = Number.isFinite(grow) && atp >= grow;
     rows.push({ box, kind: "expand", gene: "ori", cost: Number.isFinite(grow) ? grow : 0,
                 afford: can });
-    ctx.fillStyle = "rgba(16,22,18,0.9)";
-    ctx.strokeStyle = can ? "rgba(207,224,74,0.65)" : "rgba(255,255,255,0.14)";
+    raisedCard(ctx, box.x, box.y, box.w, box.h, 5 * u, "#141c18", 2.5 * u);
+    if (can) {
+      // The one upgrade you can always aim at gets a halo when it is in
+      // reach, so the screen has an obvious first move.
+      ctx.strokeStyle = "#cfe04a";
+      ctx.globalAlpha = 0.2;
+      ctx.lineWidth = Math.max(5 * u, 2);
+      ctx.beginPath();
+      ctx.roundRect(box.x - 1.5 * u, box.y - 1.5 * u,
+                    box.w + 3 * u, box.h + 3 * u, 6.5 * u);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = "rgba(0,0,0,0)";
+    ctx.strokeStyle = can ? "#cfe04a" : "rgba(255,255,255,0.14)";
     ctx.lineWidth = Math.max(1.2 * u, 1);
     ctx.beginPath();
     ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
@@ -281,7 +295,16 @@ export function drawResearch(
     rows.push({ box: { x: bx, y: by, w: cw, h: 34 * u }, kind: "trait",
                 gene: "ori", trait: id, cost: tr.cost,
                 afford: !have && atp >= tr.cost });
-    ctx.fillStyle = have ? "rgba(90,200,140,0.28)" : "rgba(16,22,18,0.9)";
+    const canBuy = !have && atp >= tr.cost;
+    raisedCard(ctx, bx, by, cw, 34 * u, 5 * u,
+               have ? "#1c3a2a" : "#141c18", 2 * u);
+    ctx.strokeStyle = have ? "#7fe0a4"
+      : canBuy ? "#cfe04a" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = Math.max((canBuy ? 1.8 : 1.2) * u, 1);
+    ctx.beginPath();
+    ctx.roundRect(bx, by, cw, 34 * u, 5 * u);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0)";
     ctx.strokeStyle = have ? "#5ec98a"
       : atp >= tr.cost ? "rgba(207,224,74,0.6)" : "rgba(255,255,255,0.14)";
     ctx.lineWidth = Math.max(1.2 * u, 1);
@@ -324,13 +347,31 @@ export function drawResearch(
     rows.push({ box, kind: "evolve", gene: g.id, cost, afford: afford && !capped });
 
     const on = selected === g.id;
-    ctx.fillStyle = on ? "rgba(30,52,40,0.95)" : "rgba(16,22,18,0.85)";
-    ctx.strokeStyle = capped ? "#7fe0a4" : afford ? "#cfe04a" : "rgba(255,255,255,0.16)";
-    ctx.lineWidth = Math.max(1.4 * u, 1);
+    // A raised card in the gene's own pathway colour, so the bench matches
+    // the ring and the bin rather than being a third visual language.
+    const tint = PATHWAY_COLOUR[GENES[g.id].pathway];
+    raisedCard(ctx, box.x, box.y, box.w, box.h, 6 * u,
+               on ? "#1e3428" : "#141c18", 2.5 * u);
+
+    // Affordability is the PRIMARY signal. Every card used to carry the same
+    // yellow outline whether you could buy it or not, so "what can I
+    // actually do right now" took arithmetic. Affordable glows in the
+    // pathway colour; unaffordable recedes and says how much short you are.
+    ctx.strokeStyle = capped ? "#7fe0a4" : afford ? tint : "rgba(255,255,255,0.13)";
+    ctx.lineWidth = Math.max((afford && !capped ? 2 : 1.3) * u, 1);
     ctx.beginPath();
     ctx.roundRect(box.x, box.y, box.w, box.h, 6 * u);
-    ctx.fill();
     ctx.stroke();
+    if (afford && !capped) {
+      ctx.strokeStyle = tint;
+      ctx.globalAlpha = 0.22;
+      ctx.lineWidth = Math.max(5 * u, 2);
+      ctx.beginPath();
+      ctx.roundRect(box.x - 1.5 * u, box.y - 1.5 * u,
+                    box.w + 3 * u, box.h + 3 * u, 7.5 * u);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
@@ -338,10 +379,23 @@ export function drawResearch(
     ctx.font = `${12 * u}px ui-monospace,monospace`;
     ctx.fillText(`${GENES[g.id].name}  L${String(g.level)}`, box.x + 10 * u, box.y + 18 * u);
 
-    // Level pips, so progress is visible without reading a number.
+    // Level pips. The one you are about to buy is outlined rather than
+    // filled -- a visible "this is the next one", which is what makes a
+    // ladder pull instead of just recording where you are.
     for (let i = 0; i < MAX_LEVEL; i++) {
-      ctx.fillStyle = i < g.level ? "#cfe04a" : "rgba(255,255,255,0.18)";
-      ctx.fillRect(box.x + 10 * u + i * 9 * u, box.y + 24 * u, 6 * u, 4 * u);
+      const px = box.x + 10 * u + i * 10 * u, py = box.y + 23 * u;
+      const pw = 7 * u, ph = 5 * u;
+      if (i < g.level) {
+        ctx.fillStyle = tint;
+        ctx.fillRect(px, py, pw, ph);
+      } else if (i === g.level && !capped) {
+        ctx.strokeStyle = afford ? tint : "rgba(255,255,255,0.3)";
+        ctx.lineWidth = Math.max(1.2 * u, 1);
+        ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.13)";
+        ctx.fillRect(px, py, pw, ph);
+      }
     }
 
     ctx.fillStyle = "#8fa89a";
@@ -356,10 +410,26 @@ export function drawResearch(
     ctx.fillText(capped ? "maxed" : `${String(cost)} ATP`,
                  box.x + box.w - 10 * u, box.y + 22 * u);
     if (!capped) {
-      ctx.fillStyle = "#6f8f7c";
+      // The DELTA, not the destination. "x1.22 efficacy" is a fact about a
+      // level you have not bought; "x1.22 -> x1.31" is the thing you are
+      // buying, and it is the whole reason to press the button.
       ctx.font = `${9 * u}px ui-monospace,monospace`;
-      ctx.fillText(`x${levelMultiplier(g.level + 1).toFixed(2)} efficacy`,
-                   box.x + box.w - 10 * u, box.y + 36 * u);
+      const now = levelMultiplier(g.level).toFixed(2);
+      const next = levelMultiplier(g.level + 1).toFixed(2);
+      ctx.fillStyle = "#6f8f7c";
+      ctx.fillText(`x${now} \u2192 `, box.x + box.w - 10 * u - ctx.measureText(`x${next}`).width, box.y + 36 * u);
+      ctx.fillStyle = afford ? tint : "#6f8f7c";
+      ctx.fillText(`x${next}`, box.x + box.w - 10 * u, box.y + 36 * u);
+    }
+    // How far short, when you cannot afford it -- a target rather than a
+    // flat refusal.
+    if (!capped && !afford && Number.isFinite(cost)) {
+      ctx.fillStyle = "rgba(255,255,255,0.32)";
+      ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+      ctx.textAlign = "left";
+      ctx.fillText(`${String(Math.max(Math.ceil(cost - atp), 0))} ATP short`,
+                   box.x + 10 * u + MAX_LEVEL * 10 * u + 8 * u, box.y + 28 * u);
+      ctx.textAlign = "right";
     }
     y += rowH;
   }

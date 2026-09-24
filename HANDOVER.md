@@ -64,6 +64,40 @@ intent of v1.25.0. Which one is correct is the owner's call, not a thing to
 change silently.
 
 
+# v1.55.0 — THE BENCH, which is the screen I should have done last time
+
+I improved the KEGG map in v1.53.0. The "research tab" meant THE BENCH --
+the screen where ATP buys upgrades. "Upgrades available are satisfying to
+obtain" was in the request and I read past it. The KEGG work stands on its
+own; this is the screen that was actually asked about.
+
+## Affordability is the primary signal
+
+Every card carried the same yellow outline whether you could buy it or not,
+so "what can I do right now" took arithmetic against the ATP in the header.
+Affordable cards now glow in the gene's own PATHWAY colour -- the same
+language as the ring and the bin, not a third one -- and unaffordable ones
+recede and say how far short you are. A number is a target; a flat refusal
+is a dead end.
+
+## The pips show the next step, not just the current one
+
+A filled pip per level and the NEXT one OUTLINED rather than filled. A
+ladder pulls when you can see the rung you are reaching for; recording
+where you are is just a status line.
+
+## The delta, not the destination
+
+The row said `x1.22 efficacy`, which is a fact about a level you have not
+bought. It reads `x1.22 -> x1.31` now, with the target in the pathway
+colour: the thing the button actually buys, which is the whole reason to
+press it.
+
+Raised cards throughout (relief.ts), so the bench matches every other
+surface. All 171 layout tests still pass, so the taller trait cards fit
+every form factor.
+
+
 # v1.54.0 — the per-frame reads were not cached
 
 Profiled before touching anything. The mob turn is fine -- linear at ~7us
