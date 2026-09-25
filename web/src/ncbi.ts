@@ -74,7 +74,7 @@ export const SOURCES: Partial<Record<GeneId, Source>> = {
   cdhA: { query: 'cdhA[Gene] AND "Methanosarcina barkeri"[Organism]', organism: "Methanosarcina barkeri" },
   ackA: { query: 'ackA[Gene] AND "Methanosarcina"[Organism]', organism: "Methanosarcina barkeri" },
   fwdB: { query: 'fwdB[Gene] AND "Methanothermobacter"[Organism]', organism: "Methanothermobacter thermautotrophicus" },
-  bd: { query: 'cydA[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
+  cydA: { query: 'cydA[Gene] AND "Escherichia coli"[Organism]', organism: "Escherichia coli" },
   cbbM: { query: 'cbbM[Gene] AND "Rhodospirillum rubrum"[Organism]', organism: "Rhodospirillum rubrum" },
   nifD: { query: 'nifD[Gene] AND "Azotobacter vinelandii"[Organism]', organism: "Azotobacter vinelandii" },
   anfG: { query: 'anfG[Gene] AND "Azotobacter vinelandii"[Organism]', organism: "Azotobacter vinelandii" },

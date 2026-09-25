@@ -44,7 +44,7 @@ export const SYMBIONTS: Readonly<Record<SymbiontId, Symbiont>> = {
     note: "An anaerobic powerhouse. Doubles ATP -- but it poisons on oxygen, "
       + "and the aerobic chain goes dark.",
     power: 1.15, armour: 1, atp: 2, sight: 0,
-    vetoes: ["ccoN", "cyoA", "bd"],          // the aerobic terminal oxidases
+    vetoes: ["ccoN", "cyoA", "cydA"],          // the aerobic terminal oxidases
   },
   capsule: {
     id: "capsule", name: "polysaccharide capsule",

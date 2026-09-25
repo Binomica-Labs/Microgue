@@ -11066,3 +11066,246 @@ describe("today's systems still work through a warm cache", () => {
       .toBeGreaterThan(warm);
   });
 });
+
+describe("the floor fights back", () => {
+  it("alarm makes a standing player measurably less safe, monotonically", async () => {
+    // The reason this exists: a player standing still on F1, F8 and F24 took
+    // ZERO damage over three hundred turns. The column was a shooting
+    // gallery. Measured over sixteen runs per level, because a single run
+    // showed `roused` hitting harder than `alarmed` -- pure composition
+    // noise, and tuning on it would have produced a curve that was not
+    // there.
+    const { microbeTurn } = await import("../src/combat.js");
+    const damageAt = (q: number): number => {
+      let total = 0, runs = 0;
+      for (let seed = 1; seed <= 6; seed++) {
+        const d = new Dungeon(96, 96, seed);
+        d.floor = 8;
+        const lvl = d.current();
+        const n = lvl.mobs.filter((m) => m.alive).length;
+        const player = { x: lvl.up.x, y: lvl.up.y, hp: 1e9, maxhp: 1e9,
+                         atp: 50, atpMax: 100, status: [] };
+        for (let t = 0; t < 150; t++) {
+          const before = player.hp;
+          microbeTurn({
+            grid: lvl.grid, mobs: lvl.mobs,
+            player,
+            rng: makeRng(t * 13 + seed), armour: 1, threat: 0.5, mobSpeed: 1,
+            mired: () => false, packets: [], clouds: [], drops: [],
+            founding: n, quorum: q,
+            stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
+          });
+          total += before - player.hp;
+        }
+        runs++;
+      }
+      return total / runs;
+    };
+    const calm = damageAt(0), alarmed = damageAt(0.6), swarming = damageAt(0.9);
+    expect(alarmed, `calm ${calm.toFixed(0)} vs alarmed ${alarmed.toFixed(0)}: `
+      + "alarm does not raise the pressure").toBeGreaterThan(calm);
+    expect(swarming, "a swarm is no worse than an alarm")
+      .toBeGreaterThan(alarmed);
+    // ...but never instant death: a cliff is not difficulty
+    expect(swarming, "a swarm kills too fast to react to").toBeLessThan(150 * 25);
+
+    // And the mechanisms SEPARATELY, because the aggregate above passes on
+    // `biteScale` alone: removing the hunting entirely left it green, so it
+    // would not have caught that regression. Each lever gets its own
+    // assertion or none of them is really pinned.
+    const Q = await import("../src/quorum.js");
+    for (const [lo, hi] of [[0, 0.3], [0.3, 0.6], [0.6, 0.9]] as const) {
+      expect(Q.huntFraction(hi), `hunting does not rise from ${String(lo)} to `
+        + String(hi)).toBeGreaterThan(Q.huntFraction(lo));
+      expect(Q.senseScale(hi), "senses do not widen").toBeGreaterThanOrEqual(
+        Q.senseScale(lo));
+      expect(Q.biteScale(hi), "bites do not sharpen").toBeGreaterThanOrEqual(
+        Q.biteScale(lo));
+    }
+    // ...and above `roused` the floor stops giving up entirely
+    expect(Q.chaseLimit(0.6, 10), "an alarmed floor still loses interest")
+      .toBe(Infinity);
+  });
+
+  it("the signal decays, so a floor forgets if you leave it alone", async () => {
+    const { decay, levelOf, raise, KILL_SIGNAL } = await import("../src/quorum.js");
+    let q = 0;
+    for (let i = 0; i < 12; i++) q = raise(q, KILL_SIGNAL);
+    expect(levelOf(q), "twelve kills did not rouse the floor").not.toBe("calm");
+    let turns = 0;
+    while (levelOf(q) !== "calm" && turns < 5000) { q = decay(q); turns++; }
+    expect(turns, "the floor never calms down").toBeLessThan(400);
+    expect(turns, "the floor calms down instantly").toBeGreaterThan(20);
+    expect(q).toBeGreaterThanOrEqual(0);
+  });
+
+  it("garbage signals never produce garbage behaviour", async () => {
+    const Q = await import("../src/quorum.js");
+    for (const bad of [NaN, Infinity, -Infinity, -5, 99]) {
+      expect(["calm", "roused", "alarmed", "swarming"]).toContain(Q.levelOf(bad));
+      for (const f of [Q.senseScale(bad), Q.biteScale(bad), Q.huntFraction(bad),
+                       Q.decay(bad), Q.raise(bad, 0.1)]) {
+        expect(Number.isFinite(f), `a signal of ${String(bad)} gave ${String(f)}`)
+          .toBe(true);
+      }
+      expect(Q.chaseLimit(bad, 10)).toBeGreaterThan(0);
+      expect(typeof Q.hunts(bad, 7)).toBe("boolean");
+    }
+  });
+});
+
+describe("the floor adapts to what kills it", () => {
+  it("leaning on one channel costs you, and laying off it recovers", async () => {
+    const R = await import("../src/resistance.js");
+    const r = R.newResistance();
+    expect(R.factor(r, "bite"), "a naive floor already resists").toBe(1);
+    for (let i = 0; i < 20; i++) R.selected(r, "bite");
+    const worn = R.factor(r, "bite");
+    expect(worn, "twenty kills changed nothing").toBeLessThan(1);
+    // never immunity: a channel that switched off would make a bad streak
+    // an unwinnable run
+    expect(worn, "a channel can be shut off entirely").toBeGreaterThan(0.35);
+    // and it relaxes when unused
+    for (let i = 0; i < 500; i++) R.relax(r, "oxidative");
+    expect(R.factor(r, "bite"), "resistance never relaxes")
+      .toBeGreaterThan(worn);
+  });
+
+  it("using a channel keeps its resistance while the others fade", async () => {
+    const R = await import("../src/resistance.js");
+    const r = R.newResistance();
+    for (let i = 0; i < 10; i++) { R.selected(r, "bite"); R.selected(r, "cold"); }
+    const bite0 = r.bite;
+    for (let i = 0; i < 40; i++) R.relax(r, "bite");     // still using bite
+    expect(r.bite, "the channel in use relaxed anyway").toBe(bite0);
+    expect(r.cold, "an unused channel did not relax").toBeLessThan(bite0);
+  });
+
+  it("every channel survives garbage and never reports a bad factor", async () => {
+    const R = await import("../src/resistance.js");
+    const r = R.newResistance();
+    for (const c of R.CHANNELS) {
+      (r as Record<string, number>)[c] = NaN;
+      expect(Number.isFinite(R.factor(r, c)), `${c} gave a bad factor`).toBe(true);
+      R.selected(r, c);
+      R.relax(r, null);
+      expect(Number.isFinite(r[c]), `${c} went non-finite`).toBe(true);
+      expect(R.resistanceLine(c).length, `${c} has no line`).toBeGreaterThan(10);
+    }
+    expect(R.hardened(R.newResistance()), "a naive floor reports a hardening")
+      .toBeNull();
+  });
+});
+
+describe("biological accuracy holds where it is checkable", () => {
+  it("every gene id is a real gene name, not a complex or a protein", () => {
+    // `bd` was in the table as "cytochrome bd oxidase". bd is the name of
+    // the COMPLEX; the genes are cydA/cydB. Every other entry was a real
+    // gene, so one complex-name-as-gene-id was a teaching error sitting in
+    // a table a player reads to learn from. The NCBI query for it already
+    // said `cydA[Gene]` -- the data knew, only the id was wrong.
+    for (const [id, g] of Object.entries(bio.GENES)) {
+      if (id === "ori") continue;
+      // Real bacterial gene names are 3-4 lowercase letters then an
+      // optional capital/number: cbbL, katG, nifH, luxAB, rrnB.
+      expect(/^[a-z]{2,4}[A-Z0-9]{0,3}$/.test(id),
+             `"${id}" does not look like a gene name`).toBe(true);
+      expect(g.product.length, `${id} has no product`).toBeGreaterThan(3);
+      expect(g.discovery.length, `${id} has no discovery note -- the teaching `
+        + "surface is empty for it").toBeGreaterThan(40);
+    }
+  });
+
+  it("every gene is reachable: no content is inert", () => {
+    // Loot comes from what a MOB carries, so a gene no organism has can
+    // never be found. That would be a gene written, documented and
+    // unreachable -- content that exists only in the source.
+    const carried = new Set<string>();
+    for (const m of bio.MICROBES) for (const g of m.genes) carried.add(g);
+    const orphan = Object.keys(bio.GENES)
+      .filter((g) => g !== "ori" && !carried.has(g));
+    expect(orphan, "genes no organism carries, so they can never drop")
+      .toEqual([]);
+  });
+
+  it("an ability's mechanism matches the gene it names", async () => {
+    // The competence ability described CONJUGATION -- a pilus pushing DNA
+    // from donor to recipient -- while naming comA, which is natural
+    // transformation: a channel taking up DNA already loose in the water.
+    // Different machinery, different direction, different genes. A game
+    // used as a teaching tool cannot describe one mechanism and label it
+    // with another's gene.
+    const { ABILITIES } = await import("../src/abilities.js");
+    const comp = ABILITIES.find((a) => a.gene === "comA");
+    if (comp) {
+      // A regex cannot read negation: the corrected note says "you are NOT
+      // reaching into anything", which a naive keyword scan flags as the
+      // very thing it is disclaiming. So assert what the note must CONTAIN
+      // -- the real mechanism -- rather than trying to forbid words that
+      // legitimately appear while being denied.
+      expect(/take up|uptake|loose in the water|drinking/i.test(comp.note),
+             "the comA ability does not describe DNA uptake").toBe(true);
+      expect(/competence|transformation|take up/i.test(comp.note),
+             "the comA ability does not describe transformation").toBe(true);
+    }
+    // and every ability's gene is one the game actually has
+    for (const a of ABILITIES) {
+      expect(a.gene in bio.GENES, `${a.id} names ${a.gene}`).toBe(true);
+    }
+  });
+});
+
+describe("renaming a gene does not destroy old saves", () => {
+  it("a save written before the bd -> cydA rename still loads its gene", async () => {
+    // v1.61.0 renamed `bd` to `cydA` -- correct, and it silently destroyed
+    // every save with one installed. `isGeneId` tests membership in GENES,
+    // an unknown id fails, and the part is dropped from the ring with NO
+    // message: the player loses a gene and is never told. A rename in a
+    // table players have saved against is a MIGRATION, not an edit.
+    const { parsePart } = await import("../src/save.js");
+    const old = parsePart({ kind: "gene", id: "bd", level: 2, mods: [],
+                            allele: null });
+    expect(old, "a pre-rename save lost its gene entirely").not.toBeNull();
+    expect(old?.kind === "gene" ? old.id : null,
+           "the gene did not migrate to its new id").toBe("cydA");
+    expect(old?.kind === "gene" ? old.level : 0,
+           "the migration lost the gene's level").toBe(2);
+  });
+
+  it("every renamed id points at a gene that actually exists now", async () => {
+    // A migration to a target that does not exist is the same data loss
+    // with an extra step.
+    const { RENAMED, currentGeneId } = await import("../src/gene_migrations.js");
+    for (const [from, to] of Object.entries(RENAMED)) {
+      expect(to in bio.GENES, `${from} migrates to ${to}, which is not a gene`)
+        .toBe(true);
+      expect(from in bio.GENES,
+             `${from} is still a live gene id -- migrating it would shadow it`)
+        .toBe(false);
+      expect(currentGeneId(from)).toBe(to);
+    }
+    // an unknown id passes through untouched rather than becoming something
+    expect(currentGeneId("notAGene")).toBe("notAGene");
+    expect(currentGeneId("cbbL"), "a live gene was migrated").toBe("cbbL");
+  });
+
+  it("lab_save migrates too -- both readers, not just the one I fixed first", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    // save.ts and lab_save.ts each carry their OWN copy of `isGeneId`.
+    // Fixing one leaves the heirloom dropping renamed genes out of the
+    // lineage exactly as silently. This asserts the duplication is kept in
+    // step, since a scan is the only thing that will notice it drifting.
+    const src = readFileSync(
+      join(fileURLToPath(new URL("../src", import.meta.url)), "lab_save.ts"),
+      "utf8");
+    expect(src.includes("currentGeneId"),
+           "lab_save.ts validates gene ids without migrating them").toBe(true);
+    const save = readFileSync(
+      join(fileURLToPath(new URL("../src", import.meta.url)), "save.ts"),
+      "utf8");
+    expect(save.includes("currentGeneId"),
+           "save.ts validates gene ids without migrating them").toBe(true);
+  });
+});

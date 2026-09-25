@@ -6,6 +6,7 @@
 // state and set `depth` to a string. Everything here takes `unknown` and
 // narrows it explicitly, so a bad save is rejected rather than trusted.
 
+import { currentGeneId } from "./gene_migrations.js";
 import { GENES, MAX_DEPTH, MICROBES, type GeneId } from "./biology.js";
 import { BASE_SLOTS, MAX_SLOTS, TRAITS, atpCeiling, type TraitId }
   from "./chromosome.js";
@@ -119,7 +120,11 @@ const bool = (v: unknown, fallback: boolean): boolean =>
   typeof v === "boolean" ? v : fallback;
 
 const isGeneId = (v: unknown): v is GeneId =>
-  typeof v === "string" && Object.prototype.hasOwnProperty.call(GENES, v);
+  typeof v === "string"
+  && Object.prototype.hasOwnProperty.call(GENES, currentGeneId(v));
+
+/** A saved gene id, migrated to its current name. See gene_migrations.ts. */
+const geneId = (v: unknown): GeneId => currentGeneId(String(v)) as GeneId;
 
 /** Old three-strength promoters map onto the Anderson series they described. */
 const LEGACY_PROMOTER: Readonly<Record<string, PromoterId>> = {
@@ -169,6 +174,7 @@ export function parsePart(v: unknown): Part | null {
   }
 
   if (kind === "gene" && isGeneId(v["id"])) {
+    const gid = geneId(v["id"]);
     // `optimised: true` becomes the codon modifier, which is what it was.
     const legacyOptimised = bool(v["optimised"], false);
     const mods = Array.isArray(v["mods"])
@@ -178,7 +184,7 @@ export function parsePart(v: unknown): Part | null {
     const count = Math.min(Math.max(Math.round(num(v["count"], 1)), 1), MAX_STACK);
     // Never keep more modifiers than the level allows, or a hand-edited save
     // would out-perform anything reachable in play.
-    return { kind: "gene", id: v["id"], level,
+    return { kind: "gene", id: gid, level,
              mods: mods.slice(0, modifierSlots(level)),
              allele: parseAllele(v["allele"]),
              // Omitted when it is one, so an unstacked gene round-trips to

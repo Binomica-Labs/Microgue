@@ -97,6 +97,164 @@ that is *almost* opaque is not atmospheric, it is noise a player has to
 learn to ignore. Opaque now.
 
 
+# v1.62.0 — a rename is a migration
+
+## Last release silently destroyed saves
+
+v1.61.0 renamed `bd` to `cydA`. The correction was right and the way I
+shipped it was not: `isGeneId` tests membership in GENES, an unknown id
+fails that test, and the part is **dropped from the ring with no message**.
+Every player carrying cytochrome bd oxidase would have lost it on their next
+load and never been told.
+
+A rename in a table players have saved data against is a MIGRATION, not an
+edit. `gene_migrations.ts` is the record: old id -> new, applied at load
+before validation. `bd` now loads as `cydA` with its level intact.
+
+**Both readers needed it.** save.ts and lab_save.ts each carry their own
+copy of `isGeneId`, so fixing one left the HEIRLOOM dropping renamed genes
+out of the lineage exactly as silently. `spec` scans both, because
+duplicated validation is the thing that drifts.
+
+Never remove an entry from that map: a save can be arbitrarily old, and the
+cost of carrying a line for ever is nothing next to a run quietly losing
+part of itself.
+
+## The v1.60 systems had no Game-level coverage
+
+Quorum and resistance were tested as pure functions and at the combat layer,
+never through a real Game -- the wiring from a kill to the floor's alarm had
+no test at all. Now pinned end to end: killing raises the signal and waiting
+brings it down; melee kills harden the bite channel and no other; and a run
+with the floor held at 0.95 for 250 turns stays coherent.
+
+
+# v1.61.0 — biological accuracy audit
+
+The data holds up. 89 genes, all real, correct products, correct discovery
+history with the right people and dates -- cbbL from spinach in 1947 as
+"Fraction I protein", katG/HPI from Claiborne and Fridovich 1979 including
+the isoniazid link, nosZ from Zumft and Matsubara 1982 with its unique
+copper centre. arsC (detox) and arrA (respiration) are correctly kept apart,
+which is a distinction a lot of material gets wrong.
+
+Three errors found.
+
+## `bd` was not a gene
+
+It sat in the table as "cytochrome bd oxidase". **bd is the name of the
+COMPLEX**; the genes are cydA/cydB. Every other entry was a real gene, so
+this was a complex-name-as-gene-id in a table players read to learn from.
+The NCBI query for it already said `cydA[Gene]` -- the data knew, only the
+id was wrong. Now cydA. `spec` pins that every id matches the shape of a
+bacterial gene name.
+
+## The competence ability described conjugation
+
+Mine, from v1.52. It said "extend a pilus into an adjacent cell and pull a
+gene across" -- that is CONJUGATION, a tra operon pushing DNA from donor to
+recipient. The gene it named, comA, is natural COMPETENCE: a channel taking
+up DNA already loose in the water. Different machinery, different direction,
+different genes.
+
+Corrected to transformation, and the mechanic follows the biology: it now
+prefers the most DAMAGED neighbour, because a leaking cell sheds far more
+DNA than an intact one. Hurt it first, then drink. Better biology and a
+better decision.
+
+## The two newest systems had no anchor
+
+Quorum sensing and resistance were both built from the right principles but
+cited nothing. They now carry their real discoveries, and the in-game alarm
+lines teach the distinction that matters: Nealson and Hastings 1970, Vibrio
+fischeri (already in the game as luxAB) -- a culture does not glow until it
+is dense, because each cell leaks autoinducer and COUNTS what comes back. It
+is not a signal one cell sends; it is a population measuring itself. That is
+also why the signal decays rather than latching.
+
+Resistance cites Luria-Delbruck 1943, and that is why it rises on KILLS
+rather than hits: you are not teaching them, you are removing everyone the
+mechanism worked on.
+
+## Gameloop audit
+
+* Every one of the 89 genes is carried by at least one organism, so nothing
+  is written-but-unreachable. `spec` pins it: a gene no mob carries can
+  never drop, and would be content existing only in the source.
+* All 23 species appear in every full descent. Good pacing (about one new
+  organism per floor) but NO run-to-run variety in what you meet -- the
+  variety comes from lineage, succession, class and conditions instead.
+  Worth considering a per-run subset later.
+
+## A test that could not read negation
+
+The corrected competence note says "you are NOT reaching into anything",
+and a keyword scan for "pilus|reaching into" flagged the very sentence
+doing the disclaiming. Assert what a note must CONTAIN, not which words it
+must avoid -- a regex cannot read a negation.
+
+
+# v1.60.0 — the floor fights back
+
+Measured before designing anything: a player standing STILL on F1, F8 and
+F24 took **zero damage over three hundred turns**. The column was a shooting
+gallery you picked every fight in on your own terms. v1.41's sensory
+adaptation fixed a real crowding bug and gutted the threat with it.
+
+The answer is not bigger numbers. It is consequence.
+
+## Quorum sensing
+
+Killing a cell puts its contents in the water and the floor reads them. The
+signal decays unless something keeps making it, and crosses four thresholds:
+
+    calm      short senses, mobs lose interest (as before)
+    roused    senses widen, disengagement slows, 8% follow the gradient
+    alarmed   the floor STOPS losing interest; 22% follow the gradient
+    swarming  senses x2.2, bites x1.35, half the floor converges
+
+Above `roused` a fraction of mobs head for the player REGARDLESS of sense
+range -- they are not seeing you, they are following the signal you left.
+Chemotaxis up an autoinducer gradient is exactly how a cell finds a source
+it cannot otherwise sense, and it is what makes a big fight a decision
+rather than free loot: clear a room and the rest of the floor comes to find
+out why.
+
+Measured over sixteen runs per level, a 60hp strain standing still survives
+46 -> 22 -> 16 -> 12 turns. A monotonic ramp.
+
+**Two tuning traps, both avoided by measuring.** A single run showed
+`roused` hitting HARDER than `alarmed` -- pure composition noise, and
+tuning on it would have produced a curve that was not there. And the first
+version sent EVERY mob at once: 2740 damage over three hundred turns, death
+in about five. A cliff is not difficulty. The fraction is the ramp.
+
+## Resistance
+
+Bacteria are the organisms that famously do not let you win twice with the
+same trick. Each damage channel carries a resistance that rises as you use
+it and relaxes when you do not, so leaning on one weapon costs more every
+time and the answer is to rotate.
+
+Capped at 0.6, well short of immunity: a channel that could be shut off
+entirely would turn a bad streak into an unwinnable run, and a roguelike
+that can hand you a dead position is not difficult, it is broken.
+
+## The alarm is on the HUD
+
+A difficulty system the player cannot see is not difficulty, it is
+unfairness. The whole point is that fighting is a DECISION, and a decision
+needs its terms visible.
+
+## A test that did not discriminate
+
+The end-to-end damage test passed with the hunting removed ENTIRELY --
+`biteScale` alone kept `alarmed > calm`. An aggregate over several
+mechanisms will happily stay green while one of them dies. Each lever now
+has its own assertion: hunting fraction, sense scale, bite scale, and that
+an alarmed floor never gives up.
+
+
 # v1.59.0 — hardening everything today touched
 
 A pass over v1.52-v1.58 together, not each alone. Three real bugs, all in

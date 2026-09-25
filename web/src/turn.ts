@@ -252,6 +252,9 @@ export function t_exploreStep(_g: Game): void {
 export { t_eatOffered, t_declineOffered } from "./offer.js";
 
 import { play } from "./audio.js";
+import { crossingLine, decay as qDecay, levelOf }
+  from "./quorum.js";
+import { relax } from "./resistance.js";
 import { chanceUnder } from "./fission.js";
 import { tickSecretions } from "./cast.js";
 import type { Intent } from "./combat.js";
@@ -346,6 +349,21 @@ export function t_mobTurn(_g: Game): void {
     }
     _g.upkeep();
 
+    // The signal disperses unless something keeps making it. Crossings are
+    // announced, because a floor that quietly turns hostile is a floor the
+    // player cannot make decisions about.
+    const wasAlarm = levelOf(_g.quorum);
+    _g.quorum = qDecay(_g.quorum);
+    relax(_g.resistance, null);
+    const nowAlarm = levelOf(_g.quorum);
+    if (nowAlarm !== wasAlarm) {
+      const line = crossingLine(wasAlarm, nowAlarm);
+      if (line !== null) {
+        _g.note(line);
+        _g.toasts.push(line, nowAlarm === "calm" ? "info" : "warn", _g.now);
+      }
+    }
+
     const events = microbeTurn({
       grid: _g.level.grid,
       mobs: _g.level.mobs,
@@ -373,6 +391,7 @@ export function t_mobTurn(_g: Game): void {
       // from, so growth is the same proportion on a sparse floor and a
       // dense one. See fission.ts.
       founding: _g.level.founding,
+      quorum: _g.quorum,
       // `up` is always present; `down` is null on the last floor, which is
       // why one of these needs the guard and the other does not.
       stairs: _g.level.down ? [_g.level.up, _g.level.down] : [_g.level.up],

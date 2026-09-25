@@ -1772,6 +1772,8 @@ describe("state that should persist, does", () => {
     nameField: "the DOM text input, built at boot", nameBoxes: "hit boxes, per frame",
     containerBoxes: "hit boxes, per frame",
     dropPick: "which loot card is being inspected",
+    quorum: "the floor's alarm; it decays and is rebuilt by fighting",
+    resistance: "what the floor has adapted to; rebuilt as you fight",
     intro: "the lab floor, before anything is created",
     introSlot: "which slot the lab is for",
     introClass: "the choice being carried out of the lab",
@@ -4856,5 +4858,96 @@ describe("oxidative stress has a counter", () => {
     const bare = taken(false), guarded = taken(true);
     expect(bare, "the dose did nothing -- the test is not testing").toBeGreaterThan(10);
     expect(guarded, "katG did not cut a light dose").toBeLessThan(bare * 0.7);
+  });
+});
+
+describe("quorum and resistance work through a real game", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const mk = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("killing raises the signal, and waiting brings it down", async () => {
+    // Tested at module level, never through the Game: the wiring from a
+    // kill to the floor's alarm had no coverage at all.
+    const { KILL_SIGNAL } = await import("../src/quorum.js");
+    const g = await mk();
+    g.startRun(0, "heterotroph");
+    expect(g.quorum, "a fresh floor is already roused").toBe(0);
+    // kill whatever is nearest, the way a player would
+    let killed = 0;
+    for (let i = 0; i < 400 && killed < 6; i++) {
+      const m = g.level.mobs.find((o) => o.alive);
+      if (!m) break;
+      g.player.x = m.x + 1;
+      g.player.y = m.y;
+      g.player.hp = g.player.maxhp;
+      g.press("left");
+      if (!m.alive) killed++;
+      g.frame(100 + i * 40);
+    }
+    if (killed === 0) return;                  // nothing reachable; no claim
+    expect(g.quorum, `${String(killed)} kills did not raise the signal`)
+      .toBeGreaterThan(0);
+    expect(g.quorum, "the signal overshot its ceiling").toBeLessThanOrEqual(1);
+    expect(g.quorum, "one kill raised more than it should")
+      .toBeLessThanOrEqual(KILL_SIGNAL * (killed + 2));
+    // and it comes back down when nothing is making it
+    const peak = g.quorum;
+    for (let i = 0; i < 300 && !g.dead; i++) { g.press("wait"); g.frame(2e4 + i * 40); }
+    expect(g.quorum, "the signal never decayed").toBeLessThan(peak);
+  });
+
+  it("melee kills harden the floor against melee, and nothing else", async () => {
+    const g = await mk();
+    g.startRun(1, "heterotroph");
+    const before = { ...g.resistance };
+    let killed = 0;
+    for (let i = 0; i < 400 && killed < 5; i++) {
+      const m = g.level.mobs.find((o) => o.alive);
+      if (!m) break;
+      g.player.x = m.x + 1;
+      g.player.y = m.y;
+      g.player.hp = g.player.maxhp;
+      g.press("left");
+      if (!m.alive) killed++;
+      g.frame(100 + i * 40);
+    }
+    if (killed === 0) return;
+    expect(g.resistance.bite, "melee kills did not harden the bite channel")
+      .toBeGreaterThan(before.bite);
+    expect(g.resistance.oxidative,
+           "a melee kill hardened an unrelated channel")
+      .toBeLessThanOrEqual(before.oxidative);
+    // never past the cap, whatever happens
+    const { CAP } = await import("../src/resistance.js");
+    for (const v of Object.values(g.resistance)) {
+      expect(v, "a channel passed its cap").toBeLessThanOrEqual(CAP);
+      expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it("a whole run with the floor alarmed stays coherent", async () => {
+    const g = await mk();
+    g.startRun(2, "heterotroph");
+    g.quorum = 0.95;                           // worst case: full swarm
+    for (let i = 0; i < 250; i++) {
+      if (g.dead) break;
+      g.player.hp = g.player.maxhp;             // survive to keep testing
+      g.press("wait");
+      g.frame(100 + i * 40);
+    }
+    const errs = g.toasts.all().filter((x) => x.level === "error")
+      .map((x) => x.text).filter((t) => !t.includes("storage is full"));
+    expect(errs, "a swarming floor threw").toEqual([]);
+    expect(Number.isFinite(g.quorum) && g.quorum >= 0 && g.quorum <= 1,
+           `quorum went to ${String(g.quorum)}`).toBe(true);
   });
 });

@@ -13,6 +13,8 @@ import { tilesOf } from "./footprint.js";
 import { SIZES } from "./behaviour.js";
 import { music, play, stopMusic } from "./audio.js";
 import { pentatonicOf, voicing } from "./music.js";
+import { factor as rFactor, selected } from "./resistance.js";
+import { KILL_SIGNAL, raise as qRaise } from "./quorum.js";
 import { lyse } from "./cast.js";
 import { daylight, isNight } from "./cycle.js";
 import { CONDITIONS } from "./conditions.js";
@@ -482,7 +484,12 @@ export function t_attack(_g: Game, m: Mob): void {
     // Turn to face it. Held until the next move, so the swing and the
     // recovery both point the right way rather than snapping back.
     _g.facingAt = { x: m.x, y: m.y };
-    const dmg = Math.max(Math.round(_g.atk()), 1);
+    // Resistance: the floor adapts to whatever keeps killing it. Leaning on
+    // one channel costs more every time, and the answer is to rotate. See
+    // resistance.ts -- it caps well short of immunity, so a bad streak is
+    // never a dead position.
+    const dmg = Math.max(
+      Math.round(_g.atk() * rFactor(_g.resistance, "bite")), 1);
     _g.trace.push(_g.clock.turn, "attack",
                   `${m.name} for ${String(dmg)} (had ${String(m.hp)})`);
     const ranged = Math.abs(m.x - _g.player.x) > 1 || Math.abs(m.y - _g.player.y) > 1;
@@ -508,6 +515,10 @@ export function t_attack(_g: Game, m: Mob): void {
     if (m.hp > 0) _g.note(say.hitLine(m.name, dmg, false, _g.turnSeed + dmg));
     if (m.hp <= 0) {
       m.alive = false;
+      // A kill is LOUD: the cell's contents go into the water and the floor
+      // reads them. And the mechanism that did it gets harder from here.
+      selected(_g.resistance, "bite");
+      _g.quorum = qRaise(_g.quorum, KILL_SIGNAL);
       lyse(_g, m, false);                  // cue + lysate; melee bursts below
       // Fighting used to advance nothing: only the FIRST kill of a species
       // counted, as cataloguing. See strain.ts -- the term saturates, so

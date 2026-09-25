@@ -131,12 +131,19 @@ const LEVELLED: readonly Ability[] = [
       + "ATP, because that is what the pump costs a real cell.",
   },
   {
-    id: "conjugate", name: "conjugation", gene: "comA", kind: "steal",
+    id: "conjugate", name: "competence", gene: "comA", kind: "steal",
     cost: 14, cooldown: 12, power: 1, range: 1, linger: 0, glyph: "\u26AD",
     minStrain: 5,
-    note: "Extend a pilus into an adjacent cell and pull a gene across. "
-      + "Horizontal transfer, taken rather than waited for -- this is how "
-      + "resistance actually spreads.",
+    // NOT conjugation, which is what this said. Conjugation is a pilus and
+    // a tra operon pushing DNA from donor to recipient. comA is natural
+    // COMPETENCE: the cell opens a channel and takes up DNA already loose
+    // in the water. Different machinery, different direction, different
+    // genes -- and the gene named here was always the competence one, so
+    // the description was describing a mechanism the game did not model.
+    note: "Open the competence channel and take up what is loose in the "
+      + "water beside you. Every neighbour sheds DNA; a damaged one sheds "
+      + "much more. This is transformation, not conjugation -- you are not "
+      + "reaching into anything, you are drinking what has already leaked.",
   },
   {
     id: "spore", name: "sporulation", gene: "otsA", kind: "surge",

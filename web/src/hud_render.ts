@@ -6,6 +6,7 @@
 // under a camera transform -- while this draws the frame around it, in screen
 // coordinates, and never moves with the view.
 
+import { levelOf } from "./quorum.js";
 import { MAX_FLOOR } from "./dungeon.js";
 import { GENES } from "./biology.js";
 import { drawBar, drawColumn, type HudLayout } from "./hud.js";
@@ -64,9 +65,19 @@ export function r_drawHud(_g: Game, W: number, H: number): void {
     ctx.textBaseline = "alphabetic";
     // MEASURED. Real Chrome showed this running off the right edge of every
     // phone: "before dawn" arriving as "before da".
+    // The floor's alarm, when there is one. A difficulty system the player
+    // cannot see is not difficulty, it is unfairness -- the whole point is
+    // that fighting is a DECISION, and a decision needs its terms visible.
+    const alarm = levelOf(_g.quorum);
     const status = `F${_g.dungeon.floor}/${MAX_FLOOR}${sealed ? " \u26D4" : ""} ${s.name}  `
       + `${s.teap} ${s.e0 >= 0 ? "+" : ""}${s.e0}mV  ${timeName(_g.clock)}`;
     ctx.fillText(ellipsise(ctx, status, statusW), barX, barTop + lh * 0.9);
+    if (alarm !== "calm") {
+      const w0 = ctx.measureText(ellipsise(ctx, status, statusW)).width;
+      ctx.fillStyle = alarm === "swarming" ? "#ff6a4a"
+        : alarm === "alarmed" ? "#ffa030" : "#e8d24a";
+      ctx.fillText(`  ${alarm}`, barX + w0, barTop + lh * 0.9);
+    }
 
     // One row: hp gauge, then plain readouts. A miniature plasmid ring used to
     // sit here and read as an unexplained circle, so it is gone -- the real

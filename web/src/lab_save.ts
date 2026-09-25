@@ -6,6 +6,7 @@
 // dying, would take the whole meta-progression with it. That is a bug worth
 // designing out rather than remembering.
 
+import { currentGeneId } from "./gene_migrations.js";
 import { GENES, type GeneId } from "./biology.js";
 import { BASE_SLOTS, MAX_SLOTS } from "./chromosome.js";
 import { MAX_STRAIN } from "./strain.js";
@@ -21,8 +22,11 @@ const num = (v: unknown, d: number): number =>
   typeof v === "number" && Number.isFinite(v) ? v : d;
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+// Migrated like save.ts: the heirloom carries genes too, and a renamed id
+// would drop them out of the lineage as silently as out of the ring.
 const isGeneId = (v: unknown): v is GeneId =>
-  typeof v === "string" && Object.prototype.hasOwnProperty.call(GENES, v);
+  typeof v === "string"
+  && Object.prototype.hasOwnProperty.call(GENES, currentGeneId(v));
 
 function parseRecord(v: unknown, i: number): RunRecord | null {
   if (!isRecord(v)) return null;
@@ -64,7 +68,8 @@ export function parseLab(raw: unknown): Lab {
     // that -- or edited by hand -- loaded a manifest the strain could never
     // carry, and the surplus was dropped at inoculation with nothing said.
     stock: Array.isArray(raw["stock"])
-      ? [...new Set((raw["stock"] as unknown[]).filter(isGeneId))]
+      ? [...new Set((raw["stock"] as unknown[]).filter(isGeneId)
+            .map((g) => currentGeneId(g) as GeneId))]
           .slice(0, stockCap(startSites))
       : [],
     startSites,

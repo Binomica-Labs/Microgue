@@ -139,15 +139,20 @@ export function castAbility(
       break;
     }
     case "steal": {
-      // Conjugation: a pilus into a neighbour, and a gene comes back. Takes
-      // from what that organism actually carries, so what you can steal
-      // depends on what you are standing next to.
+      // Natural transformation: DNA loose in the water is taken up through
+      // the competence channel. What is available depends on what is beside
+      // you -- and on how badly it is leaking, because a damaged cell sheds
+      // far more DNA than an intact one. That is both the real mechanism
+      // and a better decision: hurt it first, then drink.
       const near = _g.level.mobs.filter((m) => m.alive
         && Math.max(Math.abs(m.x - px), Math.abs(m.y - py)) <= a.range);
-      if (near.length === 0) return "Nothing adjacent to conjugate with.";
+      if (near.length === 0) return "Nothing beside you is shedding DNA.";
       const rng = makeRng(_g.turnSeed++);
-      const donor = near[rng.int(near.length)];
-      if (!donor) return "Nothing adjacent to conjugate with.";
+      // Prefer the most damaged neighbour: that is where the DNA is.
+      const bleeding = [...near].sort((a, b) =>
+        (a.hp / Math.max(a.maxhp, 1)) - (b.hp / Math.max(b.maxhp, 1)));
+      const donor = bleeding[0] ?? near[rng.int(near.length)];
+      if (!donor) return "Nothing beside you is shedding DNA.";
       const have = _g.genome.carried();
       const pool = donor.genes.filter((g) => !have.has(g));
       if (pool.length === 0) {
@@ -165,7 +170,7 @@ export function castAbility(
       _g.fx.add({ kind: "bolt", t0: _g.now, dur: 300, colour: "#8e6cf0",
                   seed: _g.now, from: { x: px, y: py },
                   to: { x: donor.x, y: donor.y } });
-      _g.note(`A pilus finds the ${donor.name}. ${got} crosses over.`);
+      _g.note(`You take up ${got} from the water around the ${donor.name}.`);
       break;
     }
     case "surge": {

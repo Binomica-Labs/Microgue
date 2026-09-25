@@ -25,6 +25,7 @@ import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
          r_drawScreenFx, r_drawToasts } from "./render.js";
+import { newResistance } from "./resistance.js";
 import { r_drawPlasmid } from "./plasmid_screen.js";
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
          i_pointerMove, i_pointerUp, i_press } from "./input.js";
@@ -174,6 +175,10 @@ class Game {
   containerBoxes: ContainerBoxes | null = null;
   /** Which loot card is being inspected. See screens.ts. */
   dropPick = 0;
+  /** Floor-wide quorum signal, 0..1. See quorum.ts. */
+  quorum = 0;
+  /** What the floor has adapted to. See resistance.ts. */
+  resistance = newResistance();
   /** Mirrors settings.autoAttack; see save.ts. Kept as a field because the
    *  turn loop reads it every frame. */
   autoAttack = false;

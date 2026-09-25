@@ -4,6 +4,7 @@
 // Everything here takes its world explicitly rather than reaching for game
 // state, which is what makes it testable without a canvas.
 
+import { biteScale, chaseLimit, hunts, senseScale } from "./quorum.js";
 import { divides, partition } from "./fission.js";
 import { ageAgenda, agendaStep, newAgenda } from "./agenda.js";
 import { canStrike, chebyshev, decideStep, senseRange, SIZES } from "./behaviour.js";
@@ -48,6 +49,9 @@ export interface TurnWorld {
    *  Absent means "use the current count", which makes the first turn on a
    *  floor the baseline -- fine for a caller that does not track it. */
   readonly founding?: number;
+  /** Floor-wide quorum signal, 0..1. Widens senses, stops disengagement and
+   *  sharpens bites as it rises. See quorum.ts. */
+  readonly quorum?: number;
   /** Whether a tile is biofilm: a mob stepping onto one is mired and forfeits
    *  the rest of its move. */
   readonly mired: (x: number, y: number) => boolean;
@@ -229,14 +233,18 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // all. Landing a hit resets the clock -- something that is actually
     // catching you has no reason to give up.
     m.bored = Math.max((m.bored ?? 0) - 1, 0);
-    const senses = dist <= senseRange(m.behaviour) || m.behaviour === "sessile";
+    // Sense range widens with the floor's alarm: a roused population is
+    // looking for you, and at `alarmed` it does not stop looking.
+    const q = w.quorum ?? 0;
+    const reach = senseRange(m.behaviour) * senseScale(q);
+    const senses = dist <= reach || m.behaviour === "sessile";
     // Not a sessile cell: it cannot chase, so it cannot chase fruitlessly.
     // It "senses" from anywhere so it strikes whatever comes adjacent, and
     // that made it bored after ten turns of you being elsewhere on the floor
     // -- then passive for forty while you stood next to it.
     if (senses && m.bored === 0 && m.behaviour !== "sessile") {
       m.chase = (m.chase ?? 0) + 1;
-      if (m.chase > CHASE_LIMIT) {
+      if (m.chase > chaseLimit(q, CHASE_LIMIT)) {
         m.bored = BORED_TURNS;
         m.chase = 0;
         // ...and it LEAVES. Simply not chasing was not enough: a bored mob
@@ -331,7 +339,8 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     if (weapon.kind === "melee" && canStrike(m.behaviour, m.size, dist)) {
       // 0.35 made the first stratum survivable for fifty consecutive hits,
       // which is no threat at all. Tuned against the whole 24-floor curve.
-      const dmg = Math.max(Math.round(m.atk * 0.55 * w.armour), 1);
+      const dmg = Math.max(
+        Math.round(m.atk * 0.55 * w.armour * biteScale(w.quorum ?? 0)), 1);
       w.player.hp = Math.max(w.player.hp - dmg, 0);
       events.push({ kind: "strike", mob: m, dmg });
       m.chase = 0;            // it is catching you; no reason to give up
@@ -542,10 +551,19 @@ function agendaMove(
   if (ageAgenda(m.agenda)) m.agenda = newAgenda(m.behaviour, w.rng);
   const a = m.agenda;
 
-  // A forager is drawn to the nearest substrate it can reach; everything
-  // else walks its own remembered point.
+  // A roused floor follows the GRADIENT.
+  //
+  // Widening sense range was not enough: a mob that never came within ten
+  // tiles still never came at all, so `alarmed` did zero damage while
+  // `swarming` did plenty. Autoinducer diffuses, and chemotaxis up a
+  // gradient is exactly how a cell finds a source it cannot otherwise
+  // sense. Above `roused`, an unaware mob heads for the player regardless
+  // of distance -- it does not SEE you, it is following the signal you left.
   let toward: Point | null = null;
-  if (a.kind === "forage") {
+  if (hunts(w.quorum ?? 0, m.uid)) {
+    toward = { x: w.player.x, y: w.player.y };
+  }
+  if (toward === null && a.kind === "forage") {
     let best = Infinity;
     for (const d of w.drops ?? []) {
       const dist = chebyshev(d.x, d.y, m.x, m.y);
