@@ -97,6 +97,9 @@ export function i_menuTap(_g: Game, x: number, y: number): void {
     _g.settings = { ..._g.settings, [hit.toggle]: !_g.settings[hit.toggle] };
     _g.autoAttack = _g.settings.autoAttack;
     setMuted(_g.settings.muted);
+    // The strip is built once, so toggling developer mode has to rebuild it
+    // or the floor arrows appear or vanish only on the next launch.
+    _g.refreshButtons();
     return;
   }
   if (hit?.slot === undefined) return;

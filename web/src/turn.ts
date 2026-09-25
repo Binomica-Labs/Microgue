@@ -21,7 +21,10 @@ export function t_descend(_g: Game): void {
   // this moved the dungeon and dropped the researcher into D1 with no class.
   if (_g.intro) { _g.note("Not from here. The column is on the bench."); return; }
   _g.trace.push(_g.clock.turn, "floor", `descend from F${String(_g.dungeon.floor)}`);
-    if (!Dungeon.isCleared(_g.level)) {
+    // Debug walks the whole column, one floor per tap. The clear-the-floor
+    // gate is the real rule and stays the real rule -- this is the switch
+    // that exists to skip it while working on floor twenty.
+    if (!_g.settings.debug && !Dungeon.isCleared(_g.level)) {
       _g.note("The way down is choked. Something here has to die first.");
       _g.toasts.push("Clear the floor before descending.", "warn", _g.now);
       return;

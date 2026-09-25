@@ -17,5 +17,6 @@ export function r_drawMenu(_g: Game, W: number, H: number): void {
     autoAttack: _g.settings.autoAttack, minimap: _g.settings.minimap,
     diagonal: _g.settings.diagonal, highContrast: _g.settings.highContrast,
     reduceMotion: _g.settings.reduceMotion, muted: _g.settings.muted,
+    debug: _g.settings.debug,
   });
 }

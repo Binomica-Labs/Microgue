@@ -11,26 +11,42 @@ export interface Button {
   active: boolean;
 }
 
-export function makeButtons(): Button[] {
+/**
+ * The button strip.
+ *
+ * `debug` adds the floor arrows. They step the column one floor per tap and
+ * skip the clear-the-floor gate, which is a development tool -- on the
+ * normal strip they were two buttons that mostly answered "the way down is
+ * choked", and a control that usually refuses teaches nothing except to
+ * stop pressing it. The stairs under your feet are how a player descends.
+ */
+export function makeButtons(debug = false): Button[] {
   const b = (id: string, glyph: string, hint: string): Button =>
     ({ id, glyph, hint, x: 0, y: 0, w: 0, h: 0, enabled: true, active: false });
   return [
     b("plasmid", "\u25CE", "plasmid"),
-    b("map", "\u229E", "pathway map"),
+    // A metabolic map is a branching path, and U+22D4 looks like one. The
+    // squared plus it replaced reads as "add" or "grid" -- it said nothing
+    // about metabolism, pathways, or maps.
+    b("map", "\u22D4", "pathways"),
     // Distinct glyphs: two identical crossed-swords buttons sat next to
     // each other and nothing told them apart.
-    b("auto", "\u21BB", "auto-attack"),
-    b("strike", "\u2694", "strike the nearest thing"),
-    b("explore", "\u2732", "auto-explore"),
-    b("wait", "\u23F8", "wait a turn"),
-    b("biofilm", "\u2593", "lay biofilm"),
-    b("research", "\u2697", "directed evolution"),
-    b("notes", "\u270E", "field notebook"),
-    b("down", "\u25BC", "descend"),
-    b("up", "\u25B2", "ascend"),
-    b("zoomIn", "+", "zoom in"),
-    b("zoomOut", "\u2212", "zoom out"),
+    b("auto", "\u21BB", "auto"),
+    b("strike", "\u2694", "strike"),
+    // A wandering line, for wandering. The asterisk it replaced read as
+    // nothing at all.
+    b("explore", "\u21DD", "explore"),
+    b("wait", "\u23F8", "wait"),
+    b("biofilm", "\u2593", "biofilm"),
+    b("research", "\u2697", "bench"),
+    b("notes", "\u270E", "notes"),
+    b("zoomIn", "+", "in"),
+    b("zoomOut", "\u2212", "out"),
     b("contrast", "\u25D1", "contrast"),
+    ...(debug
+      ? [b("down", "\u25BC", "down"),
+         b("up", "\u25B2", "up")]
+      : []),
   ];
 }
 
@@ -114,11 +130,22 @@ export function drawButtons(
     ctx.roundRect(b.x, b.y, b.w, b.h, r);
     ctx.fill();
     ctx.stroke();
+    // Glyph ABOVE, label BELOW.
+    //
+    // The hint existed on every button from the beginning and was never
+    // drawn anywhere: every control was a bare symbol with no text, on any
+    // screen, ever. No glyph teaches "directed evolution" or "lay biofilm"
+    // on its own, and a player who cannot tell two buttons apart is not
+    // helped by making the symbols prettier. Naming them is the fix; the
+    // symbol is what you recognise once you already know.
     ctx.fillStyle = "#ffffff";
-    ctx.font = `${b.w * 0.42}px ui-monospace,monospace`;
+    ctx.font = `${b.w * 0.40}px ui-monospace,monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(b.glyph, b.x + b.w / 2, b.y + b.h / 2 + b.w * 0.02);
+    ctx.fillText(b.glyph, b.x + b.w / 2, b.y + b.h * 0.40);
+    ctx.font = `${Math.max(b.w * 0.19, 7)}px ui-monospace,monospace`;
+    ctx.fillStyle = b.active ? "#ffffff" : "rgba(255,255,255,0.72)";
+    ctx.fillText(b.hint, b.x + b.w / 2, b.y + b.h * 0.79);
   }
   ctx.globalAlpha = 1;
 }

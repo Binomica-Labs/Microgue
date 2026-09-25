@@ -290,3 +290,48 @@ describe("no screen leaks canvas state into the next one", () => {
       .toEqual([]);
   });
 });
+
+describe("the button strip says what it does", () => {
+  it("every button has a label short enough to fit its own width", async () => {
+    // The `hint` existed on every button from the start and was NEVER
+    // drawn: every control was a bare symbol, on any screen, ever. No glyph
+    // teaches "directed evolution" or "lay biofilm" on its own. The hints
+    // were also written as sentences ("strike the nearest thing"), which is
+    // fine for a tooltip and impossible under a 44pt button.
+    const { makeButtons } = await import("../src/buttons.js");
+    for (const b of makeButtons(true)) {
+      expect(b.hint.length, `"${b.hint}" is too long to sit under a button`)
+        .toBeLessThanOrEqual(9);
+      expect(b.hint.length, `${b.id} has no label`).toBeGreaterThan(1);
+      expect(b.glyph.length, `${b.id} has no glyph`).toBeGreaterThan(0);
+    }
+  });
+
+  it("no two buttons share a glyph or a label", async () => {
+    // Two identical crossed-swords buttons once sat side by side with
+    // nothing telling them apart. The same collision in the labels would
+    // be worse, because the label is the part you read.
+    const { makeButtons } = await import("../src/buttons.js");
+    const bs = makeButtons(true);
+    const glyphs = bs.map((b) => b.glyph);
+    const hints = bs.map((b) => b.hint);
+    expect(new Set(glyphs).size, "two buttons share a glyph").toBe(glyphs.length);
+    expect(new Set(hints).size, "two buttons share a label").toBe(hints.length);
+  });
+
+  it("the floor arrows are developer-only", async () => {
+    // They step a floor per tap and skip the clear-the-floor gate. On the
+    // normal strip they mostly answered "the way down is choked", and a
+    // control that usually refuses teaches only to stop pressing it.
+    const { makeButtons } = await import("../src/buttons.js");
+    const normal = makeButtons(false).map((b) => b.id);
+    const debug = makeButtons(true).map((b) => b.id);
+    expect(normal, "the floor arrows are on the normal strip")
+      .not.toContain("down");
+    expect(normal).not.toContain("up");
+    expect(debug, "developer mode does not add the arrows").toContain("down");
+    expect(debug).toContain("up");
+    // and nothing else changes
+    expect(debug.filter((id) => id !== "down" && id !== "up")).toEqual(normal);
+  });
+});

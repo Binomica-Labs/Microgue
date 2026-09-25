@@ -7790,7 +7790,7 @@ describe("the delete tab wins over the row it sits on", () => {
     ];
     const nul = new Proxy({}, { get: () => () => undefined }) as never;
     const tog = { autoAttack: false, minimap: true, diagonal: false,
-                  highContrast: false, reduceMotion: false, muted: false };
+                  highContrast: false, reduceMotion: false, muted: false, debug: false };
     const b = drawMenu(nul, 393, 852, { top: 47, right: 0, bottom: 34, left: 0 },
                        1.86, "continue", slots, null, tog);
     const del = b.rows.find((r) => r.del);

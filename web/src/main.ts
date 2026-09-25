@@ -98,6 +98,10 @@ class Game {
   log: { text: string; t: number }[] = [];
   showPlasmid = false;
   buttons: Button[] = makeButtons();
+
+  /** Rebuild the strip: the debug setting adds or removes the floor arrows,
+   *  and the strip is built once at construction. */
+  refreshButtons(): void { this.buttons = makeButtons(this.settings.debug); }
   ring: RingGeom = { cx: 0, cy: 0, rInner: 0, rOuter: 0, rot: 0, used: 16 };
   // A pointer gesture is classified once on down and acted on once on up.
   // Deciding per-event is what let a button press open the plasmid on down and

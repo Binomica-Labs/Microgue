@@ -4951,3 +4951,57 @@ describe("quorum and resistance work through a real game", () => {
            `quorum went to ${String(g.quorum)}`).toBe(true);
   });
 });
+
+describe("developer mode walks the whole column", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("one tap per floor, all the way to the bottom, without clearing", async () => {
+    // Reported: the arrows stop at the last floor of the first zone. The
+    // gate is `isCleared` -- every floor must be emptied first -- and a
+    // boss floor makes that a wall. That rule is correct for PLAYERS and
+    // exactly what a developer needs to skip to reach floor twenty.
+    const { Game } = await import("../src/main.js");
+    const { MAX_FLOOR } = await import("../src/dungeon.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.settings = { ...g.settings, debug: true };
+    g.startRun(0, "heterotroph");
+    for (let i = 0; i < MAX_FLOOR + 4; i++) {
+      if (g.dungeon.floor >= MAX_FLOOR) break;
+      const was = g.dungeon.floor;
+      g.player.hp = g.player.maxhp;             // survive the trip
+      g.descend();
+      expect(g.dungeon.floor, `stuck on F${String(was)} with debug on`)
+        .toBeGreaterThan(was);
+    }
+    expect(g.dungeon.floor, "developer mode did not reach the bottom")
+      .toBe(MAX_FLOOR);
+    const errs = g.toasts.all().filter((x) => x.level === "error")
+      .map((x) => x.text).filter((t) => !t.includes("storage is full"));
+    expect(errs, "walking the column threw").toEqual([]);
+  });
+
+  it("without developer mode the clear-the-floor rule still holds", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(1, "heterotroph");
+    expect(g.settings.debug, "developer mode is on by default").toBe(false);
+    const was = g.dungeon.floor;
+    g.descend();
+    // an uncleared floor refuses -- the real rule, unchanged
+    const { Dungeon } = await import("../src/dungeon.js");
+    if (!Dungeon.isCleared(g.level)) {
+      expect(g.dungeon.floor, "an uncleared floor let the player through")
+        .toBe(was);
+    }
+  });
+});

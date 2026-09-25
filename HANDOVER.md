@@ -97,6 +97,49 @@ that is *almost* opaque is not atmospheric, it is noise a player has to
 learn to ignore. Opaque now.
 
 
+# v1.63.0 — the buttons say what they do
+
+## The hint was never drawn
+
+Every button has carried a `hint` since the beginning. It was displayed
+NOWHERE -- not as a label, not as a tooltip, not on any screen. Every
+control in the game was a bare symbol and the player was expected to infer
+"lay biofilm" from a shaded block.
+
+No glyph teaches "directed evolution", and making the symbols prettier does
+not help someone who cannot tell two buttons apart. Naming them is the fix;
+the symbol is what you recognise once you already know. Glyph above, label
+below, on every button.
+
+The hints were also written as sentences -- "strike the nearest thing" --
+which is fine for a tooltip and impossible under a 44pt button. Shortened to
+one word each, and `spec` pins a 9-character ceiling so the next one cannot
+overflow.
+
+Two glyphs were genuinely meaningless and changed:
+
+    map      U+229E squared plus -> U+22D4, which looks like a fork in a path
+    explore  U+2732 asterisk     -> U+21DD, a wandering line
+
+The rest were fine and were left alone. Churning working symbols is not the
+same as fixing broken ones.
+
+## The floor arrows are developer-only
+
+They stepped the column and mostly answered "the way down is choked",
+because `isCleared` requires emptying a floor first and a boss floor makes
+that a wall -- which is why they appeared to stop at the end of the first
+zone. A control that usually refuses teaches only to stop pressing it.
+
+`settings.debug` ("developer mode") now gates them. With it on they walk the
+whole column, one floor per tap, skipping the clear gate; `spec` pins that
+they reach MAX_FLOOR, and separately that WITHOUT it the clear-the-floor rule
+is completely unchanged.
+
+The strip is built once at construction, so toggling the setting calls
+`refreshButtons()` -- otherwise the arrows would appear only on next launch.
+
+
 # v1.62.0 — a rename is a migration
 
 ## Last release silently destroyed saves

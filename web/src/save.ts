@@ -46,6 +46,16 @@ export interface Settings {
   readonly reduceMotion: boolean;
   /** Sound off. Separate from reduce-motion; they are different needs. */
   readonly muted: boolean;
+  /**
+   * Developer mode.
+   *
+   * Exposes the floor arrows, which step the column one floor per tap and
+   * bypass the clear-the-floor gate. They were always on the button strip
+   * and always confusing: a player taps them, is told the way down is
+   * choked, and has learned nothing except that two buttons do not work.
+   * They are a development tool, so they live behind a switch.
+   */
+  readonly debug: boolean;
   readonly diagonal: boolean;
 }
 
@@ -107,7 +117,7 @@ export interface SaveData {
 
 export const DEFAULT_SETTINGS: Settings = {
   autoAttack: false, minimap: true,
-  zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true, muted: false,
+  zoom: 1, uiScale: 1, highContrast: false, reduceMotion: false, diagonal: true, muted: false, debug: false,
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -272,6 +282,7 @@ function parseSettings(v: unknown): Settings {
     // re-clamps the absolute value, so a generous bound here is safe.
     zoom: Math.min(Math.max(num(v["zoom"], 1), ZOOM_PREF_MIN), ZOOM_PREF_MAX),
     uiScale: Math.min(Math.max(num(v["uiScale"], 1), 0.5), 3),
+    debug: bool(v["debug"], false),
     highContrast: bool(v["highContrast"], false),
     reduceMotion: bool(v["reduceMotion"], false),
     diagonal: bool(v["diagonal"], true),

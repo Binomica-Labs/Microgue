@@ -242,7 +242,7 @@ describe("the copyright is everywhere it needs to be", () => {
     }) as unknown as CanvasRenderingContext2D;
     drawMenu(ctx, 393, 852, { top: 47, right: 0, bottom: 34, left: 0 }, 1.86,
              "main", [null, null, null, null], null,
-             { autoAttack: false, minimap: true, diagonal: false, highContrast: false, reduceMotion: false, muted: false });
+             { autoAttack: false, minimap: true, diagonal: false, highContrast: false, reduceMotion: false, muted: false, debug: false });
     const credit = texts.find((t) => t.includes("Binomica Labs"));
     expect(credit, "the main menu shows no copyright").toBeDefined();
     expect(credit).toContain("CC BY-NC-SA");
