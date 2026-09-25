@@ -261,3 +261,32 @@ describe("a loot card cannot print across its neighbours", () => {
     }
   });
 });
+
+describe("no screen leaks canvas state into the next one", () => {
+  it("every module that sets lineCap restores it", async () => {
+    // `lineCap` is GLOBAL canvas state. bench_render set it to "round" and
+    // never restored, so every later screen in the frame inherited it --
+    // the plasmid ring draws its wedges as thick stroked arcs, and round
+    // caps turned each one into a blob while a short unused-slot arc became
+    // a circle. One missing `restore()`, two symptoms, and a wrong
+    // diagnosis (I blamed the modal backdrop) before this was found.
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    const dir = join(fileURLToPath(new URL("..", import.meta.url)), "src");
+    const bad: string[] = [];
+    for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
+      const src = readFileSync(join(dir, f), "utf8");
+      const sets = (src.match(/ctx\.lineCap\s*=/g) ?? []).length;
+      if (sets === 0) continue;
+      const saves = (src.match(/ctx\.save\(\)/g) ?? []).length;
+      const restores = (src.match(/ctx\.restore\(\)/g) ?? []).length;
+      if (saves === 0 || saves !== restores) {
+        bad.push(`${f}: ${String(sets)} lineCap set(s), `
+          + `${String(saves)} save / ${String(restores)} restore`);
+      }
+    }
+    expect(bad, "a module sets lineCap without balanced save/restore")
+      .toEqual([]);
+  });
+});

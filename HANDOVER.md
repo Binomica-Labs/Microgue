@@ -97,6 +97,43 @@ that is *almost* opaque is not atmospheric, it is noise a player has to
 learn to ignore. Opaque now.
 
 
+# v1.58.0 — one missing restore(), and my wrong diagnosis
+
+## The ring "rescaling" was leaked canvas state
+
+`bench_render.ts` set `ctx.lineCap = "round"` and never restored it.
+`lineCap` is GLOBAL canvas state, so every screen drawn after the bench in
+that frame inherited it -- and the plasmid ring draws its wedges as thick
+stroked arcs. Round caps turned each wedge into a rounded blob, and a SHORT
+arc (an unused slot) became a circle.
+
+**Those circles are what I blamed on the modal backdrop last release.** The
+opaque backdrop was a fine change on its own, but it was treating a symptom
+and I said so at the time without knowing why I was right to doubt it. The
+cause was a missing `restore()` I had written myself one release earlier.
+
+Every other module that touches `lineCap` wraps it in save/restore; mine was
+the only one that did not. `spec` now scans src for the pattern, so the next
+one fails a test instead of a screenshot.
+
+## Drag to the bin, not to a row
+
+Dragging a part off the ring required landing exactly ON a drawn bin row, so
+a throw at the gap between rows, below the last one, or at the "PARTS BIN"
+header sprang back with no explanation. The intent -- get this off the ring
+-- is unambiguous well before the finger picks a row. Anywhere in the bin
+region now takes it.
+
+## Tandem terminators pay their own operon
+
+They already worked: downstream leak 0.0301 -> 0.0000, less wasted
+transcription. But that is INVISIBLE to a player with no downstream gene --
+two terminators simply did nothing they could see. Cleanly released
+polymerase is recycled polymerase, so the operon that paid for the seal now
+gets it back: expression 0.0918 -> 0.1029. `spec` pins that a third
+terminator does NOT stack another boost.
+
+
 # v1.57.0 — THE BENCH as a tree
 
 A list of rows says nothing about what it is listing: a list of genes looks

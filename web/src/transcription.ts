@@ -40,6 +40,16 @@ const POLARITY = 0.82;
  *  fraction of its own value: the tandem bonus. See the walk. */
 export const TANDEM = 0.4;
 
+/**
+ * What a sealed (tandem) terminator gives back to its own operon.
+ *
+ * Cleanly released polymerase is recycled polymerase. The mechanic already
+ * stopped the downstream leak, but that is invisible to a player who has no
+ * downstream gene -- two terminators simply did nothing they could see. This
+ * is the part they feel.
+ */
+export const TANDEM_BOOST = 1.12;
+
 export interface Reading {
   readonly slot: number;
   readonly id: GeneId;
@@ -115,6 +125,9 @@ export function transcribe(
       const readings: Reading[] = [];
       let flow = 1;
       let rank = 0;
+      // Set when this walk crosses a tandem run. Applied at the END, to the
+      // genes already read -- they are the operon the seal closes.
+      let tandemSeal = false;
       let relief = 0;
       for (let step = 1; step < n; step++) {
         const at = norm(p + dir * step);
@@ -137,7 +150,15 @@ export function transcribe(
           // and later in a run read through at a fraction of their own value,
           // so two hairpins (0.38 each) stop harder than 0.38 x 0.38.
           const prev = slots[norm(at - dir)];
-          if (prev?.kind === "terminator") rt *= TANDEM;
+          if (prev?.kind === "terminator") {
+            rt *= TANDEM;
+            // ...and the operon it CLOSES gets the benefit. A sealed
+            // terminator releases polymerase cleanly instead of letting it
+            // run on, so it is back at the promoter sooner: less waste is
+            // more throughput on the operon that paid for it. Modest, and
+            // it only ever applies to a run that is genuinely tandem.
+            tandemSeal = true;
+          }
           flow *= Math.min(Math.max(rt, 0), 1);
           if (flow < FLOOR) break;
           continue;                                   // and keep reading
@@ -150,7 +171,10 @@ export function transcribe(
         relief = Math.max(relief, modEffect(part.mods).relief);
         rank++;
       }
-      return readings;
+      // The seal's dividend, to the genes this walk actually read.
+      return tandemSeal
+        ? readings.map((r) => ({ ...r, flow: r.flow * TANDEM_BOOST }))
+        : readings;
     };
 
     const readings = walk(1);

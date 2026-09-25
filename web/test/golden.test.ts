@@ -45,7 +45,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  v1.50 first: 358 lines of 92649, every one between the parts bin's clip
  *  rect and the plasmid help text -- the symbol tiles and meters, rows 42u
  *  instead of 34u, and the help text below moved 16px down with them. */
-const GOLDEN = "b6d748eb28cdfc87";
+const GOLDEN = "8e6acb1c8f56ba43";
 
 const trace: string[] = [];
 

@@ -32,6 +32,14 @@ export function drawTree(
   const shift = top;
 
   // The trunk: the chromosome everything is anchored to.
+  //
+  // SAVED, because `lineCap` is global canvas state and leaving it on
+  // "round" leaked into every later screen in the frame. The plasmid ring
+  // draws its wedges as thick stroked arcs, so round caps turned each one
+  // into a blob -- and a short unused-slot arc became a CIRCLE. Those were
+  // the "grey circles floating around the plasmid" I wrongly blamed on the
+  // world showing through the backdrop last release.
+  ctx.save();
   ctx.strokeStyle = "#3a4a40";
   ctx.lineCap = "round";
   ctx.lineWidth = Math.max(11 * u, 5);
@@ -133,5 +141,6 @@ export function drawTree(
     }
   }
   ctx.textAlign = "left";
+  ctx.restore();
   return { layout: l, rows };
 }

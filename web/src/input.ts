@@ -465,7 +465,17 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
             _g.gesture = "none";
             return;
           }
-          if (_g.binRows.some((r) => inBoxOf(r.box, x, y))) {
+          // Anywhere in the BIN REGION, not just exactly on a row.
+          //
+          // It required a hit on a drawn row, so a part thrown at the gap
+          // between two rows, or below the last one, or at the "PARTS BIN"
+          // header, just sprang back with no explanation. The player's
+          // intent -- get this off the ring -- is unambiguous well before
+          // their finger lands on a specific row.
+          const binTop = _g.binRows[0]?.box.y
+            ?? (_g.ring.cy + _g.ring.rOuter + 8 * uiUnit(innerWidth, innerHeight, _g.settings.uiScale));
+          if (y >= binTop - 26 * uiUnit(innerWidth, innerHeight, _g.settings.uiScale)
+              || _g.binRows.some((r) => inBoxOf(r.box, x, y))) {
             const r = _g.genome.uninstall(_g.dragFrom);   // ring -> bin
             if (r.ok) { _g.selected = null; _g.save(); } else _g.note(r.err);
           } else if (target !== null && target !== _g.dragFrom) {

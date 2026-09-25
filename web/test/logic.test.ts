@@ -10890,3 +10890,57 @@ describe("the tree grows into the space it has", () => {
     }
   });
 });
+
+describe("a tandem terminator seals AND pays", () => {
+  const build = (parts: readonly { kind: string; id: string }[]): Plasmid => {
+    const p = new Plasmid();
+    p.integrated = 20;
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    let slot = (ori + 1) % p.usableSlots;
+    for (const x of parts) {
+      p.stash(x.kind === "gene"
+        ? { kind: "gene", id: x.id as bio.GeneId, level: 1, mods: [],
+            allele: WILD_TYPE }
+        : { kind: x.kind as "promoter", id: x.id as never });
+      p.install(p.bin.length - 1, slot);
+      slot = (slot + 1) % p.usableSlots;
+    }
+    return p;
+  };
+  const P = { kind: "promoter", id: "j23106" };
+  const T = { kind: "terminator", id: "rrnbt1" };
+
+  it("two terminators stop the downstream leak a single one lets through", () => {
+    const one = build([P, { kind: "gene", id: "psbA" }, T,
+                       { kind: "gene", id: "katG" }]);
+    const two = build([P, { kind: "gene", id: "psbA" }, T, T,
+                       { kind: "gene", id: "katG" }]);
+    expect(one.expression("katG", 4), "a single terminator leaked nothing, "
+      + "so there is no leak to seal and this test measures nothing")
+      .toBeGreaterThan(0);
+    expect(two.expression("katG", 4), "the tandem did not seal the leak")
+      .toBeLessThan(one.expression("katG", 4));
+  });
+
+  it("and the operon it closes gets more out, not just less waste", () => {
+    // Sealing was invisible to a player with no downstream gene: two
+    // terminators simply did nothing they could see. Cleanly released
+    // polymerase is recycled polymerase, so the operon that paid for the
+    // seal gets the benefit.
+    const one = build([P, { kind: "gene", id: "psbA" }, T]);
+    const two = build([P, { kind: "gene", id: "psbA" }, T, T]);
+    expect(two.expression("psbA", 4), "a tandem terminator did nothing for "
+      + "its own operon").toBeGreaterThan(one.expression("psbA", 4));
+    // ...and it is a boost, not a runaway
+    expect(two.expression("psbA", 4) / one.expression("psbA", 4),
+           "the tandem boost is too large").toBeLessThan(1.3);
+  });
+
+  it("three terminators do not compound into an exploit", () => {
+    const two = build([P, { kind: "gene", id: "psbA" }, T, T]);
+    const three = build([P, { kind: "gene", id: "psbA" }, T, T, T]);
+    expect(three.expression("psbA", 4),
+           "each extra terminator stacks another boost")
+      .toBeCloseTo(two.expression("psbA", 4), 5);
+  });
+});
