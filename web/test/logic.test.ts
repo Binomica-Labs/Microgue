@@ -10944,3 +10944,125 @@ describe("a tandem terminator seals AND pays", () => {
       .toBeCloseTo(two.expression("psbA", 4), 5);
   });
 });
+
+describe("the levelled abilities hold up at their edges", () => {
+  it("sporulation is total immunity, and it EXPIRES", async () => {
+    // `armour: 0` multiplies damage to nothing. A surge that never expired
+    // would be permanent invulnerability from one 18-ATP cast.
+    const { ABILITIES } = await import("../src/abilities.js");
+    const spore = ABILITIES.find((a) => a.id === "spore");
+    expect(spore, "sporulation is gone").toBeDefined();
+    if (!spore) return;
+    expect(spore.power, "a spore that is not total immunity").toBe(0);
+    expect(spore.linger, "a spore that never ends").toBeGreaterThan(0);
+    expect(spore.linger, "a spore that lasts for ever in practice")
+      .toBeLessThanOrEqual(10);
+    // and it costs more than it gives back per turn
+    expect(spore.cooldown, "a spore with no cooldown is permanent immunity")
+      .toBeGreaterThan(spore.linger);
+  });
+
+  it("every ability's cost, cooldown and range are sane numbers", async () => {
+    const { ABILITIES } = await import("../src/abilities.js");
+    for (const a of ABILITIES) {
+      for (const [k, v] of Object.entries({
+        cost: a.cost, cooldown: a.cooldown, power: a.power,
+        range: a.range, linger: a.linger,
+      })) {
+        expect(Number.isFinite(v), `${a.id}.${k} = ${String(v)}`).toBe(true);
+        expect(v, `${a.id}.${k} is negative`).toBeGreaterThanOrEqual(0);
+      }
+      expect(a.cost, `${a.id} is free`).toBeGreaterThan(0);
+      expect(a.range, `${a.id} reaches across the whole floor`).toBeLessThan(12);
+      expect(a.glyph.length, `${a.id} has no glyph`).toBeGreaterThan(0);
+    }
+  });
+
+  it("no two abilities share an id, and each names a real gene", async () => {
+    const { ABILITIES } = await import("../src/abilities.js");
+    const ids = ABILITIES.map((a) => a.id);
+    expect(new Set(ids).size, "two abilities share an id").toBe(ids.length);
+    for (const a of ABILITIES) {
+      expect(a.gene in bio.GENES, `${a.id} names ${a.gene}, which is not a gene`)
+        .toBe(true);
+    }
+  });
+});
+
+describe("bulk loot at its edges", () => {
+  it("eat all on a pile of nothing but symbionts is a no-op, not a loss", async () => {
+    const { eatAll } = await import("../src/bulk_loot.js");
+    const g = { dead: false, player: { hp: 10, maxhp: 20, atp: 5, atpMax: 50 },
+                note: () => undefined, fx: { add: () => undefined },
+                genome: { has: () => true } };
+    const d = { x: 0, y: 0, items: [
+      { kind: "symbiont", id: "hydrogenosome" },
+      { kind: "symbiont", id: "hydrogenosome" },
+    ] } as unknown as Parameters<typeof eatAll>[1];
+    const r = eatAll(g as never, d);
+    expect(r.taken, "a symbiont was digested").toBe(0);
+    expect(d.items.length, "symbionts were destroyed").toBe(2);
+  });
+
+  it("eat all on a dead player does nothing", async () => {
+    const { eatAll } = await import("../src/bulk_loot.js");
+    const g = { dead: true, player: { hp: 0, maxhp: 20, atp: 5, atpMax: 50 },
+                note: () => undefined, fx: { add: () => undefined },
+                genome: { has: () => true } };
+    const d = { x: 0, y: 0, items: [
+      { kind: "substrate", id: "glucose" }] } as unknown as Parameters<typeof eatAll>[1];
+    expect(eatAll(g as never, d).taken).toBe(0);
+    expect(d.items.length, "a dead player still ate").toBe(1);
+  });
+});
+
+describe("today's systems still work through a warm cache", () => {
+  // Every one of these was built or changed today, and they all read
+  // through the memo added in v1.54.0. A cache that was correct when each
+  // landed alone can still be stale where two of them meet.
+
+  it("completing a KEGG module moves the cost even with the memo warm", async () => {
+    const { MODULES } = await import("../src/kegg.js");
+    const { masteryOf } = await import("../src/module_reward.js");
+    const m0 = MODULES[0];
+    if (!m0) return;
+    const all = m0.steps.map((s) => s.gene);
+    const p = new Plasmid();
+    p.integrated = 24;
+    for (const g of all.slice(0, -1)) {
+      p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.assemble(all.slice(0, -1));
+    const warm = p.atpCost(4);                 // warm, module INCOMPLETE
+    expect(warm, "nothing is costing anything").toBeGreaterThan(0);
+    const last = all[all.length - 1];
+    if (last === undefined) return;
+    p.stash({ kind: "gene", id: last, level: 1, mods: [], allele: WILD_TYPE });
+    p.assemble(all);                           // now COMPLETE
+    expect(masteryOf(p.carried()).complete.length,
+           "the module did not complete").toBeGreaterThan(0);
+    expect(p.atpCost(4), "a warm memo hid the module dividend")
+      .not.toBeCloseTo(warm, 9);
+  });
+
+  it("adding a second terminator moves expression even with the memo warm", () => {
+    const p = new Plasmid();
+    p.integrated = 20;
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    let slot = (ori + 1) % p.usableSlots;
+    const put = (part: Part): void => {
+      p.stash(part);
+      p.install(p.bin.length - 1, slot);
+      slot = (slot + 1) % p.usableSlots;
+    };
+    put({ kind: "promoter", id: "j23106" });
+    put({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    put({ kind: "terminator", id: "rrnbt1" });
+    const warm = p.expression("psbA", 4);
+    expect(warm, "psbA is not expressing, so this measures nothing")
+      .toBeGreaterThan(0);
+    put({ kind: "terminator", id: "rrnbt1" });
+    expect(p.expression("psbA", 4), "a warm memo hid the tandem seal")
+      .toBeGreaterThan(warm);
+  });
+});

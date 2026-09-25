@@ -68,6 +68,11 @@ export function buildOperon(_p: Plasmid, genes: readonly GeneId[]): Result {
         const p = _p.slots[at];
         if (p) parts.push(p);
         _p.slots[at] = null;
+        // Writing a slot directly bypasses `install`/`swap`, so nothing
+        // invalidates the memoised reads. It happened to be harmless here
+        // because later calls in this path invalidate anyway -- which is
+        // luck, not a contract. Any direct slot write must touch().
+        _p.touch();
       } else {
         const bi = _p.bin.findIndex((p) => p.kind === "gene" && p.id === g);
         const p = _p.bin[bi];

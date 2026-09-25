@@ -155,8 +155,13 @@ export function castAbility(
       }
       const got = pool[rng.int(pool.length)];
       if (!got) return "The pilus finds nothing.";
-      _g.genome.stash({ kind: "gene", id: got, level: 1, mods: [],
-                        allele: WILD_TYPE });
+      // `stash` REFUSES when the bin is full, and its result was ignored --
+      // the gene vanished while the player was still charged the ATP and
+      // the cooldown. Refuse before spending, the way every other ability
+      // that cannot land does.
+      const took = _g.genome.stash({ kind: "gene", id: got, level: 1,
+                                     mods: [], allele: WILD_TYPE });
+      if (!took.ok) return `No room for ${got}. The pilus withdraws.`;
       _g.fx.add({ kind: "bolt", t0: _g.now, dur: 300, colour: "#8e6cf0",
                   seed: _g.now, from: { x: px, y: py },
                   to: { x: donor.x, y: donor.y } });

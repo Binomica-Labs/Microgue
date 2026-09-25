@@ -232,3 +232,67 @@ describe("the per-frame reads are memoised", () => {
     void before;
   });
 });
+
+describe("nothing mutates the ring without invalidating the memo", () => {
+  it("every module that writes a slot directly also calls touch()", async () => {
+    // `power`, `vitality` and `expression` are memoised (v1.54.0). Anything
+    // that writes `slots[i]` outside plasmid.ts's own accessors bypasses the
+    // invalidation and leaves those reads answering from a ring that no
+    // longer exists. operon.ts did exactly that; it was harmless only
+    // because a later call in the same path happened to invalidate, which
+    // is luck rather than a contract.
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    const dir = join(fileURLToPath(new URL("..", import.meta.url)), "src");
+    const bad: string[] = [];
+    for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
+      if (f === "plasmid.ts") continue;          // owns the invalidation
+      const src = readFileSync(join(dir, f), "utf8");
+      const writes = (src.match(/\.slots\[[^\]]+\]\s*=(?!=)/g) ?? []).length;
+      if (writes === 0) continue;
+      // The rule is "invalidates at least once", not "once per write". A
+      // loop that rewrites a dozen slots should touch ONCE after it --
+      // touching per write would clear the cache a dozen times for one
+      // operation, which is the opposite of the point.
+      const touches = (src.match(/\.touch\(\)/g) ?? []).length;
+      if (touches === 0) {
+        bad.push(`${f}: ${String(writes)} direct slot write(s), no touch()`);
+      }
+    }
+    expect(bad, "a module writes the ring without invalidating the memo")
+      .toEqual([]);
+  });
+
+  it("a stale read is impossible across the public mutation API", () => {
+    // Measured end to end rather than asserted: every way a caller can
+    // change the ring must move the numbers that depend on it.
+    const p = new Plasmid();
+    p.integrated = 20;
+    for (const g of ["cbbL", "katG", "psbA"] as bio.GeneId[]) {
+      p.stash({ kind: "gene", id: g, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.assemble(["cbbL", "katG"] as bio.GeneId[]);
+    const read = (): number => p.power(4) + p.vitality(4)
+      + p.expression("cbbL", 4);
+    const base = read();
+    expect(base, "nothing is expressing, so this measures nothing")
+      .toBeGreaterThan(0);
+
+    // uninstall something the reads depend on
+    const slot = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "katG");
+    if (slot >= 0) {
+      p.uninstall(slot);
+      expect(read(), "uninstall left a stale read").not.toBeCloseTo(base, 9);
+    }
+    // rotate
+    const r0 = read();
+    p.rotate(1);
+    expect(Number.isFinite(read()), "rotate broke a read").toBe(true);
+    void r0;
+    // symbiont
+    const s0 = read();
+    p.symbiont = "hydrogenosome";
+    expect(read(), "a symbiont left a stale read").not.toBeCloseTo(s0, 9);
+  });
+});

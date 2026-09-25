@@ -97,6 +97,53 @@ that is *almost* opaque is not atmospheric, it is noise a player has to
 learn to ignore. Opaque now.
 
 
+# v1.59.0 — hardening everything today touched
+
+A pass over v1.52-v1.58 together, not each alone. Three real bugs, all in
+the seam between two things that were each correct on their own.
+
+## The memo hazard I flagged, found twice
+
+v1.54.0's note said: any public mutable field a memoised value reads is a
+stale cache waiting to happen. Audited every input the memoised reads
+consume. `supply` is in the key, `symbiont` invalidates -- both fine. But
+the RING itself can be written directly:
+
+* `operon.ts` wrote `slots[at] = null` and never invalidated. Harmless only
+  because a later call in that path happened to invalidate -- luck, not a
+  contract.
+* `stack.ts` wrote three slots with no invalidation at all, and COULD NOT
+  invalidate: its structural parameter type omitted `touch()` entirely, so
+  the capability was not even reachable. The type now requires it.
+
+`spec` scans src for direct slot writes without a `touch()`. The rule is
+"invalidates at least once", not "once per write" -- a loop that rewrites a
+dozen slots should touch ONCE after it, and a scan demanding one touch per
+write would push the code into clearing the cache a dozen times for one
+operation.
+
+## Conjugation could eat your reward
+
+`castAbility`'s steal ignored `stash`'s result. With a full bin the stolen
+gene vanished while the player was still charged 14 ATP and a 12-turn
+cooldown. It refuses before spending now, like every other ability that
+cannot land.
+
+## Warm-cache interaction tests
+
+Each of today's systems reads through the v1.54.0 memo, and a cache correct
+for each alone can still be stale where two meet. Pinned: completing a KEGG
+module moves the ATP cost with the memo already warm, and adding a second
+terminator moves expression with it already warm. Both measured end to end,
+both with a guard that the baseline is non-zero -- a comparison of 0 against
+0 proves nothing, which a first attempt at the cofactor check did before I
+caught it.
+
+Plus edges on the v1.52 abilities: sporulation is total immunity so `spec`
+pins that it expires AND that its cooldown outlasts its duration; every
+ability's numbers are finite, positive and bounded; no two share an id.
+
+
 # v1.58.0 — one missing restore(), and my wrong diagnosis
 
 ## The ring "rescaling" was leaked canvas state

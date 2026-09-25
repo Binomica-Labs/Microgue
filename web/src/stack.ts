@@ -78,6 +78,10 @@ export function rescueStranded(
     slots: (Part | null)[];
     bin: Part[];
     stash: (part: Part) => { ok: boolean };
+    /** Required: this function writes slots directly, so it must be able to
+     *  invalidate the memoised reads. The structural type omitted it, which
+     *  meant this module COULD NOT invalidate even in principle. */
+    touch: () => void;
   },
   from: number, to: number,
 ): void {
@@ -96,4 +100,9 @@ export function rescueStranded(
       if (free >= 0) p.slots[free] = part;
     }
   }
+  // Writing slots directly bypasses install/uninstall, so nothing
+  // invalidates the memoised reads (power, vitality, expression). Once,
+  // after the whole shrink -- not per slot, which would clear the cache
+  // a dozen times for one operation.
+  p.touch();
 }
