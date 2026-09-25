@@ -21,6 +21,7 @@ export type Glyph =
   | { kind: "promoter" }
   | { kind: "terminator" }
   | { kind: "origin" }
+  | { kind: "fragment" }
   | { kind: "modifier" }
   | { kind: "substrate" }
   | { kind: "symbiont" };
@@ -36,6 +37,9 @@ export function glyphOfItem(it: Item): Glyph {
   if (it.kind === "cassette") {
     return it.gene === "ori" ? { kind: "origin" } : { kind: "cds", pathway: GENES[it.gene].pathway };
   }
+  // A fragment gets its own emblem: it is not a cassette yet and drawing it
+  // as one would promise the player something they have not paid for.
+  if (it.kind === "fragment") return { kind: "fragment" };
   return { kind: it.kind };
 }
 
@@ -125,6 +129,20 @@ export function drawGlyph(
       ctx.moveTo(cx - s * 0.26, y + s * 0.26);
       ctx.lineTo(cx + s * 0.26, y + s * 0.26);
       ctx.stroke();
+      break;
+    }
+    case "fragment": {
+      // A gel lane: a bare double strand with ragged ends and no arrow,
+      // because an arrow would claim a reading frame the player has not
+      // paid to learn. Three bands, the way a gel actually looks.
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = lw;
+      for (const f of [0.3, 0.5, 0.7]) {
+        ctx.beginPath();
+        ctx.moveTo(x + s * 0.22, y + s * f);
+        ctx.lineTo(x + s * 0.78, y + s * f);
+        ctx.stroke();
+      }
       break;
     }
     case "origin": {

@@ -87,6 +87,10 @@ export function pickupLine(it: Item, atp: number, blocked: GeneId | null): strin
       : MODIFIERS[it.id].name;
     return `You take up a ${tier.name} ${it.kind}: ${what}.`;
   }
+  if (it.kind === "fragment") {
+    return `You take up a ${it.frag.kb.toFixed(1)} kb fragment. `
+      + "Unreadable until you sequence it.";
+  }
   const s = SUBSTRATES[it.id];
   if (blocked !== null) {
     return `You take up ${s.name} (${s.formula}), but nothing in you can use it. ` +

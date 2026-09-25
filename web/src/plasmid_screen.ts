@@ -131,7 +131,11 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
       ? ["promoter → gene → terminator switches an operon on",
          "tap a part below to inspect it, then install or catabolise",
          "drag the list to scroll · drag outside the ring to spin it",
-         "expression costs ATP; respiration pays less the deeper you go"]
+         // This line used to read "expression costs ATP; respiration pays
+         // less the deeper you go", which told the player to be frugal
+         // while the maths rewarded filling the ring. Now the maths has a
+         // real tradeoff, the text can state it.
+         "polymerase is finite: more genes means less of each"]
       : describeSlot(_g.genome, _g.selected, _g.dungeon.depth);
     ctx.textAlign = "left";
     // Shrink to the room that is actually left, and stop when there is none.

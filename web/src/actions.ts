@@ -14,6 +14,11 @@ import { SIZES } from "./behaviour.js";
 import { music, play, stopMusic } from "./audio.js";
 import { pentatonicOf, voicing } from "./music.js";
 import { factor as rFactor, selected } from "./resistance.js";
+import { fragmentOf } from "./fragment.js";
+
+/** How many gene drops arrive unsequenced. Most, but not all: a run where
+ *  nothing was readable without paying would have no floor under it. */
+const FRAGMENT_SHARE = 0.7;
 import { KILL_SIGNAL, raise as qRaise } from "./quorum.js";
 import { lyse } from "./cast.js";
 import { daylight, isNight } from "./cycle.js";
@@ -583,7 +588,16 @@ export function t_attack(_g: Game, m: Mob): void {
         : stackable.length > 0 ? 0.6
         : 0.2;
       if (gene !== undefined && rng.next() < chance) {
-        loot.push({ kind: "cassette", gene, allele: rollAllele(rng, _g.dungeon.depth) });
+        // Most genes now arrive UNSEQUENCED. You get the gel -- a length and
+        // a melting hint -- and pay ATP to learn the rest. A cassette that
+        // arrives fully characterised is a number going up; one you have to
+        // pay to look at is a decision. See fragment.ts.
+        //
+        // Not all of them: a run with nothing readable would be a run with
+        // no floor under it, so a minority still drop already-characterised.
+        loot.push(rng.next() < FRAGMENT_SHARE
+          ? { kind: "fragment", frag: fragmentOf(gene, rng) }
+          : { kind: "cassette", gene, allele: rollAllele(rng, _g.dungeon.depth) });
       }
       // Extra cassettes for an elite, rolled at depth like any other. A
       // second copy of something you hold now STACKS rather than being wasted,

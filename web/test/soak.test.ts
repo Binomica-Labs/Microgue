@@ -5005,3 +5005,103 @@ describe("developer mode walks the whole column", () => {
     }
   });
 });
+
+describe("everything built today, running at once", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  const mk = async () => {
+    const { Game } = await import("../src/main.js");
+    return new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+  };
+
+  it("burden, quorum, resistance and fragments coexist for 400 turns", async () => {
+    // Six systems landed today and each was tested alone. This is the only
+    // test that runs them together, which is where the seams are.
+    const g = await mk();
+    g.startRun(0, "heterotroph");
+    g.quorum = 0.7;                            // an alarmed floor
+    for (let i = 0; i < 400; i++) {
+      if (g.dead) break;
+      g.player.hp = g.player.maxhp;
+      g.press(i % 5 === 0 ? "left" : "wait");
+      g.frame(100 + i * 40);
+      // every derived number stays real, every turn
+      for (const [k, v] of Object.entries({
+        power: g.genome.power(g.dungeon.depth),
+        load: g.genome.load(g.dungeon.depth),
+        share: g.genome.burdenShare(g.dungeon.depth),
+        quorum: g.quorum, atp: g.player.atp,
+      })) {
+        expect(Number.isFinite(v), `turn ${String(i)}: ${k} = ${String(v)}`)
+          .toBe(true);
+      }
+      expect(g.genome.burdenShare(g.dungeon.depth),
+             `turn ${String(i)}: share left 0..1`).toBeGreaterThan(0);
+      expect(g.genome.burdenShare(g.dungeon.depth)).toBeLessThanOrEqual(1);
+    }
+    const errs = g.toasts.all().filter((x) => x.level === "error")
+      .map((x) => x.text).filter((t) => !t.includes("storage is full"));
+    expect(errs, "the six systems together threw").toEqual([]);
+  });
+
+  it("an overloaded ring is always recoverable", async () => {
+    // Burden must never be able to hand the player a dead position. If
+    // filling the ring could strand you, it would be a trap rather than a
+    // tradeoff -- and a roguelike that can deal an unwinnable hand is
+    // broken, not difficult.
+    const g = await mk();
+    g.startRun(1, "heterotroph");
+    const genes: bio.GeneId[] = ["cbbL", "katG", "psbA", "sodA", "celA",
+                                 "groL", "recA", "uvrA"];
+    for (const id of genes) {
+      g.genome.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    g.genome.assemble(genes);
+    const loaded = g.genome.load(g.dungeon.depth);
+    // uninstalling ALWAYS reduces the load -- the way out is always open
+    let removed = 0;
+    for (let k = 0; k < 6; k++) {
+      const i = g.genome.slots.findIndex(
+        (s) => s?.kind === "gene" && s.id !== "ori");
+      if (i < 0) break;
+      g.genome.uninstall(i);
+      removed++;
+    }
+    if (removed > 0) {
+      expect(g.genome.load(g.dungeon.depth),
+             "unloading the ring did not reduce the load").toBeLessThan(loaded);
+    }
+    expect(g.genome.burdenShare(g.dungeon.depth),
+           "an emptied ring is still throttled").toBeGreaterThan(0.5);
+  });
+
+  it("sequencing refunds when the bin cannot take the gene", async () => {
+    // The ability version of this bug cost 14 ATP and a cooldown for
+    // nothing. The same shape here would charge a player to read a fragment
+    // and then drop it.
+    const { sequencingCost } = await import("../src/fragment.js");
+    const g = await mk();
+    g.startRun(2, "heterotroph");
+    // fill the bin
+    for (let i = 0; i < 40; i++) {
+      g.genome.stash({ kind: "gene", id: "cbbL", level: 1, mods: [],
+                       allele: WILD_TYPE });
+    }
+    const atp0 = g.player.atp = 500;
+    const frag = { kind: "fragment" as const,
+                   frag: { gene: "katG" as bio.GeneId, kb: 2.2, gc: 0.5 } };
+    const took = g.take(frag);
+    if (!took) {
+      expect(g.player.atp, "a refused sequence still charged the player")
+        .toBe(atp0);
+    } else {
+      expect(g.player.atp, "a successful sequence charged nothing")
+        .toBe(atp0 - sequencingCost(2.2));
+    }
+  });
+});

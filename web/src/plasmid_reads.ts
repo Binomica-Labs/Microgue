@@ -27,7 +27,12 @@ export function p_computeExpression(_p: Plasmid, id: GeneId, depth: number): num
   // one bad frame cannot make every downstream number NaN for the rest of
   // the run -- expression, power, vitality and combat all read through _p.
   const s = Number.isFinite(_p.supply) ? Math.min(Math.max(_p.supply, 0), 1) : 1;
-  return _p.rawExpression(id, depth) * s;
+  // BURDEN. Polymerase and ribosomes are finite and shared, so what this
+  // gene actually gets is its raw demand times the share the whole ring can
+  // be given. Without this, per-gene expression never diluted however many
+  // genes shared a promoter, and the ring had no optimum -- only a
+  // direction. See burden.ts.
+  return _p.rawExpression(id, depth) * s * _p.burdenShare(depth);
 }
 
 export function p_computeVitality(_p: Plasmid, depth: number): number {

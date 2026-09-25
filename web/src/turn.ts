@@ -127,6 +127,37 @@ export function t_take(_g: Game, it: Item): boolean {
                          "info", _g.now);
         return true;
       }
+      if (it.kind === "fragment") {
+        // SEQUENCE IT. The whole point: you pay ATP to find out what you
+        // picked up, and the price scales with the length you could already
+        // see on the gel. Refusing when you cannot afford it leaves the
+        // fragment on the floor, which is correct -- it is still there when
+        // you can.
+        const cost = sequencingCost(it.frag.kb);
+        if (_g.player.atp < cost) {
+          _g.note(`Sequencing that needs ${String(cost)} ATP. `
+            + "The fragment waits.");
+          return false;
+        }
+        _g.player.atp -= cost;
+        const rng = makeRng(_g.turnSeed++);
+        const allele = rollAllele(rng, _g.dungeon.depth);
+        const r = _g.genome.stash({ kind: "gene", id: it.frag.gene, level: 1,
+                                    mods: [], allele });
+        if (!r.ok) {
+          _g.player.atp += cost;             // nothing read, nothing charged
+          _g.toasts.push(r.err, "warn", _g.now);
+          return false;
+        }
+        const rarity = alleleRarity(it.frag.gene, allele);
+        _g.note(`${String(cost)} ATP of sequencing. It reads as `
+          + `${alleleName(it.frag.gene, allele)}.`);
+        _g.toasts.push(`${RARITY[rarity].name}: `
+          + alleleName(it.frag.gene, allele), "info", _g.now);
+        _g.fx.add({ kind: "ring", t0: _g.now, dur: 520, x: _g.player.x,
+                    y: _g.player.y, colour: RARITY[rarity].colour, r: 1.4 });
+        return true;
+      }
       const part: Part = it.kind === "promoter"
         ? { kind: "promoter", id: it.id }
         : { kind: "terminator", id: it.id };
@@ -258,6 +289,8 @@ import { play } from "./audio.js";
 import { crossingLine, decay as qDecay, levelOf }
   from "./quorum.js";
 import { relax } from "./resistance.js";
+import { sequencingCost } from "./fragment.js";
+import { alleleName, alleleRarity, rollAllele } from "./allele.js";
 import { chanceUnder } from "./fission.js";
 import { tickSecretions } from "./cast.js";
 import type { Intent } from "./combat.js";

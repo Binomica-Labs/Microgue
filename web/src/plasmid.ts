@@ -17,6 +17,7 @@
 import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
 import { p_atpBalance, p_atpCost, p_atpGain, p_wastedTranscription }
   from "./plasmid_atp.js";
+import { BASE_CAPACITY, demandOf, loadOf, shareOf } from "./burden.js";
 import { p_computeExpression, p_computePower, p_computeVitality }
   from "./plasmid_reads.js";
 import { p_transact } from "./plasmid_tx.js";
@@ -612,6 +613,47 @@ export class Plasmid {
 
   /** Expression before the ATP brownout. Cost is computed from this, so the
    *  two do not chase each other. */
+  /**
+   * The share of its demand each construct actually receives.
+   *
+   * Memoised on the same map as everything else -- it reads every gene on
+   * the ring, so computing it per gene per frame would be quadratic in the
+   * one place that is read most.
+   */
+  burdenShare(depth: number): number {
+    const key = `bs${String(depth)}:${String(this.supplyBucket())}`;
+    const hit = this.memoAtp.get(key);
+    if (hit !== undefined) return hit;
+    const genes: { id: GeneId; raw: number }[] = [];
+    for (const s of this.slots) {
+      if (s?.kind !== "gene" || s.id === "ori") continue;
+      genes.push({ id: s.id, raw: this.rawExpression(s.id, depth) });
+    }
+    return this.memo(key, shareOf(demandOf(genes), this.capacity()));
+  }
+
+  /**
+   * What the cell can make.
+   *
+   * FLAT. I first scaled this with strain level, and a test caught that it
+   * broke a rule the game already had: levelling EXPANDS the plasmid (more
+   * slots) rather than granting power. Tying capacity to level would have
+   * quietly made levelling a power-up, which is a design decision I was not
+   * making deliberately -- I was just reaching for a knob. Capacity is a
+   * property of the cell; what you do with it is the player's problem.
+   */
+  capacity(): number { return BASE_CAPACITY; }
+
+  /** How hard the ring is straining right now, for the readout. */
+  load(depth: number): number {
+    const genes: { id: GeneId; raw: number }[] = [];
+    for (const s of this.slots) {
+      if (s?.kind !== "gene" || s.id === "ori") continue;
+      genes.push({ id: s.id, raw: this.rawExpression(s.id, depth) });
+    }
+    return loadOf(demandOf(genes), this.capacity());
+  }
+
   rawExpression(id: GeneId, depth: number): number {
     const slot = this.slots.find((p) => p?.kind === "gene" && p.id === id);
     if (slot?.kind !== "gene") return 0;

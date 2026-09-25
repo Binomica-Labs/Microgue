@@ -7,6 +7,7 @@
 // spent on top of it, and for a damaged cell repair is usually the larger of
 // the two.
 
+import { strainLine, strainOf } from "./burden.js";
 import type { Game } from "./main.js";
 
 export function r_ringReadout(_g: Game, u: number): void {
@@ -57,10 +58,23 @@ export function r_ringReadout(_g: Game, u: number): void {
     atpText,
     _g.ring.cx, _g.ring.cy + 10 * u);
   ctx.fillStyle = "#8fa89a";
+  // Capacity is now the ring's real constraint, so it has to be on the ring.
+  // A player cannot make a tradeoff they cannot see, and the whole point of
+  // burden is that it is a tradeoff.
+  const load = _g.genome.load(d);
   const powerText = `power ${_g.genome.power(d).toFixed(1)}`
-    + (_g.genome.burden() > 0 ? `   burden ${String((_g.genome.burden() * 100) | 0)}%` : "")
+    + `   capacity ${String(Math.round(load * 100))}%`
     + (_g.genome.supply < 0.99 ? `   brownout ${String((_g.genome.supply * 100) | 0)}%` : "");
   fit(powerText, Math.min(11 * u, kbSize * 0.75));
   ctx.fillText(powerText, _g.ring.cx, _g.ring.cy + 27 * u);
+
+  // ...and what that number MEANS, in words, when it is starting to bite.
+  const s = strainOf(load);
+  if (s !== "idle" && s !== "easy") {
+    ctx.fillStyle = s === "choked" ? "#ff6a4a"
+      : s === "strained" ? "#ffa030" : "#e8d24a";
+    fit(strainLine(s), Math.min(9.5 * u, kbSize * 0.6));
+    ctx.fillText(strainLine(s), _g.ring.cx, _g.ring.cy + 41 * u);
+  }
 
 }

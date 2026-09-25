@@ -12,6 +12,8 @@
 // A tile holding more than one becomes a lysate -- the burst remains of a
 // cell -- which opens as a container rather than being hoovered up blind.
 
+import { gelLine } from "./fragment.js";
+import type { Fragment } from "./fragment.js";
 import { GENES, type GeneId } from "./biology.js";
 import { SYMBIONTS, type SymbiontId } from "./symbiont.js";
 import { alleleName, alleleRarity, type Allele } from "./allele.js";
@@ -53,6 +55,9 @@ export const SUBSTRATES: Readonly<Record<SubstrateId, SubstrateDef>> = {
 
 export type Item =
   | { kind: "cassette"; gene: GeneId; allele: Allele }
+  // Unsequenced DNA. You get the gel -- a length and a melting hint -- and
+  // pay ATP to find out the rest. See fragment.ts.
+  | { kind: "fragment"; frag: Fragment }
   | { kind: "substrate"; id: SubstrateId }
   // Regulatory parts. These are the rare drops: a conditional promoter or a
   // tandem terminator changes what your plasmid can BE, not just what it does.
@@ -128,12 +133,17 @@ export interface Drop {
  * HOW GOOD; the adjectives belong in the inspector.
  */
 export function itemShortName(it: Item): string {
-  return it.kind === "cassette" ? GENES[it.gene].name : itemName(it);
+  if (it.kind === "cassette") return GENES[it.gene].name;
+  if (it.kind === "fragment") return `${it.frag.kb.toFixed(1)}kb`;
+  return itemName(it);
 }
 
 export function itemName(it: Item): string {
   switch (it.kind) {
     case "cassette":    return alleleName(it.gene, it.allele);
+    // Named by what you can MEASURE, not by what it is -- the player has a
+    // gel and nothing else until they pay for the sequence.
+    case "fragment":    return `${it.frag.kb.toFixed(1)} kb fragment`;
     case "substrate":   return SUBSTRATES[it.id].name;
     case "promoter":    return PROMOTERS[it.id].name;
     case "terminator":  return TERMINATORS[it.id].name;
@@ -148,11 +158,18 @@ export function itemColour(it: Item): string {
   // A symbiont is always a landmark drop; give it the legendary colour so it
   // reads as one on the floor.
   if (it.kind === "symbiont") return RARITY.legendary.colour;
+  // An unsequenced fragment has NO rarity colour, deliberately. Colouring it
+  // by what it will turn out to be would answer the question the player is
+  // being asked to pay for. A neutral grey is the honest signal: you do not
+  // know yet.
+  if (it.kind === "fragment") return "#8b9aa4";
   return RARITY[it.rarity].colour;      // rarity is the signal that matters
 }
 
+
 export function itemNote(it: Item): string {
   switch (it.kind) {
+    case "fragment": return gelLine(it.frag);
     case "cassette":   return GENES[it.gene].desc;
     case "substrate":  return SUBSTRATES[it.id].note;
     case "promoter":   return PROMOTERS[it.id].note;

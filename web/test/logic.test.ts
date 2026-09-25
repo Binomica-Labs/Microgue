@@ -399,7 +399,13 @@ describe("plasmid operons", () => {
       p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
       p.put(2, { kind: "terminator", id });
       p.put(3, { kind: "gene", id: "omcS", level: 1, mods: [], allele: WILD_TYPE });
-      return { before: p.expression("mtrC", 4), after: p.expression("omcS", 4) };
+      // Raw: the readthrough fraction is a property of TRANSCRIPTION, and
+      // that is what this asserts. Realised expression also carries the
+      // burden share, and a leakier terminator expresses more downstream,
+      // which raises demand and lowers everyone's share -- so the ratio
+      // shifts for a reason that has nothing to do with terminators.
+      return { before: p.rawExpression("mtrC", 4),
+               after: p.rawExpression("omcS", 4) };
     };
     const leaky = build("hairpin");
     const tight = build("rrnbt1t2");
@@ -4528,7 +4534,7 @@ describe("the part catalogue is data, not code", () => {
       p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
       p.put(2, { kind: "terminator", id });
       p.put(3, { kind: "gene", id: "omcS", level: 1, mods: [], allele: WILD_TYPE });
-      return p.expression("omcS", 4);
+      return p.rawExpression("omcS", 4);
     };
     const leaky = build("hairpin");
     const tight = build("rrnbt1t2");
@@ -4554,10 +4560,20 @@ describe("the part catalogue is data, not code", () => {
     p.integrated = MAX_SLOTS - BASE_SLOTS;   // these fixtures need room
     p.put(0, { kind: "promoter", id: "j23119" });
     p.put(1, { kind: "gene", id: "mtrC", level: 1, mods: [], allele: WILD_TYPE });
-    const bare = p.expression("mtrC", 4);
+    // RAW expression, because that is where the multiplier claim is exact.
+    // Realised expression now passes through burden, and a modifier that
+    // boosts one gene RAISES total demand -- so it lowers everyone's share,
+    // including its own. Sub-multiplicative on the realised figure is the
+    // feature, not a rounding error, and it gets its own assertion below.
+    const bare = p.rawExpression("mtrC", 4);
     expect(p.addModifier("mtrC", "codon").ok).toBe(true);
-    const one = p.expression("mtrC", 4);
+    const one = p.rawExpression("mtrC", 4);
     expect(one / bare).toBeCloseTo(MODIFIERS.codon.effect.expression ?? 1, 5);
+    // ...and the realised gain is SMALLER than the raw one, because the
+    // boost competes with the rest of the ring for finite polymerase.
+    const realised = p.expression("mtrC", 4);
+    expect(realised, "burden is not applied to realised expression")
+      .toBeLessThan(one);
     // Level 1 allows a single modifier.
     expect(p.addModifier("mtrC", "rbs").ok, "level 1 must cap at one slot").toBe(false);
     expect(p.evolve("mtrC").ok).toBe(true);
@@ -11307,5 +11323,276 @@ describe("renaming a gene does not destroy old saves", () => {
       "utf8");
     expect(save.includes("currentGeneId"),
            "save.ts validates gene ids without migrating them").toBe(true);
+  });
+});
+
+describe("burden: capacity is finite and shared", () => {
+  const build = (operons: number): Plasmid => {
+    const p = new Plasmid();
+    p.integrated = 24;
+    const ori = p.slots.findIndex((s) => s?.kind === "gene" && s.id === "ori");
+    let slot = (ori + 1) % p.usableSlots;
+    const put = (x: Part): void => {
+      p.stash(x);
+      p.install(p.bin.length - 1, slot);
+      slot = (slot + 1) % p.usableSlots;
+    };
+    const pool: bio.GeneId[] = ["cbbL", "katG", "psbA", "sodA", "celA",
+                                "groL", "recA", "uvrA", "narG", "nirS",
+                                "mtrC", "dsrA"];
+    for (let o = 0; o < operons; o++) {
+      put({ kind: "promoter", id: "j23106" });
+      put({ kind: "gene", id: pool[(o * 2) % pool.length] ?? "cbbL",
+            level: 1, mods: [], allele: WILD_TYPE });
+      put({ kind: "gene", id: pool[(o * 2 + 1) % pool.length] ?? "katG",
+            level: 1, mods: [], allele: WILD_TYPE });
+      put({ kind: "terminator", id: "rrnbt1" });
+    }
+    return p;
+  };
+
+  it("a fuller ring gives each gene LESS -- the dilution that did not exist", () => {
+    // Measured before this existed: per-gene expression was FLAT at 0.367
+    // however many genes shared a promoter, and power per ATP rose
+    // monotonically with genome size. There was no decision on the ring:
+    // fill it, always, and it was never close. Finite polymerase is what
+    // was missing.
+    const small = build(1).expression("cbbL", 4);
+    const big = build(6).expression("cbbL", 4);
+    expect(small, "nothing is expressing, so this measures nothing")
+      .toBeGreaterThan(0);
+    expect(big, "a full ring does not dilute its own genes")
+      .toBeLessThan(small);
+    // ...and meaningfully, not by a rounding error
+    expect(big / small, "the dilution is too small to feel")
+      .toBeLessThan(0.75);
+    // but never to nothing: a cell under load is slow, not silent
+    expect(big, "one gene too many silenced the ring").toBeGreaterThan(0);
+  });
+
+  it("total power still rises -- burden is a tradeoff, not a punishment", () => {
+    // A curve where more genes meant less power would just be a cap with
+    // extra steps. The point is diminishing returns, not reversal.
+    const a = build(1).power(4), b = build(3).power(4), c = build(6).power(4);
+    expect(b, "a bigger ring is not more powerful").toBeGreaterThan(a);
+    expect(c).toBeGreaterThan(b);
+    // ...and burden is measurably taking a cut. A ratio threshold was the
+    // first attempt and it was arbitrary: the genes in the pool have
+    // different tiers, so "6x the genes should be under 6x the power" was
+    // comparing things that were never proportional. The exact claim is
+    // that the big ring's share is below 1 -- it is getting less than it
+    // asked for -- and that is what makes the returns diminish.
+    const big = build(6);
+    expect(big.burdenShare(4), "a full ring gets everything it asks for")
+      .toBeLessThan(0.8);
+    expect(build(1).burdenShare(4), "a small ring is throttled as hard as a big one")
+      .toBeGreaterThan(big.burdenShare(4));
+  });
+
+  it("load reports what the ring is asking for, and reads sanely", async () => {
+    const { strainOf, strainLine, BASE_CAPACITY } = await import("../src/burden.js");
+    const empty = new Plasmid();
+    expect(empty.load(4), "an empty ring is straining").toBeLessThan(0.25);
+    const full = build(6);
+    expect(full.load(4), "a full ring reports no load").toBeGreaterThan(0.5);
+    for (const l of [0, 0.5, 1, 1.5, 3, NaN, Infinity, -1]) {
+      const s = strainOf(l);
+      expect(["idle", "easy", "working", "strained", "choked"]).toContain(s);
+      expect(strainLine(s).length, `no line for ${s}`).toBeGreaterThan(5);
+    }
+    expect(BASE_CAPACITY).toBeGreaterThan(0);
+  });
+
+  it("capacity does NOT scale with strain level", () => {
+    // Levelling expands the plasmid rather than granting power -- a rule the
+    // game already had, and one I broke by reaching for a knob. A test
+    // caught it. Capacity is a property of the cell.
+    const p = build(3);
+    p.strain = 1;
+    const low = p.capacity();
+    p.strain = 8;
+    expect(p.capacity(), "levelling became a power-up").toBe(low);
+  });
+
+  it("burden survives an empty ring and garbage demand", async () => {
+    const { demandOf, shareOf, loadOf } = await import("../src/burden.js");
+    expect(demandOf([])).toBe(0);
+    expect(shareOf(0, 4.5), "an empty ring is throttled").toBe(1);
+    for (const [d, c] of [[NaN, 4.5], [Infinity, 4.5], [1, 0], [1, NaN],
+                          [-5, 4.5]] as const) {
+      const s = shareOf(d, c);
+      expect(Number.isFinite(s) && s > 0 && s <= 1,
+             `shareOf(${String(d)}, ${String(c)}) = ${String(s)}`).toBe(true);
+      expect(Number.isFinite(loadOf(d, c))).toBe(true);
+    }
+    expect(new Plasmid().burdenShare(4), "an empty ring is penalised").toBe(1);
+  });
+});
+
+describe("unsequenced fragments: paying to find out", () => {
+  it("the gel tells you length and melting, and nothing about function", async () => {
+    // The honest limit of the cheap measurement. A gel gives you a size and
+    // says nothing whatsoever about what the sequence means -- so the fog
+    // here is not invented, it is where real information actually stops.
+    const { fragmentOf, gelLine } = await import("../src/fragment.js");
+    for (const g of ["cbbL", "nifH", "mcrA"] as bio.GeneId[]) {
+      const f = fragmentOf(g, makeRng(7));
+      const line = gelLine(f);
+      expect(line, "the gel names the gene it is hiding").not.toContain(g);
+      expect(line, "the gel leaks the product")
+        .not.toContain(bio.GENES[g].product);
+      expect(line.length).toBeGreaterThan(20);
+      // the length it reports is TRUE -- a gel does not lie about size
+      expect(f.kb, `${g}: the gel misreported its length`)
+        .toBeCloseTo(bio.GENES[g].kb, 6);
+    }
+  });
+
+  it("all three size bands actually fire on the real gene set", async () => {
+    // Bands at 4 kb and 2 kb put 71% of genes in "short" and NOTHING in
+    // "long": genes here run 0.2-3.7 kb. A descriptor that never fires is
+    // not a descriptor, and one that swallows most of the set is not a
+    // distinction.
+    const { fragmentOf, gelLine } = await import("../src/fragment.js");
+    const bands = new Map<string, number>();
+    for (const id of Object.keys(bio.GENES)) {
+      if (id === "ori") continue;
+      const line = gelLine(fragmentOf(id as bio.GeneId, makeRng(3)));
+      const band = line.startsWith("a long") ? "long"
+        : line.startsWith("a fair") ? "fair" : "short";
+      bands.set(band, (bands.get(band) ?? 0) + 1);
+    }
+    const total = Object.keys(bio.GENES).length - 1;
+    for (const band of ["short", "fair", "long"]) {
+      const n = bands.get(band) ?? 0;
+      expect(n, `"${band}" never fires`).toBeGreaterThan(0);
+      expect(n / total, `"${band}" swallows the whole set`).toBeLessThan(0.7);
+    }
+  });
+
+  it("GC hints at depth without giving it away", async () => {
+    // The hint must be real enough to lean on and soft enough to be wrong
+    // about, or it is either noise or a lookup table.
+    const { fragmentOf } = await import("../src/fragment.js");
+    const mean = (tier: number): number => {
+      const vals: number[] = [];
+      for (const [id, g] of Object.entries(bio.GENES)) {
+        if (id === "ori" || g.tier !== tier) continue;
+        for (let k = 0; k < 30; k++) {
+          vals.push(fragmentOf(id as bio.GeneId, makeRng(k * 31)).gc);
+        }
+      }
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    };
+    const low = mean(1), high = mean(8);
+    if (low > 0 && high > 0) {
+      expect(high, "GC does not track depth at all").toBeGreaterThan(low);
+      // ...but the bands OVERLAP, so a single fragment is never a tell
+      const spread: number[] = [];
+      for (let k = 0; k < 200; k++) {
+        spread.push(fragmentOf("cbbL", makeRng(k)).gc);
+      }
+      const min = Math.min(...spread), max = Math.max(...spread);
+      expect(max - min, "GC has no spread, so it IS a lookup table")
+        .toBeGreaterThan(0.08);
+    }
+  });
+
+  it("sequencing costs more for more DNA, and always something", async () => {
+    const { sequencingCost } = await import("../src/fragment.js");
+    expect(sequencingCost(3.5), "a long read is not dearer than a short one")
+      .toBeGreaterThan(sequencingCost(0.5));
+    for (const bad of [0, -1, NaN, Infinity]) {
+      const c = sequencingCost(bad);
+      expect(Number.isFinite(c) && c > 0, `sequencingCost(${String(bad)}) = ${String(c)}`)
+        .toBe(true);
+    }
+    // never so dear that one fragment is a whole run's income
+    expect(sequencingCost(3.7)).toBeLessThan(60);
+  });
+
+  it("an unsequenced fragment carries no rarity colour", async () => {
+    // Colouring it by what it will turn out to be would answer the question
+    // the player is being asked to pay for.
+    const { fragmentOf } = await import("../src/fragment.js");
+    const { itemColour } = await import("../src/items.js");
+    const { RARITY } = await import("../src/parts.js");
+    const c = itemColour({ kind: "fragment", frag: fragmentOf("mcrA", makeRng(1)) });
+    for (const r of Object.values(RARITY)) {
+      expect(c, "a fragment is wearing a rarity colour").not.toBe(r.colour);
+    }
+  });
+});
+
+describe("every system built today survives garbage at its boundary", () => {
+  // One place that feeds NaN, Infinity and absurd magnitudes to all of
+  // today's systems at once. Each has its own edge tests; this is the sweep
+  // that catches the next one someone adds without them.
+  const GARBAGE = [NaN, Infinity, -Infinity, -1e9, 1e9, 0, -0];
+
+  it("nothing returns a non-finite number or an empty label", async () => {
+    const A = await import("../src/abilities.js");
+    const R = await import("../src/resistance.js");
+    const Q = await import("../src/quorum.js");
+    const B = await import("../src/burden.js");
+    const F = await import("../src/fragment.js");
+    const M = await import("../src/module_reward.js");
+    for (const b of GARBAGE) {
+      expect(A.grantedAbilities(() => b, b).length).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(R.factor(R.newResistance(), "bite"))).toBe(true);
+      expect(["calm", "roused", "alarmed", "swarming"]).toContain(Q.levelOf(b));
+      expect(typeof Q.hunts(b, b)).toBe("boolean");
+      for (const v of [Q.senseScale(b), Q.biteScale(b), Q.huntFraction(b),
+                       B.shareOf(b, b), B.loadOf(b, b), F.sequencingCost(b)]) {
+        expect(Number.isFinite(v), `a garbage input gave ${String(v)}`).toBe(true);
+      }
+      expect(B.shareOf(b, b), "share left 0..1").toBeGreaterThan(0);
+      expect(B.shareOf(b, b)).toBeLessThanOrEqual(1);
+      expect(F.sequencingCost(b), "a free sequence").toBeGreaterThan(0);
+      expect(M.masteryOf(new Set()).counted).toBe(0);
+    }
+  });
+
+  it("every gene yields a sane fragment and a payable price", async () => {
+    // 89 genes, each one a possible drop. A single bad kb or GC would be a
+    // fragment the player cannot read the gel of.
+    const F = await import("../src/fragment.js");
+    for (const id of Object.keys(bio.GENES)) {
+      const f = F.fragmentOf(id as bio.GeneId, makeRng(id.length * 7));
+      expect(f.kb, `${id}: bad length`).toBeGreaterThan(0);
+      expect(Number.isFinite(f.kb)).toBe(true);
+      expect(f.gc, `${id}: GC out of range`).toBeGreaterThan(0);
+      expect(f.gc).toBeLessThan(1);
+      const c = F.sequencingCost(f.kb);
+      expect(c, `${id}: unpayable`).toBeGreaterThan(0);
+      expect(c, `${id}: costs a whole run`).toBeLessThan(80);
+      expect(F.gelLine(f).length, `${id}: no gel line`).toBeGreaterThan(20);
+    }
+  });
+
+  it("a ring of every gene at once does not break any reader", () => {
+    // The worst ring a player could ever build, against every derived
+    // number. Burden makes total demand a global property now, so "one of
+    // everything" is a genuinely different shape from anything else tested.
+    const p = new Plasmid();
+    p.integrated = 24;
+    const ids = Object.keys(bio.GENES).filter((g) => g !== "ori") as bio.GeneId[];
+    for (const id of ids.slice(0, 24)) {
+      p.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    p.assemble(ids.slice(0, 24));
+    for (const d of [1, 8, 24]) {
+      for (const [k, v] of Object.entries({
+        power: p.power(d), vitality: p.vitality(d), cost: p.atpCost(d),
+        gain: p.atpGain(d), load: p.load(d), share: p.burdenShare(d),
+      })) {
+        expect(Number.isFinite(v), `depth ${String(d)}: ${k} = ${String(v)}`)
+          .toBe(true);
+        expect(v, `depth ${String(d)}: ${k} is negative`)
+          .toBeGreaterThanOrEqual(0);
+      }
+      expect(p.burdenShare(d), "share left its range").toBeGreaterThan(0);
+      expect(p.burdenShare(d)).toBeLessThanOrEqual(1);
+    }
   });
 });

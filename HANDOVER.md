@@ -97,6 +97,159 @@ that is *almost* opaque is not atmospheric, it is noise a player has to
 learn to ignore. Opaque now.
 
 
+# v1.66.0 — hardening everything from v1.52 to v1.65
+
+Fourteen releases today, each tested alone. This pass is the seams.
+
+## What was checked and found sound
+
+* **Fragments never reach a save.** The new `Item` kind looked like the
+  gene-rename bug waiting to happen -- a new member of a serialised union --
+  but a fragment is consumed at pickup, so it exists only on the floor, and
+  floor drops were never persisted. No migration needed. Worth writing down
+  because the shape of the risk was right even though the answer was no.
+* **Burden is always recoverable.** An overloaded ring drops from 1.20 to
+  0.63 load as genes come off, so filling it can never strand a player.
+  Burden had to be a tradeoff and not a trap: a roguelike that can deal an
+  unwinnable hand is broken, not difficult. `spec` pins that uninstalling
+  always reduces load and that an empty ring is never throttled.
+* **89 genes x 7 garbage inputs, clean.** Every system from today fed NaN,
+  Infinity and absurd magnitudes at once, with nothing returning a
+  non-finite number or an empty label.
+
+## What is new
+
+* A 400-turn Game-level soak with burden, quorum, resistance and fragments
+  ALL live at once, checking every derived number every turn. Six systems
+  landed today and each was tested alone; this is the only place they run
+  together.
+* A standing garbage sweep in one block, so the next system someone adds
+  without its own edge tests still gets swept.
+* A worst-case ring: one of every gene the plasmid will hold, against every
+  reader at three depths. Burden made total demand a GLOBAL property, so
+  "one of everything" is a genuinely different shape from anything the
+  per-system tests build.
+* Sequencing refunds when the bin cannot take the gene. The ability version
+  of that bug cost 14 ATP and a cooldown for nothing; the same shape here
+  would charge a player to read a fragment and then drop it.
+
+Both new guards verified by removal: free sequencing and a zero share each
+produce six failures.
+
+
+# v1.65.0 — unsequenced DNA
+
+Sebastian's idea, from Diablo 2's identify scrolls: loot you cannot read
+until you pay. The allele roll underneath was ALREADY a bell curve, so the
+variation existed -- what was missing was the not-knowing. A reward you can
+evaluate at a glance is a number going up; one you pay to look at is a
+decision.
+
+## Why this is better than an identify scroll
+
+Because of what you can genuinely learn about DNA without reading it:
+
+* **Length is free.** A gel tells you how long a fragment is and nothing
+  whatsoever about what it says. So an unsequenced fragment shows its kb and
+  hides the rest -- the fog is not invented, it is where real information
+  actually stops.
+* **GC is nearly free**, from melting behaviour, and hints at ORIGIN rather
+  than function. Measured: mean GC runs 0.429 at tier 1 to 0.625 at tier 8,
+  with enough spread that one fragment is never a tell. A player who learns
+  to read "long and GC-rich" as "expensive, probably from something deep"
+  has learned to read a gel.
+* **The sequence costs you**, scaled by length. The big fragment that might
+  hold something remarkable is the expensive one. That is the gamble, and it
+  is the real economics.
+
+ATP is also the combat and survival budget, so sequencing is curiosity
+competing with staying alive -- which is exactly the tension that makes it
+a choice rather than a formality.
+
+70% of gene drops now arrive unsequenced. Not all: a run where nothing was
+readable without paying would have no floor under it.
+
+The emblem is a gel lane -- three bands, no arrow -- because an arrow would
+claim a reading frame the player has not paid to learn. And a fragment
+carries NO rarity colour: colouring it by what it turns out to be would
+answer the question being sold.
+
+## Bands set from the data, not from what the words sound like
+
+First thresholds were 4 kb for "long" and 2 kb for "fair". Genes here run
+0.2-3.7 kb with a median of 1.5, so that put 71% of everything in "short"
+and NOTHING in "long" -- a descriptor that never fires is not a descriptor.
+At 2.2 and 1.2 the three bands split 27/51/22, and `spec` fails if any band
+empties or swallows more than 70%.
+
+
+# v1.64.0 — burden: capacity is finite and shared
+
+## The ring had no decision in it
+
+Measured, not assumed. Power per ATP RISES with genome size -- 0.43 at two
+genes, 1.87 at ten -- so bigger was not merely better, it was increasingly
+better. And per-gene expression was FLAT at 0.367 however many genes shared
+a promoter: nothing diluted. The correct play was to fill the ring, always,
+and it was never close.
+
+Meanwhile the help text said "expression costs ATP; respiration pays less
+the deeper you go", so a player who believed the game played frugally and
+badly. **Two failures hiding each other**: the text told you to restrain and
+the maths rewarded maximalism, so nobody found out either was wrong. The
+observed symptom was a ring at 4.0 of 22 kb with the parts bin at 17/18 --
+parts in hand, nothing installed.
+
+## Finite polymerase
+
+A cell has a limited pool of RNA polymerase and ribosomes, and every
+construct competes for it. Ceroni's 2015 capacity monitor measured exactly
+this. It is the constraint that actually bites at a bench -- the reason a
+design that works on paper crawls in a cell -- and Microgue modelled none
+of it.
+
+    demand  = sum over genes of raw expression x KILOBASES
+    share   = capacity / (capacity + demand)
+    what a gene gets = raw x supply x share
+
+Weighted by kb, not gene count, so a 5.2 kb nitrogenase is a heavier ask
+than a 0.9 kb ferredoxin -- and the kb figure on the ring finally means
+something.
+
+Measured after: per-gene expression falls 0.29 -> 0.17 as the ring fills.
+Total power still RISES (a tradeoff, not a punishment) but sub-linearly, and
+the ring reports `capacity NN%` with a plain-language strain line once it
+starts to bite.
+
+Capacity tuned by sweeping it, not by feel: at 4.5 a small ring is
+comfortable, a mid-size one is "working", an ambitious one is "strained".
+The pressure arrives as a consequence of ambition rather than greeting you
+at the door.
+
+## A rule I broke by reaching for a knob
+
+I first scaled capacity with strain level. A test caught it: the game
+already had the rule "levelling EXPANDS the plasmid rather than granting
+power", and tying capacity to level would have quietly made levelling a
+power-up. That was not a design decision I was making deliberately -- it was
+a free parameter I grabbed. Capacity is flat.
+
+## Four tests that pinned magnitudes, not claims
+
+The rebalance broke tests asserting exact expression values. Three were
+asserting TRANSCRIPTION claims (a terminator's readthrough fraction, a
+modifier's multiplier) against REALISED expression, which now carries the
+burden share -- so a modifier that boosts one gene raises demand and lowers
+everyone's share, including its own. Retargeted to `rawExpression`, where
+those claims are exact, with a separate assertion that the realised gain is
+smaller. Sub-multiplicative is the feature.
+
+And one of my own new tests asserted "6x the genes should give under 6x the
+power" -- arbitrary, and comparing things that were never proportional since
+the pool's genes have different tiers. Replaced with the exact claim: a full
+ring's share is below 0.8, a small ring's is higher.
+
+
 # v1.63.0 — the buttons say what they do
 
 ## The hint was never drawn
