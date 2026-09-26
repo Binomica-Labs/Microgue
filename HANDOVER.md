@@ -258,6 +258,90 @@ content against buttons at three sizes and three epitaph lengths.
 Checking first cost one probe. Each of the previous three cost a release.
 
 
+# v1.73.0 — every column has its own ecology
+
+The last of the replayability asks, and the first attempt was wrong in a
+way worth recording.
+
+## Dropping species was the wrong lever
+
+The audit said all twenty-three species appear in every descent, so I built
+a per-run subset: keep 72%, minimum two per depth. Then I measured it.
+
+**There are only TWO TO FOUR species per depth.** Cutting 72% of a
+three-species floor leaves two -- thinner WITHIN a run while varying almost
+nothing between runs, and it pushed same-species spawn clumps from three to
+five, because fewer species means more of each. A fission test caught the
+clumping; the thinness I only saw because I went looking for why.
+
+The pools are too small for membership to be the variable.
+
+## Abundance is
+
+What actually differs between two real columns a mile apart is not which
+organisms are available, it is which one dominates. Every species is still
+present -- nothing leaves the loot pool, no floor can empty, no gene becomes
+unreachable -- and each column scales each species' spawn weight between
+0.25x and 2.6x, drawn from a soft bell so most sit near baseline and a few
+are genuinely dominant or scarce.
+
+Measured: floors back to three species, the dominant organism differs
+between seeds, and over 40% of species shift materially between any two
+columns. `spec` fails if the abundances stop moving.
+
+## And a sweep over the last five releases
+
+Community, titles, the export card, the constellation and its view, fed
+NaN, Infinity and absurd magnitudes at every entry point. One hit:
+**`fitWeb` passed garbage straight through**, and it is what SEEDS the map
+view the first time the bench opens. A browser hands you a non-finite
+canvas size mid-rotation or before layout settles; that produced a
+non-finite scale which `clampWeb` then dutifully preserved, and the map
+would never have appeared again for the rest of the session. clampWeb
+recovering is the safety net; not producing bad values is the fix.
+
+
+# v1.72.0 — the ending names what you built
+
+Reaching the bottom set a flag, printed two lines, and left the player
+standing on floor twenty-four with nothing to do. No report, no record, no
+reason the twenty-four floors had been worth walking. **A run that ends with
+less ceremony than a death is a run the game does not think you finished.**
+
+It goes to the report now, banks a real outcome on the researcher's bench,
+and deletes the slot -- the same shape as a death, because a completion is
+at least as much of an ending.
+
+## What you finish AS
+
+The payoff is not a bigger congratulation. A run in this game is a BUILD, so
+the ending names it, weighted by LEVEL rather than gene count: a strain with
+one gene at L5 in a pathway committed harder than one with three untouched
+genes, and the title should describe the commitment rather than the
+shopping list.
+
+    photo      a phototroph        carbon     an autotroph
+    nitrogen   a diazotroph        sulfur     a sulfur reducer
+    iron       an iron breather    methane    a methanogen
+    energy     a chemolithotroph   stress     an extremophile
+    resist     a resistant lineage motility   a swarmer
+    secretion  a predator          core       a generalist
+
+Eleven distinct endings for eleven committed builds, measured. Each carries
+a line on what that physiology actually IS -- a player who finishes as a
+methanogen and reads that methanogens are the only biological source of
+methane has learned something the game never stopped to tell them. And
+because two players reach the bottom with different genomes, it varies
+without a line of generated text.
+
+Breadth is recognised separately: six pathways or more says so, because
+going wide and going deep are different achievements and one title cannot
+mean both. An empty build finishes "a survivor" rather than undefined --
+reaching the bottom carrying nothing is its own kind of answer.
+
+Still open: more procedural generation.
+
+
 # v1.71.0 — save this build
 
 A run ends and everything it was disappears. The report card says what

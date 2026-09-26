@@ -5263,3 +5263,53 @@ describe("sequencing is a confirmed act, not a side effect of looting", () => {
     expect(g.sequence(-1)).toBe(false);
   });
 });
+
+describe("winning is a real ending", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("reaching the bottom opens the report and banks the run", async () => {
+    // It used to set a flag, print two lines, and leave the player standing
+    // on floor twenty-four with nothing to do. A run that ends with less
+    // ceremony than a death is a run the game does not think you finished.
+    const { Game } = await import("../src/main.js");
+    const { readLab } = await import("../src/lab_save.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(6, "heterotroph");
+    const before = readLab(6).ledger.length;
+    g.win();
+    expect(g.won, "the win did not register").toBe(true);
+    expect(g.aftermath.stage, "the win left the player on the floor")
+      .toBe("report");
+    const after = readLab(6);
+    expect(after.ledger.length, "a completion left no trace on the bench")
+      .toBeGreaterThan(before);
+    const last = after.ledger[after.ledger.length - 1];
+    expect(last?.won, "the ledger recorded the win as a death").toBe(true);
+    // ...and the record carries the title, not a death cause
+    expect(last?.epitaph.join(" ").length,
+           "the record has no ending text").toBeGreaterThan(10);
+  });
+
+  it("winning twice does nothing the second time", async () => {
+    const { Game } = await import("../src/main.js");
+    const { readLab } = await import("../src/lab_save.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(7, "heterotroph");
+    g.win();
+    const n = readLab(7).ledger.length;
+    g.win();
+    g.win();
+    expect(readLab(7).ledger.length, "winning again added another record")
+      .toBe(n);
+  });
+});

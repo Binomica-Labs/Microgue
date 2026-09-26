@@ -2,6 +2,7 @@
 // Multi-level descent. One cave per stratum, generated from that stratum's
 // parameters, cached so climbing back finds the same level.
 
+import { communityOf, microbesIn, type Community } from "./community.js";
 import { MAX_DEPTH, microbesAt, stratum, type Microbe as Microbe0, type Stratum }
   from "./biology.js";
 import type { Microbe } from "./entity.js";
@@ -103,6 +104,7 @@ export class Dungeon {
 
   constructor(w = 110, h = 80, seed = 7) {
     this.w = w; this.h = h; this.seed = seed;
+    this.community = communityOf(seed);
   }
 
   /** Below this the level has nowhere to fight. */
@@ -159,7 +161,8 @@ export class Dungeon {
 
   /** This stratum's real organisms, never on a stair, never where you arrive. */
   private populate(lvl: Level, rng: Rng): void {
-    const pool = microbesAt(lvl.depth);
+    // THIS column's community, not the whole catalogue. See community.ts.
+    const pool = microbesIn(this.community, lvl.depth);
     if (!pool.length) return;
     // Scaled to the floor area that actually exists, so a sparse level does
     // not end up with the same handful of microbes as a dense one. At 167 open
@@ -224,6 +227,16 @@ export class Dungeon {
   /** One microbe, built from its prototype. Factored out so boss placement
    *  cannot drift from ordinary spawning. */
   private nextUid = 1;
+
+  /**
+   * The species in this column.
+   *
+   * Rolled from the seed, so it is stable for a resumed run and identical
+   * for everyone on a daily. Every species is still present -- what varies
+   * is how ABUNDANT each one is, which is what actually differs between two
+   * real columns. See community.ts for why membership was the wrong lever.
+   */
+  readonly community: Community;
 
   private spawn(p: Microbe0, x: number, y: number): Mob {
     const hp = Math.round(p.hp * SIZES[p.size].hp);
@@ -384,7 +397,7 @@ export class Dungeon {
 
   /** Extra microbes in the rooms that warrant them. */
   private stockRooms(lvl: Level, rng: Rng): void {
-    const pool = microbesAt(lvl.depth);
+    const pool = microbesIn(this.community, lvl.depth);
     if (pool.length === 0) return;
     for (const room of lvl.rooms) {
       const style = ROOM_STYLE[room.kind];

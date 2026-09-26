@@ -8,9 +8,20 @@ import { shade } from "./relief.js";
 
 export interface WebView { cx: number; cy: number; scale: number }
 
-/** A view that fits the whole map in the space given. */
+/**
+ * A view that fits the whole map in the space given.
+ *
+ * Guarded, because this SEEDS the view the first time the bench opens. A
+ * non-finite canvas size -- which a browser will hand you mid-rotation or
+ * before layout settles -- produced a non-finite scale that `clampWeb`
+ * then dutifully preserved, and the map never appeared for the rest of the
+ * session. `clampWeb` recovers from bad input; the sensible thing is not
+ * to produce any here.
+ */
 export function fitWeb(w: number, h: number): WebView {
-  return { cx: w / 2, cy: h / 2, scale: Math.min(w, h) * 0.44 };
+  const ww = Number.isFinite(w) && w > 0 ? w : 400;
+  const hh = Number.isFinite(h) && h > 0 ? h : 800;
+  return { cx: ww / 2, cy: hh / 2, scale: Math.min(ww, hh) * 0.44 };
 }
 
 export function clampWeb(v: WebView, w: number, h: number): WebView {

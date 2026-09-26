@@ -15,6 +15,8 @@ import { TRAITS, atpCeiling, expansionCost, type TraitId }
   from "./chromosome.js";
 import { creditFor, recordRun, stockCap } from "./lab.js";
 import { writeLab } from "./lab_save.js";
+import type { GeneId } from "./biology.js";
+import { isGeneralist, titleOf } from "./strain_title.js";
 import { deleteSlot } from "./saves.js";
 import { quality } from "./allele.js";
 import { countOf } from "./stack.js";
@@ -257,10 +259,59 @@ export function t_research(_g: Game, row: ResearchRow): void {
   }
 
 export function t_win(_g: Game): void {
-    if (_g.won) return;
-    _g.won = true;
-    _g.run.deepest = MAX_FLOOR;
-    _g.toasts.push("You have reached the bottom of the column.", "info", _g.now);
-    _g.note("Nothing below but carbonate and the glass. The column is yours.");
-    _g.save();
+  if (_g.won) return;
+  _g.won = true;
+  _g.run.deepest = MAX_FLOOR;
+
+  // A REAL ending.
+  //
+  // This used to set a flag, print two lines, and leave the player standing
+  // on floor twenty-four with nothing to do -- no report, no record, no
+  // reason the twenty-four floors had been worth walking. A run that ends
+  // with less ceremony than a death is a run the game does not think you
+  // finished.
+  //
+  // The ending names what you BUILT, because that is what a run in this
+  // game is. Two players reach the bottom with completely different
+  // genomes, so it varies without a line of generated text.
+  const installed = new Map<GeneId, number>();
+  for (const s of _g.genome.slots) {
+    if (s?.kind === "gene" && s.id !== "ori") installed.set(s.id, s.level);
   }
+  const title = titleOf(installed);
+  const broad = isGeneralist(installed);
+
+  _g.toasts.push("The column is yours.", "info", _g.now);
+  _g.note("Nothing below but carbonate and the glass.");
+  _g.note(`You finish ${title.name}. ${title.note}`);
+  if (broad) {
+    _g.note("And you finish BROAD -- six pathways or more, which is a "
+      + "different achievement from going deep in one.");
+  }
+
+  // Banked on the researcher's bench, like a death is. A completion that
+  // left no trace would make the lineage's whole record a list of failures.
+  const carried = _g.genome.slots.filter(
+    (s) => s?.kind === "gene" && s.id !== "ori").length;
+  const outcome = {
+    floor: MAX_FLOOR,
+    turns: _g.clock.turn,
+    catalogued: _g.run.bestiary.length,
+    killed: _g.run.killed,
+    bossesCleared: Math.floor((MAX_FLOOR - 1) / 3),
+    genesCarried: carried,
+    bestAllele: 0,
+    killedBy: "nothing",
+    won: true,
+  };
+  const credit = creditFor(outcome, _g.lab.deepestEver);
+  recordRun(_g.lab, outcome, credit, [title.name, title.note]);
+  writeLab(_g.lab, _g.slot);
+
+  _g.deathRecord = null;
+  _g.aftermath.stage = "report";
+  _g.shopScroll = 0;
+  _g.shopAnchor = 0;
+  deleteSlot(_g.slot);
+  _g.save();
+}

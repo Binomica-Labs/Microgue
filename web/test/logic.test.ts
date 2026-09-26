@@ -12080,3 +12080,197 @@ describe("the card is an artefact, so nothing bad may reach it", () => {
       .toContain("0 genes");
   });
 });
+
+describe("the ending names what you built", () => {
+  it("every pathway you can commit to gives a different ending", async () => {
+    // Reaching the bottom was two lines of text and then the player stood
+    // on floor twenty-four with nothing to do. A run in this game is a
+    // BUILD, so the ending should name it -- and because two players finish
+    // with different genomes it varies without a line of generated text.
+    const { titleOf } = await import("../src/strain_title.js");
+    const byPath = new Map<string, bio.GeneId[]>();
+    for (const [id, g] of Object.entries(bio.GENES)) {
+      if (id === "ori") continue;
+      byPath.set(g.pathway, [...(byPath.get(g.pathway) ?? []), id as bio.GeneId]);
+    }
+    const titles = new Set<string>();
+    for (const [p, ids] of byPath) {
+      const build = new Map(ids.slice(0, 3).map((i) => [i, 4]));
+      const t = titleOf(build);
+      expect(t.name.length, `${p} has no title`).toBeGreaterThan(3);
+      expect(t.note.length, `${p} has no explanation`).toBeGreaterThan(20);
+      titles.add(t.name);
+    }
+    expect(titles.size, "committing to different pathways gives the same "
+      + "ending").toBeGreaterThanOrEqual(byPath.size - 1);
+  });
+
+  it("the same build always gets the same title", async () => {
+    // A result that changed between identical runs would read as a bug, and
+    // ties have to break somewhere.
+    const { titleOf } = await import("../src/strain_title.js");
+    const build = new Map<bio.GeneId, number>([["psbA", 2], ["katG", 2]]);
+    const a = titleOf(build).name;
+    for (let i = 0; i < 20; i++) {
+      expect(titleOf(new Map(build)).name, "the title is unstable").toBe(a);
+    }
+  });
+
+  it("commitment beats breadth: level is weighted, not gene count", async () => {
+    // A strain with one gene at L5 in a pathway committed harder than one
+    // with three untouched genes, and the title should describe the
+    // commitment rather than the shopping list.
+    const { titleOf } = await import("../src/strain_title.js");
+    const photo = Object.entries(bio.GENES)
+      .filter(([, g]) => g.pathway === "photo").map(([id]) => id as bio.GeneId);
+    const stress = Object.entries(bio.GENES)
+      .filter(([, g]) => g.pathway === "stress").map(([id]) => id as bio.GeneId);
+    if (photo.length === 0 || stress.length === 0) return;
+    const first = photo[0];
+    if (first === undefined) return;
+    const deep = new Map<bio.GeneId, number>([[first, 5]]);
+    const alone = titleOf(deep).name;
+    for (const id of stress.slice(0, 2)) deep.set(id, 1);
+    // one L5 photo gene against two L1 stress genes
+    expect(titleOf(deep).name, "a deep commitment lost to a shallow one")
+      .toBe(alone);
+  });
+
+  it("an empty build still gets an ending", async () => {
+    // Reaching the bottom carrying nothing is an achievement of a different
+    // kind, and "undefined" would be a poor reward for it.
+    const { titleOf, isGeneralist } = await import("../src/strain_title.js");
+    const t = titleOf(new Map());
+    expect(t.name, "an empty build has no title").toContain("survivor");
+    expect(t.note.length).toBeGreaterThan(20);
+    expect(isGeneralist(new Map()), "nothing counts as broad").toBe(false);
+    // and garbage levels do not break the weighting
+    const junk = new Map<bio.GeneId, number>([["psbA", NaN], ["katG", -5]]);
+    expect(titleOf(junk).name.length, "garbage levels broke the title")
+      .toBeGreaterThan(3);
+  });
+
+  it("breadth is recognised separately from depth", async () => {
+    const { isGeneralist } = await import("../src/strain_title.js");
+    const paths = new Map<string, bio.GeneId>();
+    for (const [id, g] of Object.entries(bio.GENES)) {
+      if (id !== "ori" && !paths.has(g.pathway)) {
+        paths.set(g.pathway, id as bio.GeneId);
+      }
+    }
+    const broad = new Map([...paths.values()].slice(0, 7).map((i) => [i, 1]));
+    expect(isGeneralist(broad), "seven pathways is not broad").toBe(true);
+    const narrow = new Map([...paths.values()].slice(0, 2).map((i) => [i, 5]));
+    expect(isGeneralist(narrow), "two pathways counted as broad").toBe(false);
+  });
+});
+
+describe("each column has its own ecology", () => {
+  it("every species is still present -- abundance varies, membership does not", async () => {
+    // The first attempt dropped species from the column, and measuring it
+    // killed the idea: there are only TWO TO FOUR species per depth. Cutting
+    // 72% of a three-species floor leaves two -- thinner WITHIN a run while
+    // varying almost nothing between runs, and it pushed same-species spawn
+    // clumps from three to five because fewer species means more of each.
+    const { communityOf, microbesIn } = await import("../src/community.js");
+    const depths = [...new Set(bio.MICROBES.map((m) => m.depth))];
+    for (const seed of [1, 7, 99]) {
+      const c = communityOf(seed);
+      for (const d of depths) {
+        const here = microbesIn(c, d);
+        const all = bio.MICROBES.filter((m) => m.depth === d);
+        expect(here.length, `seed ${String(seed)} depth ${String(d)}: `
+          + "the column lost a species").toBe(all.length);
+        expect(here.every((m) => Number.isFinite(m.weight ?? 1)),
+               "a weight went non-finite").toBe(true);
+        expect(here.every((m) => (m.weight ?? 1) > 0),
+               "a species was weighted to zero, which removes it").toBe(true);
+      }
+    }
+  });
+
+  it("different seeds really do give different ecologies", async () => {
+    // The whole point. If the abundances barely move, this is a system that
+    // costs code and changes nothing.
+    const { communityOf, abundanceOf } = await import("../src/community.js");
+    const a = communityOf(1), b = communityOf(2);
+    let moved = 0;
+    for (const m of bio.MICROBES) {
+      if (Math.abs(abundanceOf(a, m.id) - abundanceOf(b, m.id)) > 0.3) moved++;
+    }
+    expect(moved, `only ${String(moved)} of ${String(bio.MICROBES.length)} `
+      + "species differ between two columns").toBeGreaterThan(
+      bio.MICROBES.length * 0.4);
+  });
+
+  it("the same seed gives the same column, always", async () => {
+    // A daily has to be the same column for everyone, and a resumed run has
+    // to find the organisms it left.
+    const { communityOf, abundanceOf } = await import("../src/community.js");
+    const a = communityOf(42), b = communityOf(42);
+    for (const m of bio.MICROBES) {
+      expect(abundanceOf(a, m.id), `${m.id} drifted between two rolls`)
+        .toBeCloseTo(abundanceOf(b, m.id), 12);
+    }
+  });
+
+  it("abundance stays in band, whatever the seed", async () => {
+    const { communityOf, abundanceOf, MIN_ABUNDANCE, MAX_ABUNDANCE } =
+      await import("../src/community.js");
+    for (const seed of [0, -1, NaN, Infinity, 2 ** 31]) {
+      const c = communityOf(seed);
+      for (const m of bio.MICROBES) {
+        const v = abundanceOf(c, m.id);
+        expect(v, `seed ${String(seed)}: ${m.id} at ${String(v)}`)
+          .toBeGreaterThanOrEqual(MIN_ABUNDANCE);
+        expect(v).toBeLessThanOrEqual(MAX_ABUNDANCE);
+      }
+      // an id that is not an organism gets a neutral weight, not NaN
+      expect(abundanceOf(c, "not-a-species")).toBe(1);
+    }
+  });
+});
+
+describe("the last five releases survive garbage at every entry point", () => {
+  const GARBAGE = [NaN, Infinity, -Infinity, 0, -1e9, 1e9];
+
+  it("nothing returns a non-finite number or an empty label", async () => {
+    const C = await import("../src/community.js");
+    const T = await import("../src/strain_title.js");
+    const E = await import("../src/export_card.js");
+    const L = await import("../src/web_layout.js");
+    const R = await import("../src/web_render.js");
+    const web = L.buildWeb(new Map(), new Set());
+    for (const b of GARBAGE) {
+      expect(Number.isFinite(C.abundanceOf(C.communityOf(b), "pseudomonas")))
+        .toBe(true);
+      expect(C.microbesIn(C.communityOf(b), b).length)
+        .toBeGreaterThanOrEqual(0);
+      expect(T.titleOf(new Map([["psbA", b]])).name.length).toBeGreaterThan(3);
+      expect(typeof T.isGeneralist(new Map([["psbA", b]]))).toBe("boolean");
+      expect(E.cardName("x", b).endsWith(".png")).toBe(true);
+      expect(() => L.webNodeAt(web, b, b, 0.05)).not.toThrow();
+      for (const f of [R.clampWeb({ cx: b, cy: b, scale: b }, 400, 800).scale,
+                       R.fitWeb(b, b).scale]) {
+        expect(Number.isFinite(f) && f > 0,
+               `a view scale of ${String(f)} from ${String(b)}`).toBe(true);
+      }
+    }
+  });
+
+  it("a bad canvas size does not blank the map for the session", async () => {
+    // `fitWeb` SEEDS the view the first time the bench opens. A browser
+    // hands you a non-finite size mid-rotation or before layout settles;
+    // that produced a non-finite scale which `clampWeb` then dutifully
+    // preserved, and the map never appeared again. clampWeb recovering is
+    // the safety net -- not producing bad values is the fix.
+    const { fitWeb } = await import("../src/web_render.js");
+    for (const [w, h] of [[NaN, NaN], [0, 0], [-100, 50], [Infinity, 800]] as const) {
+      const v = fitWeb(w, h);
+      expect(Number.isFinite(v.scale) && v.scale > 0,
+             `fitWeb(${String(w)}, ${String(h)}) gave ${String(v.scale)}`)
+        .toBe(true);
+      expect(Number.isFinite(v.cx) && Number.isFinite(v.cy)).toBe(true);
+    }
+  });
+});
