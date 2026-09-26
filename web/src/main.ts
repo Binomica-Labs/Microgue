@@ -25,11 +25,13 @@ import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
          r_drawScreenFx, r_drawToasts } from "./render.js";
+import type { Fragment } from "./fragment.js";
 import { newResistance } from "./resistance.js";
 import { r_drawPlasmid } from "./plasmid_screen.js";
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
          i_pointerMove, i_pointerUp, i_press } from "./input.js";
 import { t_ascend, t_attack, t_audit, t_descend, t_describeTile, t_die,
+         t_sequence,
          t_look, t_visibleHostile, t_mobTurn, t_onTile, t_repath, t_research, t_step, t_step_,
          t_take, t_takeTurn, t_upkeep, t_win, t_world, t_catabolise,
          t_expand, t_acquire, t_explore, t_eatOffered, t_declineOffered }
@@ -179,6 +181,19 @@ class Game {
   containerBoxes: ContainerBoxes | null = null;
   /** Which loot card is being inspected. See screens.ts. */
   dropPick = 0;
+  /**
+   * Fragments picked up but not yet read.
+   *
+   * NOT `Part[]`: a Part is something the ring can transcribe, and an
+   * unsequenced fragment is exactly the thing that cannot be. Putting it in
+   * that union would force every operon walker, kb sum and install path to
+   * handle a member that is never valid for them.
+   */
+  fragments: Fragment[] = [];
+  /** Index of the fragment awaiting a sequencing confirm, or null. */
+  sequencing: number | null = null;
+  /** Hit boxes for the unread-fragment rows, rebuilt each frame. */
+  fragRows: { box: Box; index: number }[] = [];
   /** Floor-wide quorum signal, 0..1. See quorum.ts. */
   quorum = 0;
   /** What the floor has adapted to. See resistance.ts. */
@@ -342,6 +357,9 @@ class Game {
   enter(level: Level, arrive: Point): void { g_enter(this, level, arrive); }
 
   descend(): void { t_descend(this); }
+
+  /** Read a held fragment. See turn.ts -- the deliberate act. */
+  sequence(index: number): boolean { return t_sequence(this, index); }
 
   ascend(): void { t_ascend(this); }
 

@@ -232,6 +232,23 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
         _g.gesture = "dismiss";
         return;
       }
+      // An unread fragment: tapping asks for a confirm. Nothing is spent or
+      // revealed until that is answered, which is the whole difference from
+      // the old behaviour -- it sequenced on an unconfirmed tap in the loot
+      // menu, so a player browsing a pile could not look at a fragment
+      // without buying it.
+      // A pending sequence is modal over the bin: answer it first.
+      const sb = _g.confirmBoxes;
+      if (_g.sequencing !== null && sb) {
+        if (inBoxOf(sb.yes, x, y)) _g.sequence(_g.sequencing);
+        if (inBoxOf(sb.yes, x, y) || inBoxOf(sb.no, x, y)) _g.sequencing = null;
+        return;
+      }
+      const fr = _g.fragRows.find((r) => inBoxOf(r.box, x, y));
+      if (fr) {
+        _g.sequencing = fr.index;
+        return;
+      }
       // Hit-test the drawn ROWS, not a grid formula. The list scrolls, so
       // where a part is on screen no longer follows from its index.
       const b = _g.binRows.find((r) => inBoxOf(r.box, x, y))?.index ?? null;

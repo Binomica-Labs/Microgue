@@ -118,6 +118,36 @@ themselves and the gamble would evaporate. Also pinned: many genes share a
 length, so the `1.4 kb fragment` name cannot identify the gene either.
 
 
+# v1.69.0 — sequencing is a confirmed act
+
+It sequenced on PICKUP: an unconfirmed tap in the loot menu spent the ATP
+and rolled the result. A player browsing a pile could not LOOK at a fragment
+without buying it, and the decision the whole mechanic exists to create --
+is this worth the ATP, right now -- was made for them by a tap they meant as
+"what is this".
+
+Taking a fragment is now free and reveals nothing. It goes into a HOLD (six
+max: unread DNA degrades, and an unbounded queue would let a player bank a
+run's luck to sequence at leisure). Sequencing happens on a confirmed tap in
+the parts bin, through the same confirm dialog the store uses.
+
+## Fragments are not Parts
+
+`Part` is the RING union -- gene, promoter, terminator -- and everything in
+it is something the plasmid can transcribe. An unsequenced fragment is
+exactly the thing that cannot be. Putting it there would have forced every
+operon walker, kb sum and install path to carry a member that is never valid
+for them, so fragments live in their own `_g.fragments` and draw their own
+rows above the bin.
+
+## Roll, stash, THEN charge
+
+The order matters and it is the same bug as the conjugation one: a full bin
+used to be a way to pay for a read and get nothing. The stash is attempted
+before the ATP comes out, so a refusal costs nothing and leaves the fragment
+in hand.
+
+
 # v1.68.0 — the bench shows what you banked
 
 v1.67.0 asked "what happens when a player removes that gene? Tree dies?" and

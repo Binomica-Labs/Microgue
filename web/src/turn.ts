@@ -128,34 +128,21 @@ export function t_take(_g: Game, it: Item): boolean {
         return true;
       }
       if (it.kind === "fragment") {
-        // SEQUENCE IT. The whole point: you pay ATP to find out what you
-        // picked up, and the price scales with the length you could already
-        // see on the gel. Refusing when you cannot afford it leaves the
-        // fragment on the floor, which is correct -- it is still there when
-        // you can.
-        const cost = sequencingCost(it.frag.kb);
-        if (_g.player.atp < cost) {
-          _g.note(`Sequencing that needs ${String(cost)} ATP. `
-            + "The fragment waits.");
+        // TAKING it is free and reveals nothing. Sequencing is a separate,
+        // deliberate act in the bin.
+        //
+        // It used to sequence on pickup: an unconfirmed tap in the loot
+        // menu spent ATP and rolled the result, so a player browsing a pile
+        // could not look at a fragment without buying it. The decision the
+        // fragment exists to create -- is this worth the ATP, right now --
+        // has to be one the player makes on purpose.
+        if (_g.fragments.length >= FRAGMENT_HOLD) {
+          _g.note("No room for another unread fragment.");
           return false;
         }
-        _g.player.atp -= cost;
-        const rng = makeRng(_g.turnSeed++);
-        const allele = rollAllele(rng, _g.dungeon.depth);
-        const r = _g.genome.stash({ kind: "gene", id: it.frag.gene, level: 1,
-                                    mods: [], allele });
-        if (!r.ok) {
-          _g.player.atp += cost;             // nothing read, nothing charged
-          _g.toasts.push(r.err, "warn", _g.now);
-          return false;
-        }
-        const rarity = alleleRarity(it.frag.gene, allele);
-        _g.note(`${String(cost)} ATP of sequencing. It reads as `
-          + `${alleleName(it.frag.gene, allele)}.`);
-        _g.toasts.push(`${RARITY[rarity].name}: `
-          + alleleName(it.frag.gene, allele), "info", _g.now);
-        _g.fx.add({ kind: "ring", t0: _g.now, dur: 520, x: _g.player.x,
-                    y: _g.player.y, colour: RARITY[rarity].colour, r: 1.4 });
+        _g.fragments.push(it.frag);
+        _g.note(`You take up a ${it.frag.kb.toFixed(1)} kb fragment. `
+          + "Unread until you sequence it.");
         return true;
       }
       const part: Part = it.kind === "promoter"
@@ -291,6 +278,11 @@ import { crossingLine, decay as qDecay, levelOf }
 import { relax } from "./resistance.js";
 import { sequencingCost } from "./fragment.js";
 import { alleleName, alleleRarity, rollAllele } from "./allele.js";
+
+/** How many unread fragments you may carry. A hold, not a hoard: unread DNA
+ *  degrades, and an unbounded queue would let a player bank a whole run's
+ *  luck to sequence at leisure. */
+const FRAGMENT_HOLD = 6;
 import { chanceUnder } from "./fission.js";
 import { tickSecretions } from "./cast.js";
 import type { Intent } from "./combat.js";
@@ -555,5 +547,39 @@ export function t_mobTurn(_g: Game): void {
 export { t_attack, t_explore, t_step, t_step_, t_upkeep }
   from "./actions.js";
 
-
-
+/**
+ * Sequence a held fragment. The deliberate act, on a confirmed tap.
+ *
+ * Everything that used to happen on pickup happens here instead: the ATP
+ * comes out, the allele is rolled, and the result goes to the bin. The
+ * player chose this, having looked at the gel and the price.
+ */
+export function t_sequence(_g: Game, index: number): boolean {
+  const f = _g.fragments[index];
+  if (!f) return false;
+  const cost = sequencingCost(f.kb);
+  if (_g.player.atp < cost) {
+    _g.toasts.push(`Sequencing needs ${String(cost)} ATP.`, "warn", _g.now);
+    return false;
+  }
+  const allele = rollAllele(makeRng(_g.turnSeed++), _g.dungeon.depth);
+  // Roll FIRST, stash SECOND, charge only if it lands: a full bin used to be
+  // a way to pay for a read and get nothing.
+  const r = _g.genome.stash({ kind: "gene", id: f.gene, level: 1, mods: [],
+                              allele });
+  if (!r.ok) {
+    _g.toasts.push(r.err, "warn", _g.now);
+    return false;
+  }
+  _g.player.atp -= cost;
+  _g.fragments.splice(index, 1);
+  const rarity = alleleRarity(f.gene, allele);
+  _g.note(`${String(cost)} ATP of sequencing. It reads as `
+    + `${alleleName(f.gene, allele)}.`);
+  _g.toasts.push(`${RARITY[rarity].name}: ${alleleName(f.gene, allele)}`,
+                 "info", _g.now);
+  _g.fx.add({ kind: "ring", t0: _g.now, dur: 520, x: _g.player.x,
+              y: _g.player.y, colour: RARITY[rarity].colour, r: 1.4 });
+  _g.save();
+  return true;
+}

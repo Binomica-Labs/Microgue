@@ -1782,6 +1782,9 @@ describe("state that should persist, does", () => {
     nameField: "the DOM text input, built at boot", nameBoxes: "hit boxes, per frame",
     containerBoxes: "hit boxes, per frame",
     dropPick: "which loot card is being inspected",
+    fragments: "unread fragments in hand; they live in the run, not the slot",
+    sequencing: "which fragment is awaiting a confirm, this frame",
+    fragRows: "hit boxes, per frame",
     quorum: "the floor's alarm; it decays and is rebuilt by fighting",
     resistance: "what the floor has adapted to; rebuilt as you fight",
     intro: "the lab floor, before anything is created",
@@ -5090,10 +5093,10 @@ describe("everything built today, running at once", () => {
            "an emptied ring is still throttled").toBeGreaterThan(0.5);
   });
 
-  it("sequencing refunds when the bin cannot take the gene", async () => {
-    // The ability version of this bug cost 14 ATP and a cooldown for
-    // nothing. The same shape here would charge a player to read a fragment
-    // and then drop it.
+  it("sequencing charges nothing when the bin cannot take the gene", async () => {
+    // Taking a fragment is now FREE and reveals nothing -- the spend moved
+    // to a confirmed tap in the bin. So the thing to check moved with it:
+    // a refused stash must leave the ATP alone, and the fragment in hand.
     const { sequencingCost } = await import("../src/fragment.js");
     const g = await mk();
     g.startRun(2, "heterotroph");
@@ -5103,15 +5106,17 @@ describe("everything built today, running at once", () => {
                        allele: WILD_TYPE });
     }
     const atp0 = g.player.atp = 500;
-    const frag = { kind: "fragment" as const,
-                   frag: { gene: "katG" as bio.GeneId, kb: 2.2, gc: 0.5 } };
-    const took = g.take(frag);
-    if (!took) {
+    g.fragments = [{ gene: "katG", kb: 2.2, gc: 0.5 }];
+    const ok = g.sequence(0);
+    if (!ok) {
       expect(g.player.atp, "a refused sequence still charged the player")
         .toBe(atp0);
+      expect(g.fragments.length, "a refused sequence consumed the fragment")
+        .toBe(1);
     } else {
       expect(g.player.atp, "a successful sequence charged nothing")
         .toBe(atp0 - sequencingCost(2.2));
+      expect(g.fragments.length, "a read fragment is still in hand").toBe(0);
     }
   });
 });
@@ -5181,5 +5186,74 @@ describe("a new game is a new researcher", () => {
     const { readLab } = await import("../src/lab_save.js");
     expect(readLab(5).credit, "dying wiped the researcher's budget")
       .toBeGreaterThan(0);
+  });
+});
+
+describe("sequencing is a confirmed act, not a side effect of looting", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("taking a fragment costs nothing and reveals nothing", async () => {
+    // It used to sequence ON PICKUP: an unconfirmed tap in the loot menu
+    // spent the ATP and rolled the result, so a player browsing a pile
+    // could not LOOK at a fragment without buying it. The decision the
+    // fragment exists to create -- is this worth the ATP right now -- has
+    // to be one the player makes on purpose.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    const atp0 = g.player.atp = 400;
+    const binBefore = g.genome.bin.length;
+    const took = g.take({ kind: "fragment",
+                          frag: { gene: "mcrA", kb: 1.4, gc: 0.6 } });
+    expect(took, "the fragment was refused").toBe(true);
+    expect(g.player.atp, "taking a fragment charged the player").toBe(atp0);
+    expect(g.genome.bin.length, "taking a fragment put a GENE in the bin")
+      .toBe(binBefore);
+    expect(g.fragments.length, "the fragment is not in hand").toBe(1);
+  });
+
+  it("and sequencing it then costs, reveals, and consumes", async () => {
+    const { sequencingCost } = await import("../src/fragment.js");
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(1, "heterotroph");
+    g.player.atp = 400;
+    g.fragments = [{ gene: "katG", kb: 1.4, gc: 0.5 }];
+    const before = g.genome.bin.length;
+    expect(g.sequence(0), "the sequence was refused").toBe(true);
+    expect(g.player.atp, "sequencing was free")
+      .toBe(400 - sequencingCost(1.4));
+    expect(g.fragments.length, "the fragment survived being read").toBe(0);
+    expect(g.genome.bin.length, "nothing reached the bin")
+      .toBeGreaterThan(before);
+  });
+
+  it("an unaffordable sequence changes nothing at all", async () => {
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(2, "heterotroph");
+    g.player.atp = 1;
+    g.fragments = [{ gene: "mcrA", kb: 3.0, gc: 0.7 }];
+    expect(g.sequence(0), "an unaffordable sequence went through").toBe(false);
+    expect(g.player.atp, "it charged what it could").toBe(1);
+    expect(g.fragments.length, "it ate the fragment anyway").toBe(1);
+    // and a bad index is a no-op, not a throw
+    expect(g.sequence(99)).toBe(false);
+    expect(g.sequence(-1)).toBe(false);
   });
 });

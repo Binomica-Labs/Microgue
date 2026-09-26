@@ -8,9 +8,12 @@
 
 import { BIN_ROW, describe as describeSlot, drawBinList, drawItemCard, drawRing }
   from "./plasmid_ui.js";
-import { drawClose, stage, uiUnit } from "./chrome.js";
+import { drawClose, stage, uiUnit, type Box } from "./chrome.js";
 import { BIN_CAP } from "./plasmid.js";
 import { r_ringReadout } from "./ring_readout.js";
+import { drawConfirm } from "./screens.js";
+import { sequencingCost } from "./fragment.js";
+import { raisedCard } from "./relief.js";
 import { ringHole } from "./render.js";
 import type { Game } from "./main.js";
 
@@ -107,6 +110,10 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
     const list = drawBinList(ctx, { ..._g.bin, w: binW, h: binH },
                              _g.genome.bin, u, _g.dragBin, _g.binScroll,
                              _g.binRows);
+  // Unread fragments, above the parts they will become. They are not Parts
+  // -- the ring can never transcribe one -- so they get their own rows
+  // rather than being smuggled into the bin list's type.
+  _g.fragRows = drawFragmentRows(ctx, _g, W, u);
     _g.binMaxScroll = list.maxScroll;
     // Deferred: the card belongs on top of everything else on this screen.
     const card = _g.card;
@@ -168,6 +175,14 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
 
     // A real close target. "Tap outside" was ambiguous, and it was what let a
     // button press dismiss the screen in the same gesture that opened it.
+    // The confirm sits over everything: sequencing is a spend, and a spend
+    // gets asked about rather than taken on a tap.
+    const pending = _g.sequencing !== null
+      ? _g.fragments[_g.sequencing] : undefined;
+    _g.confirmBoxes = pending
+      ? drawConfirm(ctx, W, H, u, `${pending.kb.toFixed(1)} kb fragment`,
+                    sequencingCost(pending.kb), _g.player.atp)
+      : null;
     _g.closeBox = drawClose(ctx, W, ins, u);
     if (card) {
       const isOrigin = card.kind === "gene" && card.id === "ori";
@@ -179,3 +194,49 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
                                   _g.cardConfirm);
     }
   }
+
+/**
+ * The unread fragments, as rows above the bin.
+ *
+ * Each shows what the gel shows -- a length -- and what it will cost to
+ * read. Tapping one asks for a confirm; nothing is spent or revealed until
+ * that confirm is answered.
+ */
+function drawFragmentRows(
+  ctx: CanvasRenderingContext2D, _g: Game, W: number, u: number,
+): { box: Box; index: number }[] {
+  const rows: { box: Box; index: number }[] = [];
+  if (_g.fragments.length === 0) return rows;
+  const ins = stage(W, _g.insets(), u);
+  const w = W - ins.left - ins.right - 28 * u;
+  const h = 26 * u;
+  let y = _g.ring.cy + _g.ring.rOuter + 6 * u;
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < _g.fragments.length; i++) {
+    const f = _g.fragments[i];
+    if (!f) continue;
+    const box: Box = { x: ins.left + 14 * u, y, w, h };
+    const cost = sequencingCost(f.kb);
+    const can = _g.player.atp >= cost;
+    raisedCard(ctx, box.x, box.y, box.w, box.h, 4 * u, "#141c18", 2 * u);
+    ctx.strokeStyle = can ? "#8b9aa4" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = Math.max(1.2 * u, 1);
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 4 * u);
+    ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#d8e4ea";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.fillText(`${f.kb.toFixed(1)} kb fragment  \u00b7  ?????`,
+                 box.x + 9 * u, y + h / 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle = can ? "#cfe04a" : "#6f8f7c";
+    ctx.font = `${9.5 * u}px ui-monospace,monospace`;
+    ctx.fillText(`sequence ${String(cost)} ATP`, box.x + w - 9 * u, y + h / 2);
+    rows.push({ box, index: i });
+    y += h + 4 * u;
+  }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  return rows;
+}
