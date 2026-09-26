@@ -335,3 +335,50 @@ describe("the button strip says what it does", () => {
     expect(debug.filter((id) => id !== "down" && id !== "up")).toEqual(normal);
   });
 });
+
+describe("the bench card does not collide with anything", () => {
+  it("the card clears the footer, and the tree clears the card", async () => {
+    // It shipped overlapping BOTH. The card was positioned off the trunk's
+    // root and sized by guesswork, so the footer line printed inside it and
+    // the tree's own root drew through it. Anchoring to the one fixed thing
+    // on the screen -- the bottom inset -- is the difference between a
+    // layout and a hope.
+    const { benchGeometry, layout } = await import("../src/bench_tree.js");
+    for (const [W, H] of [[1080, 2400], [393, 852], [320, 560]] as const) {
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      const insTop = 24, insBottom = 12;
+      // THE RENDERER'S OWN numbers, not a copy of them. The first version
+      // recomputed the layout here, so it checked the formula was sound and
+      // proved nothing about whether bench_render used it -- moving the card
+      // back onto the footer produced zero failures.
+      const { treeTop: top, treeH: h, cardTop, cardH, footerY } =
+        benchGeometry(H, u, insTop, insBottom, 4);
+      const l = layout([{ id: "psbA", level: 2 },
+                        { id: "katG", level: 1 }], W, h, u);
+
+      expect(cardTop + cardH, `${String(W)}x${String(H)}: the card covers the footer`)
+        .toBeLessThan(footerY);
+      expect(l.rootY + top, `${String(W)}x${String(H)}: the tree draws over the card`)
+        .toBeLessThan(cardTop);
+      // ...and the tree still starts below the trait strip
+      for (const n of l.nodes) {
+        expect(n.y + top, `${String(W)}x${String(H)}: a node is in the header`)
+          .toBeGreaterThan(insTop + 100 * u);
+      }
+    }
+  });
+
+  it("a sparse tree does not leave a void above it", async () => {
+    // Two genes on a tall phone left several hundred pixels of nothing
+    // between the trait strip and the highest branch. A sparse tree should
+    // be a SMALL tree, not a stretched one with a hole on top.
+    const { layout } = await import("../src/bench_tree.js");
+    const h = 1700;
+    const l = layout([{ id: "psbA", level: 2 },
+                      { id: "katG", level: 1 }], 1080, h, 2.57);
+    const highest = Math.min(...l.branches.map((b) => b.tipY),
+                             ...l.nodes.map((n) => n.y));
+    expect(highest / h, `the tree starts ${((highest / h) * 100).toFixed(0)}% `
+      + "down its own space").toBeLessThan(0.25);
+  });
+});

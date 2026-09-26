@@ -118,6 +118,35 @@ themselves and the gamble would evaporate. Also pinned: many genes share a
 length, so the `1.4 kb fragment` name cannot identify the gene either.
 
 
+## v1.69.1 — the bench card collided with everything
+
+v1.67.0's detail card was positioned off the trunk's root and sized by
+guesswork. It overlapped the footer line, it overlapped ITSELF (product and
+gene name 8u apart at a 12u font), and the tree drew straight through it.
+The tree's coordinate origin also sat INSIDE the trait strip, and a two-gene
+tree stretched across two thousand pixels with a void above it.
+
+Rebuilt from the bottom up, anchored to the one fixed thing on the screen:
+the bottom inset. Rows stack at a spacing derived from the font size. The
+tree gets the space that is actually free -- below the strip, above the
+card -- rather than the whole screen. And a lone gene now sits FAR out on
+its limb (0.84 rather than 0.62), because a sparse tree should be a small
+tree, not a stretched one with a hole on top.
+
+## A test that verified the formula and not the code
+
+The first version of the collision test recomputed the card's position
+itself. Moving the card back onto the footer produced ZERO failures: it was
+checking that the arithmetic was sound, not that the renderer used it.
+
+`benchGeometry()` is now the single definition, called by the renderer and
+by the test. The same regression now produces two failures. **A test that
+duplicates the thing it checks cannot fail** -- this is the third time
+today duplicated logic has been the bug (two `occupancy` predicates, two
+`isGeneId` copies, and now this), and the second time the duplicate was in
+a test rather than in the code.
+
+
 # v1.69.0 — sequencing is a confirmed act
 
 It sequenced on PICKUP: an unconfirmed tap in the loot menu spent the ATP

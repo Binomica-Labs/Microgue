@@ -1,7 +1,7 @@
 // Microgue © 2026 Binomica Labs. CC BY-NC-SA 4.0. https://github.com/Binomica-Labs/Microgue
 // Drawing the bench tree. Layout lives in bench_tree.ts; this only paints.
 
-import { layout, type TreeLayout } from "./bench_tree.js";
+import { benchGeometry, layout, type TreeLayout } from "./bench_tree.js";
 import { GENES, type GeneId } from "./biology.js";
 import { PATHWAY_COLOUR } from "./plasmid_ui.js";
 import { MAX_LEVEL, evolutionCost, levelMultiplier } from "./parts.js";
@@ -26,8 +26,16 @@ export function drawTree(
   genes: readonly { id: GeneId; level: number; detached?: boolean }[],
   atp: number, selected: GeneId | null, now: number,
 ): BenchTreeResult {
-  const top = ins.top + 96 * u;
-  const l = layout(genes, W, H - top, u);
+  // The tree gets the space that is ACTUALLY free, which is neither the
+  // whole screen nor what I assumed.
+  //
+  // `ins.top + 96u` put the tree's coordinate origin INSIDE the trait strip
+  // (which runs to about ins.top + 136u), and the full height let a
+  // two-gene tree stretch across 2000px with a void above it. A tree should
+  // grow into its space, not be inflated to fill a box it was never given.
+  const geo = benchGeometry(H, u, ins.top, ins.bottom, 4);
+  const top = geo.treeTop;
+  const l = layout(genes, W, geo.treeH, u);
   const rows: TreeRow[] = [];
   const shift = top;
 
@@ -147,49 +155,67 @@ export function drawTree(
     const afford = Number.isFinite(cost) && atp >= cost && !capped
       && !pick.detached;
     const tint = PATHWAY_COLOUR[pick.pathway];
-    const by = l.rootY + shift - 34 * u;
-    // A raised card behind it, so it reads as a panel rather than as text
-    // floating over the trunk.
-    const cardW = Math.min(W - 40 * u, 320 * u);
-    const cardH = 74 * u;
-    raisedCard(ctx, W / 2 - cardW / 2, by - 20 * u, cardW, cardH, 6 * u,
+
+    // Laid out from the BOTTOM UP, against the footer.
+    //
+    // It was positioned off the trunk's root and sized by guesswork: the
+    // card swallowed the footer line, and its two text rows sat 8u apart at
+    // a 12u font so the product printed through the gene name. Anchoring to
+    // the one fixed thing on the screen -- the footer -- and stacking rows
+    // at a spacing derived from the font size is the difference between a
+    // layout and a hope.
+    const line = 15 * u;
+    const rows = capped || pick.detached ? 3 : afford ? 3 : 4;
+    const g2 = benchGeometry(H, u, ins.top, ins.bottom, rows);
+    const cardH = g2.cardH;
+    const cardW = Math.min(W - 36 * u, 340 * u);
+    const top0 = g2.cardTop;
+    const cx = W / 2;
+
+    raisedCard(ctx, cx - cardW / 2, top0, cardW, cardH, 6 * u,
                "#141c18", 2.5 * u);
     ctx.strokeStyle = tint;
     ctx.lineWidth = Math.max(1.6 * u, 1);
     ctx.beginPath();
-    ctx.roundRect(W / 2 - cardW / 2, by - 20 * u, cardW, cardH, 6 * u);
+    ctx.roundRect(cx - cardW / 2, top0, cardW, cardH, 6 * u);
     ctx.stroke();
 
     ctx.textAlign = "center";
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `${12 * u}px ui-monospace,monospace`;
-    ctx.fillText(`${GENES[pick.id].name}  L${String(pick.level)}`, W / 2, by);
-    // WHAT IT IS. The one thing a coloured dot can never tell you.
+    ctx.textBaseline = "middle";
+    let y = top0 + 12 * u;
+
+    // WHAT IT IS -- the one thing a coloured dot can never tell you.
     ctx.fillStyle = shade(tint, 0.35);
     ctx.font = `${9 * u}px ui-monospace,monospace`;
-    ctx.fillText(`${GENES[pick.id].product}  \u00b7  ${pick.pathway}`,
-                 W / 2, by - 8 * u);
+    ctx.fillText(`${GENES[pick.id].product}  \u00b7  ${pick.pathway}`, cx, y);
+    y += line;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `${12 * u}px ui-monospace,monospace`;
+    ctx.fillText(`${GENES[pick.id].name}  L${String(pick.level)}`, cx, y);
+    y += line;
+
     ctx.font = `${10 * u}px ui-monospace,monospace`;
     if (pick.detached) {
       ctx.fillStyle = shade(tint, 0.3);
-      ctx.fillText(`L${String(pick.level)} kept in the bin \u2014 install it to evolve it`,
-                   W / 2, by + 15 * u);
+      ctx.fillText("kept in the bin \u2014 install it to evolve it", cx, y);
     } else if (capped) {
       ctx.fillStyle = tint;
-      ctx.fillText("maxed", W / 2, by + 15 * u);
+      ctx.fillText("maxed", cx, y);
     } else {
       ctx.fillStyle = afford ? tint : "#6f8f7c";
       ctx.fillText(
         `${String(cost)} ATP   x${levelMultiplier(pick.level).toFixed(2)}`
-        + ` \u2192 x${levelMultiplier(pick.level + 1).toFixed(2)}`,
-        W / 2, by + 15 * u);
+        + ` \u2192 x${levelMultiplier(pick.level + 1).toFixed(2)}`, cx, y);
       if (!afford) {
+        y += line;
         ctx.fillStyle = "rgba(255,255,255,0.35)";
         ctx.font = `${9 * u}px ui-monospace,monospace`;
         ctx.fillText(`${String(Math.max(Math.ceil(cost - atp), 0))} ATP short`,
-                     W / 2, by + 28 * u);
+                     cx, y);
       }
     }
+    ctx.textBaseline = "alphabetic";
   }
   ctx.textAlign = "left";
   ctx.restore();

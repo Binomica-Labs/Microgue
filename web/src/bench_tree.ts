@@ -128,7 +128,13 @@ export function layout(
     list.forEach((g, k) => {
       // Spaced along the branch, nearest the fork first, leaving room at the
       // tip so a long branch does not run off the top.
-      const step = list.length === 1 ? 0.62 : 0.30 + (k / (list.length - 1)) * 0.56;
+      // A lone gene sits FAR out, not two thirds along. With one gene per
+      // branch the old 0.62 left a third of the limb -- and on a tall phone
+      // several hundred pixels -- as visible empty space above the only
+      // thing on it. A sparse tree should be a small tree, not a stretched
+      // one with a void on top.
+      const step = list.length === 1 ? 0.84
+        : 0.30 + (k / (list.length - 1)) * 0.56;
       const d = reach * step;
       const x = rootX + Math.cos(angle) * d;
       const y = forkY + Math.sin(angle) * d;
@@ -149,7 +155,7 @@ export function layout(
     // A branch that runs on into empty space is a limb pointing at nothing,
     // and with one gene on it that was most of the branch.
     const lastStep = list.length === 0 ? 0.3
-      : list.length === 1 ? 0.62 : 0.86;
+      : list.length === 1 ? 0.84 : 0.86;
     const tipD = reach * Math.min(lastStep + 0.1, 0.95);
     branches.push({ pathway: p, angle, thickness,
                     tipX: rootX + Math.cos(angle) * tipD,
@@ -170,4 +176,27 @@ export function nodeAt(
     if (d <= nd.r * 1.6 && d < bestD) { best = nd; bestD = d; }
   }
   return best;
+}
+
+/**
+ * Where the detail card sits, and how much room the tree may have.
+ *
+ * ONE definition, used by the renderer and by the test that checks it does
+ * not collide with anything. The first version of that test recomputed
+ * these numbers itself, so it verified the formula was sound and proved
+ * nothing about whether the renderer used it -- moving the card back onto
+ * the footer produced zero failures. A test that duplicates the thing it
+ * checks is a test that cannot fail.
+ */
+export function benchGeometry(
+  H: number, u: number, insTop: number, insBottom: number, rows: number,
+): { treeTop: number; treeH: number; cardTop: number; cardH: number;
+     footerY: number } {
+  const line = 15 * u;
+  const cardH = Math.min(Math.max(rows, 3), 4) * line + 14 * u;
+  const footerY = H - insBottom - 14 * u;
+  const cardTop = H - insBottom - 30 * u - cardH;
+  const treeTop = insTop + 150 * u;
+  const treeH = Math.max(H - treeTop - (96 * u + insBottom), 120 * u);
+  return { treeTop, treeH, cardTop, cardH, footerY };
 }
