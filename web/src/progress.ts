@@ -93,7 +93,7 @@ export function t_die(_g: Game): void {
   // the next `startRun`'s `readLab()` -- the whole mechanic silently did
   // nothing on a real device. Anything a death produces must be written
   // after it is produced.
-  writeLab(_g.lab);
+  writeLab(_g.lab, _g.slot);
   if (h.parts.length > 0) {
     _g.note(`${String(h.parts.length)} constructs pass to generation `
       + `${String(h.generation)}. ${String(h.lost.length)} lost.`);

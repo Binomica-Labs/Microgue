@@ -16,7 +16,21 @@ import { parseSuccession, successionEntries } from "./succession.js";
 import { parsePart } from "./save.js";
 import { BIN_CAP, SLOTS, type Part } from "./plasmid.js";
 
+/**
+ * The lab is PER SLOT, because a save slot is a researcher.
+ *
+ * One global key meant credit, stock, heirloom, generation and succession
+ * were shared by every new game ever started: a fresh researcher inherited
+ * the last one's bought upgrades and banked synthesis budget, so "new game"
+ * never actually started anything new. A slot is a person with a bench;
+ * the runs they launch down the tube are theirs alone.
+ */
 export const LAB_KEY = "microgue:lab:v1";
+
+export function labKey(slot: number): string {
+  const s = Number.isFinite(slot) ? Math.max(Math.trunc(slot), 0) : 0;
+  return `${LAB_KEY}:${String(s)}`;
+}
 
 const num = (v: unknown, d: number): number =>
   typeof v === "number" && Number.isFinite(v) ? v : d;
@@ -87,16 +101,22 @@ export function parseLab(raw: unknown): Lab {
   };
 }
 
-export function readLab(): Lab {
+/** Wipe a slot's researcher. A NEW researcher starts with nothing: no
+ *  bought upgrades, no stock, no heirloom, and a synthesis budget of zero. */
+export function clearLab(slot: number): void {
+  try { localStorage.removeItem(labKey(slot)); } catch { /* full or blocked */ }
+}
+
+export function readLab(slot = 0): Lab {
   try {
-    const raw = localStorage.getItem(LAB_KEY);
+    const raw = localStorage.getItem(labKey(slot));
     return raw === null ? newLab() : parseLab(JSON.parse(raw));
   } catch { return newLab(); }
 }
 
-export function writeLab(lab: Lab): boolean {
+export function writeLab(lab: Lab, slot = 0): boolean {
   try {
-    localStorage.setItem(LAB_KEY, JSON.stringify({
+    localStorage.setItem(labKey(slot), JSON.stringify({
       ...lab, succession: successionEntries(lab.succession),
     }));
     return true;

@@ -587,7 +587,14 @@ export function drawContainer(
       // modifier. "uncommon terminator" is 19 characters and ran across the
       // next tile on every phone.
       ctx.fillStyle = edge;
-      const kind = it.kind === "substrate" ? SUBSTRATES[it.id].formula
+      // A fragment has no rarity to show. `rarityOf` falls through to
+      // "common" for anything without the field, so an unsequenced fragment
+      // was labelled COMMON -- which answers the exact question the player
+      // is being asked to pay for, and answers it wrongly: it is not common,
+      // it is unread. The neutral colour was already right; the label was
+      // quietly undoing it.
+      const kind = it.kind === "fragment" ? "?????"
+        : it.kind === "substrate" ? SUBSTRATES[it.id].formula
         : it.kind === "symbiont" ? "symbiont"
         : RARITY[rarityOf(it)].name;
       fitInto(ctx, kind, cell - 8 * u, Math.max(cell * 0.13, 7), 6);

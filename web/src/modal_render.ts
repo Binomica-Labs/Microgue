@@ -127,7 +127,17 @@ function drawBenchTree(
   const genes = _g.genome.slots.flatMap((p) =>
     p?.kind === "gene" && p.id !== "ori" ? [{ id: p.id, level: p.level }] : []);
 
-  if (genes.length === 0) {
+  // ...plus LEVELLED genes sitting in the bin, as ghosts. Uninstalling
+  // keeps a gene's levels (the Part carries them), but the tree was built
+  // from ring slots only, so a branch vanished and nothing told the player
+  // their ATP was still banked. Only levelled ones: an L1 spare is a spare,
+  // not an investment, and drawing every bin gene would bury the signal.
+  const shelved = _g.genome.bin.flatMap((p) =>
+    p.kind === "gene" && p.id !== "ori" && p.level > 1
+      ? [{ id: p.id, level: p.level, detached: true }] : []);
+  const onTree = [...genes, ...shelved];
+
+  if (onTree.length === 0) {
     ctx.fillStyle = "#6f8f7c";
     ctx.font = `${11 * u}px ui-monospace,monospace`;
     ctx.fillText("No genes on the ring to work on.", ins.left + 14 * u,
@@ -136,7 +146,7 @@ function drawBenchTree(
     return drawClose(ctx, W, ins, u);
   }
 
-  const t = drawTree(ctx, W, H, ins, u, genes, _g.player.atp,
+  const t = drawTree(ctx, W, H, ins, u, onTree, _g.player.atp,
                      _g.researchPick, _g.now);
   _g.researchRows = [...strip, ...t.rows.map((r) => ({
     box: r.box, kind: "evolve" as const, gene: r.gene,

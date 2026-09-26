@@ -318,7 +318,7 @@ class Game {
     this.ctx = ctx;
     // The splash decides what to load, so boot does not.
     migrateLegacy();
-    this.lab = readLab();
+    this.lab = readLab(this.slot);
     try {
       if (localStorage.getItem("microgue:updated") === "1") {
         localStorage.removeItem("microgue:updated");
@@ -466,7 +466,7 @@ class Game {
     this.pendingOrder = null;
     const r = buy(this.lab, offer);
     if (!r.ok) { this.toasts.push(r.err, "warn", this.now); return; }
-    writeLab(this.lab);
+    writeLab(this.lab, this.slot);
     this.toasts.push(`Ordered ${offer.name}. ${String(this.lab.credit)} credit left.`,
                      "info", this.now);
   }
@@ -588,7 +588,7 @@ class Game {
 
   load(): boolean {
     migrateLegacy();
-    this.lab = readLab();
+    this.lab = readLab(this.slot);
     const s = readSave(SAVE_KEY);
     if (s === null) return false;
     this.applySave(s);

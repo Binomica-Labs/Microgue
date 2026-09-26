@@ -309,8 +309,8 @@ describe("the new systems are reachable from play", () => {
   // one turn into the run: upkeep recomputed the level from an empty notebook
   // and silently downgraded it, taking three ring positions with it.
   it("a strain level the lab paid for survives the first turn", async () => {
-    const { LAB_KEY } = await import("../src/lab_save.js");
-    localStorage.setItem(LAB_KEY, JSON.stringify({
+    const { labKey } = await import("../src/lab_save.js");
+    localStorage.setItem(labKey(0), JSON.stringify({
       credit: 0, deepestEver: 20, ledger: [], stock: [],
       startSites: 4, startStrain: 8,
     }));
@@ -326,8 +326,8 @@ describe("the new systems are reachable from play", () => {
   });
 
   it("a purchased strain survives a save and reload", async () => {
-    const { LAB_KEY } = await import("../src/lab_save.js");
-    localStorage.setItem(LAB_KEY, JSON.stringify({
+    const { labKey } = await import("../src/lab_save.js");
+    localStorage.setItem(labKey(0), JSON.stringify({
       credit: 0, deepestEver: 1, ledger: [], stock: [],
       startSites: 0, startStrain: 5,
     }));
@@ -366,6 +366,11 @@ describe("the new systems are reachable from play", () => {
 });
 
 describe("permadeath and the lab", () => {
+  // These used to die in slot 0 and resume in slot 1, expecting the lab to
+  // follow. That was the old GLOBAL lab: one bench shared by every game
+  // ever started, so a fresh researcher inherited the last one's upgrades
+  // and budget. A slot is a researcher now, so meta-progression follows the
+  // SLOT -- and the test says so.
   const canvas2 = () => ({
     width: 400, height: 800, style: {} as CSSStyleDeclaration,
     getContext: () => stubContext({ calls: 0 }),
@@ -411,7 +416,7 @@ describe("permadeath and the lab", () => {
     expect(earned).toBeGreaterThan(0);
 
     const b = new Game(canvas2());
-    b.startRun(1);
+    b.startRun(0);   // the SAME researcher: one slot, one bench
     expect(b.lab.credit, "the lab did not persist").toBe(earned);
     expect(b.lab.ledger.length).toBe(1);
     expect(b.lab.deepestEver).toBe(11);
@@ -427,9 +432,14 @@ describe("permadeath and the lab", () => {
     if (!offer) return;
     a.order(offer);
     expect(a.lab.stock).toContain("mtrC");
+    // The strain has to DIE before the next one starts: a slot with a live
+    // save resumes it, and a resumed run does not re-draw from stock. That
+    // is the real flow -- permadeath, then a new culture on the same bench.
+    a.player.hp = 0;
+    a.die();
 
     const b = new Game(canvas2());
-    b.startRun(2);
+    b.startRun(0);   // same slot = same researcher
     expect(b.genome.inBin("mtrC") || b.genome.has("mtrC"),
            "the ordered construct is not on the new strain").toBe(true);
   });
@@ -447,7 +457,7 @@ describe("permadeath and the lab", () => {
     expect(a.lab.startStrain).toBeGreaterThan(1);
 
     const b = new Game(canvas2());
-    b.startRun(3);
+    b.startRun(0);   // same slot = same researcher
     expect(b.genome.integrated).toBeGreaterThan(0);
     expect(b.genome.strain).toBeGreaterThan(1);
   });
@@ -463,7 +473,7 @@ describe("permadeath and the lab", () => {
     for (let i = 0; i < 4; i++) deleteSlot(i);
 
     const b = new Game(canvas2());
-    b.startRun(0);
+    b.startRun(0);   // same slot = same researcher
     expect(b.lab.credit, "the lab lived in a slot file").toBe(777);
   });
 });
@@ -4493,7 +4503,7 @@ describe("release soak: lineage across real deaths", () => {
       willInherit = g.lab.heirloom.flatMap((p) => (p.kind === "gene" ? [p.id] : []));
     }
     expect(willInherit.length, "six deaths and not one gene inherited").toBeGreaterThan(0);
-    g.startRun(1, "heterotroph");
+    g.startRun(0, "heterotroph");   // same researcher
     // Bin OR ring: an inherited gene the class operon also uses is assembled
     // onto the ring from the bin.
     for (const id of willInherit) {
@@ -4535,7 +4545,7 @@ describe("release soak: lineage across real deaths", () => {
     const { traceOf } = await import("../src/succession.js");
     const before = traceOf(g.lab.succession, 1).grazed;
     expect(before, "death left no trace on its floor").toBeGreaterThan(0);
-    g.startRun(1, "heterotroph");
+    g.startRun(0, "heterotroph");   // same researcher
     expect(traceOf(g.lab.succession, 1).grazed, "the trace did not survive startRun")
       .toBeCloseTo(before, 5);
     expect(g.dungeon.influence.mobs, "the next strain's F1 was not thinned")
@@ -5103,5 +5113,73 @@ describe("everything built today, running at once", () => {
       expect(g.player.atp, "a successful sequence charged nothing")
         .toBe(atp0 - sequencingCost(2.2));
     }
+  });
+});
+
+describe("a new game is a new researcher", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("two slots are two benches: nothing crosses between them", async () => {
+    // One global lab key meant credit, stock, heirloom, generation and
+    // succession were shared by every game ever started -- a fresh
+    // researcher inherited the last one's bought upgrades and banked
+    // budget, so "new game" never started anything new.
+    const { labKey, readLab, writeLab } = await import("../src/lab_save.js");
+    const { newLab } = await import("../src/lab.js");
+    expect(labKey(0), "two slots share a key").not.toBe(labKey(1));
+
+    const a = newLab();
+    a.credit = 500;
+    a.stock = ["mtrC"];
+    a.deepestEver = 19;
+    writeLab(a, 0);
+
+    const other = readLab(1);
+    expect(other.credit, "slot 1 inherited slot 0's budget").toBe(0);
+    expect(other.stock, "slot 1 inherited slot 0's stock").toEqual([]);
+    expect(other.deepestEver, "slot 1 inherited slot 0's record").toBe(0);
+    // ...and slot 0 is untouched by the read
+    expect(readLab(0).credit, "slot 0 lost its budget").toBe(500);
+  });
+
+  it("clearing a researcher zeroes the budget and empties the bench", async () => {
+    const { labKey, readLab, writeLab, clearLab } =
+      await import("../src/lab_save.js");
+    const { newLab } = await import("../src/lab.js");
+    const l = newLab();
+    l.credit = 420;
+    l.stock = ["katG", "mtrC"];
+    l.generation = 7;
+    writeLab(l, 3);
+    expect(readLab(3).credit).toBe(420);
+    clearLab(3);
+    const fresh = readLab(3);
+    expect(fresh.credit, "the synthesis budget survived a new researcher")
+      .toBe(0);
+    expect(fresh.stock, "the gene stock survived").toEqual([]);
+    expect(fresh.generation, "the lineage survived").toBeLessThanOrEqual(1);
+    expect(labKey(3)).toContain("3");
+  });
+
+  it("DEATH does not wipe the researcher -- only an explicit new game does", async () => {
+    // The first version inferred "new researcher" from "the slot has no
+    // save". Death DELETES the slot file, so that inference wiped the bench
+    // on every death, destroying exactly the meta-progression the lab
+    // exists to carry. Ten tests caught it. The wipe is triggered from the
+    // menu's New Game path and nowhere else.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(5, "heterotroph");
+    g.lab.credit = 250;
+    g.player.hp = 0;
+    g.die();
+    const { readLab } = await import("../src/lab_save.js");
+    expect(readLab(5).credit, "dying wiped the researcher's budget")
+      .toBeGreaterThan(0);
   });
 });

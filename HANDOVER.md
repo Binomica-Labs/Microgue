@@ -97,6 +97,97 @@ that is *almost* opaque is not atmospheric, it is noise a player has to
 learn to ignore. Opaque now.
 
 
+## v1.66.1 — the fragment was labelled COMMON
+
+Shipped yesterday's fragments with the loot card reading "common" under the
+gel. `rarityOf` falls through to `"common"` for anything without a `rarity`
+field, and a fragment deliberately has none -- so the card answered the exact
+question the player is being asked to pay for, and answered it WRONGLY: the
+fragment is not common, it is unread.
+
+Worse, I had already thought about this: `itemColour` returns a neutral grey
+for fragments precisely so rarity stays hidden, with a comment saying so.
+The colour was right and the label beside it was quietly undoing it. **A
+default that is correct for every other case is still a leak when a new case
+means "no value".**
+
+Reads `?????` now. `spec` checks every surface -- name, short name, note,
+colour -- against a DEEP gene (mcrA), because a tell that only fires on the
+good ones is worse than no tell: the interesting fragments would announce
+themselves and the gamble would evaporate. Also pinned: many genes share a
+length, so the `1.4 kb fragment` name cannot identify the gene either.
+
+
+# v1.68.0 — the bench shows what you banked
+
+v1.67.0 asked "what happens when a player removes that gene? Tree dies?" and
+answered it: `evolve` mutates the Part in place, `uninstall` moves that Part
+to the BIN, so the levels travel with it. The investment was always safe.
+
+But the tree was built from ring slots ONLY. Take an L4 gene off and the
+branch simply vanished, with nothing anywhere saying the four levels of ATP
+still existed. **An investment you cannot see is one you assume you lost.**
+
+Levelled bin genes now appear as GHOSTS: hollow, dashed, in their pathway
+colour, labelled "in the bin". Three rules, each with a reason:
+
+* **A ghost never thickens its limb.** Branch thickness is a claim about
+  what the strain can currently DO, and a branch fattening for parts on a
+  shelf would lie about it.
+* **A ghost can never be bought.** `evolve` searches the ring, so a purchase
+  would take the ATP and refuse. Its card says "install it to evolve it"
+  rather than offering a button that cannot work.
+* **Only LEVELLED genes qualify.** An L1 spare is a spare, not an
+  investment, and drawing every bin gene would bury the signal under exactly
+  the parts nobody is asking about.
+
+
+# v1.67.0 — a new game is a new researcher
+
+## One global bench, shared by every game ever started
+
+`LAB_KEY` was a single key, so credit, stock, heirloom, generation and
+succession belonged to nobody in particular: a fresh start inherited the
+last researcher's bought upgrades and banked synthesis budget. "New game"
+never started anything new.
+
+**The slot is the researcher now.** `labKey(slot)` per bench; an explicit
+New Game wipes that slot's lab, so the budget goes to zero and the bench is
+bare. The slot next door is someone else. Every run launched down the tube
+afterwards belongs to that one researcher.
+
+## The first version destroyed the meta-progression
+
+I inferred "new researcher" from "the slot has no save". Death DELETES the
+slot file -- so that inference wiped the bench on every death, costing
+exactly the progression the lab exists to carry, and contradicting the
+comment two lines above it that promises dying must not. **Ten tests caught
+it.** The wipe now fires from the menu's New Game path and nowhere else,
+which is the only place a player deliberately says "start over", and `spec`
+pins that dying does NOT wipe.
+
+Five more tests were encoding the old semantics -- die in slot 0, resume in
+slot 1, expect the lab to follow. They use one slot now, and say why.
+
+## What happens when you remove a levelled gene
+
+Asked, checked, and the answer is good: `evolve` mutates the Part in place
+and `uninstall` moves that Part to the BIN, so the level travels with it.
+The tree node vanishes and the investment is safe; re-installing restores
+both. Only catabolising destroys it.
+
+The tree does not "die" -- but nothing tells the player that, which is worth
+fixing next: ghost nodes for levelled genes sitting in the bin would show an
+investment that is currently invisible.
+
+## The tree was too abstract
+
+A tree of coloured dots shows the SHAPE of a build and says nothing about
+what any node is. Tapping one now opens a raised card: the gene's product,
+its pathway, its level, and what the next level buys. The shape is the
+overview; the card is the detail. It was trying to be both.
+
+
 # v1.66.0 — hardening everything from v1.52 to v1.65
 
 Fourteen releases today, each tested alone. This pass is the seams.

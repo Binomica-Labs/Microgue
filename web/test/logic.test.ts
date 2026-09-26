@@ -11596,3 +11596,114 @@ describe("every system built today survives garbage at its boundary", () => {
     }
   });
 });
+
+describe("an unsequenced fragment gives nothing away", () => {
+  it("no screen labels it with a rarity it has not earned", async () => {
+    // It shipped labelled COMMON. `rarityOf` falls through to "common" for
+    // anything without a `rarity` field, so the loot card answered the exact
+    // question the player is being asked to pay for -- and answered it
+    // wrongly, because the fragment is not common, it is UNREAD. The neutral
+    // colour was already right and the label was quietly undoing it.
+    const { fragmentOf } = await import("../src/fragment.js");
+    const { itemColour, itemName, itemShortName, itemNote } =
+      await import("../src/items.js");
+    const { RARITY } = await import("../src/parts.js");
+    // mcrA is a deep, rare gene: if anything leaks, it leaks here
+    const it = { kind: "fragment" as const,
+                 frag: fragmentOf("mcrA", makeRng(4)) };
+    const surfaces = [itemName(it), itemShortName(it), itemNote(it)];
+    for (const s of surfaces) {
+      expect(s, `"${s}" names the gene`).not.toContain("mcrA");
+      expect(s.toLowerCase(), `"${s}" names a rarity`)
+        .not.toMatch(/common|uncommon|rare|epic|legendary/);
+      expect(s, `"${s}" leaks the product`)
+        .not.toContain(bio.GENES.mcrA.product);
+    }
+    for (const r of Object.values(RARITY)) {
+      expect(itemColour(it), "the fragment wears a rarity colour")
+        .not.toBe(r.colour);
+    }
+  });
+
+  it("every gene's fragment is equally opaque, deep or shallow", () => {
+    // A tell that only fires on the good ones is worse than no tell: it
+    // would mean the interesting fragments announce themselves and the
+    // gamble evaporates.
+    const names = new Set<string>();
+    for (const id of Object.keys(bio.GENES)) {
+      if (id === "ori") continue;
+      names.add(`${bio.GENES[id as bio.GeneId].kb.toFixed(1)} kb fragment`);
+    }
+    // Many genes share a length, so the NAME cannot identify the gene.
+    expect(names.size, "every gene has a unique length, so the name is a tell")
+      .toBeLessThan(Object.keys(bio.GENES).length - 1);
+  });
+});
+
+describe("a levelled gene in the bin is still visible", () => {
+  it("uninstalling keeps the level, and the tree still shows it", async () => {
+    // `evolve` mutates the Part in place and `uninstall` moves that Part to
+    // the bin, so levels travel with it -- the investment was always safe.
+    // But the tree was built from ring slots ONLY, so the branch vanished
+    // and nothing anywhere said the four levels of ATP still existed. An
+    // investment you cannot see is one you assume you lost.
+    const { layout } = await import("../src/bench_tree.js");
+    const p = new Plasmid();
+    p.integrated = 20;
+    p.stash({ kind: "gene", id: "psbA", level: 1, mods: [], allele: WILD_TYPE });
+    // The LAST bin entry and a genuinely free slot: index 0 is not
+    // necessarily the part just stashed, and slot 2 is not necessarily empty.
+    const slot = p.slots.findIndex((s) => s === null);
+    expect(slot, "no free slot to install into").toBeGreaterThanOrEqual(0);
+    const ok = p.install(p.bin.length - 1, slot);
+    expect(ok.ok, "the install was refused").toBe(true);
+    p.evolve("psbA");
+    p.evolve("psbA");
+    const onRing = p.slots[slot];
+    const lifted = onRing?.kind === "gene" ? onRing.level : 0;
+    expect(lifted, "evolve did not raise the level").toBeGreaterThan(1);
+
+    p.uninstall(slot);
+    const shelved = p.bin.find((b) => b.kind === "gene" && b.id === "psbA");
+    expect(shelved, "the gene vanished from the bin").toBeDefined();
+    expect(shelved?.kind === "gene" ? shelved.level : 0,
+           "uninstalling ATE the levels the player paid for").toBe(lifted);
+
+    // ...and the tree places it, as a ghost
+    const l = layout([{ id: "psbA", level: lifted, detached: true }],
+                     393, 760, 1.86);
+    expect(l.nodes.length, "a banked gene does not appear on the tree").toBe(1);
+    expect(l.nodes[0]?.detached, "it is drawn as installed").toBe(true);
+  });
+
+  it("a ghost never thickens the limb it hangs from", async () => {
+    // A branch fattening for parts on a shelf would lie about what the
+    // strain can currently DO. Thickness is a claim about the working cell.
+    const { layout } = await import("../src/bench_tree.js");
+    const working = layout(
+      [{ id: "katG", level: 1 }], 393, 760, 1.86);
+    const withGhost = layout([
+      { id: "katG", level: 1 },
+      { id: "sodA", level: 5, detached: true },
+    ], 393, 760, 1.86);
+    const a = working.branches.find((b) => b.pathway === "stress");
+    const g = withGhost.branches.find((b) => b.pathway === "stress");
+    if (a && g) {
+      expect(g.thickness, "a banked gene fattened the branch")
+        .toBeCloseTo(a.thickness, 5);
+    }
+    expect(withGhost.nodes.length, "the ghost is missing").toBe(2);
+  });
+
+  it("only LEVELLED bin genes become ghosts", () => {
+    // An L1 spare is a spare, not an investment. Drawing every bin gene
+    // would bury the signal in exactly the parts nobody is asking about.
+    const p = new Plasmid();
+    p.integrated = 20;
+    for (const id of ["cbbL", "katG"] as bio.GeneId[]) {
+      p.stash({ kind: "gene", id, level: 1, mods: [], allele: WILD_TYPE });
+    }
+    const shelved = p.bin.filter((b) => b.kind === "gene" && b.level > 1);
+    expect(shelved, "an unlevelled spare counts as an investment").toEqual([]);
+  });
+});

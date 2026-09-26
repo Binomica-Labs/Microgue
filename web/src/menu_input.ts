@@ -6,6 +6,7 @@
 // player taps the row AND THEN taps yes on a modal whose default is no. A
 // modal that is up swallows every tap but its own two buttons.
 
+import { clearLab } from "./lab_save.js";
 import { setMuted } from "./audio.js";
 import { arm, commits } from "./press.js";
 import { loadSlot, deleteSlot } from "./saves.js";
@@ -72,6 +73,11 @@ export function i_menuTap(_g: Game, x: number, y: number): void {
         // Overwrite: the slot is cleared as a side effect of starting a fresh
         // culture in it, which the class picker then does.
         deleteSlot(c.slot);
+        // ...and a new game is a NEW RESEARCHER: their bench, stock,
+        // heirloom and synthesis budget all start empty. This is the one
+        // place a player deliberately says "start over", so it is the only
+        // place the lab may be wiped.
+        clearLab(c.slot);
         _g.pickingClassFor = c.slot;
       }
     } else {

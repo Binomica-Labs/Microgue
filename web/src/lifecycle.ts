@@ -199,9 +199,25 @@ export function g_startRun(
   if (ex) ex.active = false;
 
   _g.slot = slot;
-  // The lab outlives every strain, so it is read here rather than from the
-  // slot file: dying, or deleting a save, must not cost the meta-progression.
-  _g.lab = readLab();
+
+  // A NEW GAME IS A NEW RESEARCHER.
+  //
+  // The lab outlives every STRAIN -- dying must not cost the
+  // meta-progression, and that is still true. But it used to outlive every
+  // GAME too: one global key meant a fresh start inherited the last
+  // researcher's bought upgrades, gene stock, heirloom and banked synthesis
+  // budget. "New game" never started anything new.
+  //
+  // The slot IS the researcher now. Starting fresh in a slot wipes that
+  // researcher and their budget goes to zero; every run they launch down
+  // the tube afterwards is theirs, and the slot next door is someone else.
+  //
+  // The wipe is triggered EXPLICITLY, from the menu's New Game path -- not
+  // inferred from "the slot has no save". Death DELETES the slot file, so
+  // that inference wiped the researcher on every death, destroying exactly
+  // the meta-progression this function's comment promises to protect. Ten
+  // tests caught it.
+  _g.lab = readLab(_g.slot);
   _g.dead = false;
   _g.deathRecord = null;
   _g.lastAttacker = null;
@@ -261,7 +277,7 @@ export function g_startRun(
       // Spent. It is one strain's inheritance, not a stockpile: left in the
       // lab, every new slot would be handed the same parts again.
       _g.lab.heirloom = [];
-      writeLab(_g.lab);
+      writeLab(_g.lab, _g.slot);
     }
 
     // Its opening operon, laid down as a WORKING unit -- promoter, genes,

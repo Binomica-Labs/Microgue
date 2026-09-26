@@ -21,12 +21,25 @@ import { GENES, type GeneId, type Pathway } from "./biology.js";
 export interface TreeGene {
   readonly id: GeneId;
   readonly level: number;
+  /**
+   * In the BIN, not on the ring.
+   *
+   * `evolve` mutates the Part in place and `uninstall` moves that Part to
+   * the bin, so a levelled gene keeps its levels when you take it off --
+   * the investment is safe. But the tree was built from ring slots ONLY, so
+   * the branch simply vanished and nothing anywhere told the player their
+   * four levels of ATP still existed. An investment you cannot see is an
+   * investment you assume you lost.
+   */
+  readonly detached?: boolean;
 }
 
 export interface TreeNode {
   readonly id: GeneId;
   readonly pathway: Pathway;
   readonly level: number;
+  /** Held in the bin rather than installed. Drawn hollow. */
+  readonly detached: boolean;
   /** Centre, in screen pixels. */
   readonly x: number;
   readonly y: number;
@@ -105,7 +118,11 @@ export function layout(
     const angle = -Math.PI / 2 + (t - 0.5) * spread;
     const list = (byPath.get(p) ?? []).slice()
       .sort((a, b) => (a.id < b.id ? -1 : 1));
-    const levels = list.reduce((s, g) => s + g.level, 0);
+    // Only installed genes thicken a limb. A bin gene is an investment, not
+    // a working part of the cell, and a branch that fattened for parts on a
+    // shelf would lie about what the strain can currently do.
+    const levels = list.reduce(
+      (s, g) => s + (g.detached === true ? 0 : g.level), 0);
     const thickness = Math.max(2 * u, Math.min(2 + levels * 1.1, 10) * u);
 
     list.forEach((g, k) => {
@@ -118,6 +135,7 @@ export function layout(
       const prev = nodes.length > 0 && k > 0 ? nodes[nodes.length - 1] : null;
       nodes.push({
         id: g.id, pathway: p, level: g.level,
+        detached: g.detached === true,
         x, y,
         // Node size carries level, so a grown gene is bigger without a
         // number: the shape of the tree IS the build.
