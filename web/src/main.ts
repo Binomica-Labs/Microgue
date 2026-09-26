@@ -25,8 +25,12 @@ import { Trace } from "./trace.js";
 import { distanceTo } from "./pursuit.js";
 import { r_draw, r_drawEmergency, r_drawFx, r_drawHud, r_drawMapScreen,
          r_drawScreenFx, r_drawToasts } from "./render.js";
+import type { Web } from "./web_layout.js";
+import type { WebView } from "./web_render.js";
+import type { GeneId } from "./biology.js";
 import type { Fragment } from "./fragment.js";
 import { newResistance } from "./resistance.js";
+import { g_saveBuild } from "./export_run.js";
 import { r_drawPlasmid } from "./plasmid_screen.js";
 import { i_bindInput, i_bindPinch, i_inClose, i_onKey, i_pointerDown,
          i_pointerMove, i_pointerUp, i_press } from "./input.js";
@@ -194,6 +198,20 @@ class Game {
   sequencing: number | null = null;
   /** Hit boxes for the unread-fragment rows, rebuilt each frame. */
   fragRows: { box: Box; index: number }[] = [];
+  /** The bench map's pan/zoom. Null until the screen sizes it. */
+  webView: WebView | null = null;
+  /** Which gene the map has selected. */
+  webPick: GeneId | null = null;
+  /** Hit-test into the map, rebuilt each frame by the renderer. */
+  webHitAt: ((px: number, py: number) => { id: GeneId } | null) | null = null;
+  /** The built map, cached on the ring's revision. `buildWeb` walks every
+   *  gene in the game and costs ~85us; rebuilding it per frame was five
+   *  times the cost of the per-frame bug it was drawn by. */
+  webCache: { rev: number; bin: number; web: Web } | null = null;
+  /** Where a map gesture began, and what was under it. */
+  webFrom: { x: number; y: number; picked: GeneId | null } | null = null;
+  /** Finger spread at the start of a pinch, for the zoom. */
+  webPinch: number | null = null;
   /** Floor-wide quorum signal, 0..1. See quorum.ts. */
   quorum = 0;
   /** What the floor has adapted to. See resistance.ts. */
@@ -357,6 +375,9 @@ class Game {
   enter(level: Level, arrive: Point): void { g_enter(this, level, arrive); }
 
   descend(): void { t_descend(this); }
+
+  /** Compose the run's build as a picture and hand it to the player. */
+  saveBuild(): void { g_saveBuild(this); }
 
   /** Read a held fragment. See turn.ts -- the deliberate act. */
   sequence(index: number): boolean { return t_sequence(this, index); }

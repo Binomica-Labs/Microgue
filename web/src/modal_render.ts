@@ -11,7 +11,8 @@ import { stage, uiUnit } from "./chrome.js";
 import { raisedCard } from "./relief.js";
 import { TRAITS, TRAIT_IDS, expansionCost } from "./chromosome.js";
 import { ellipsise, type ResearchRow } from "./screens.js";
-import { drawTree } from "./bench_render.js";
+import { buildWeb, drawWeb, fitWeb, webHit } from "./web_render.js";
+import type { GeneId } from "./biology.js";
 import { drawClose, drawHeader, type Box } from "./chrome.js";
 import { drawNotes, drawResearch } from "./screens.js";
 import type { Game } from "./main.js";
@@ -146,8 +147,35 @@ function drawBenchTree(
     return drawClose(ctx, W, ins, u);
   }
 
-  const t = drawTree(ctx, W, H, ins, u, onTree, _g.player.atp,
-                     _g.researchPick, _g.now);
+  // THE MAP. Every gene in the game, dim until held.
+  //
+  // The tree was built from what the player HAS, so a new strain got two
+  // dots and a V -- and three releases of tuning could not fix that,
+  // because the problem was never the proportions. An empty tree has
+  // nothing to draw. A map of what EXISTS is full from the first second and
+  // lighting a node is the reward.
+  // Rebuilt only when the ring or the bin actually changes. The map is a
+  // pure function of those two, and nothing else on this screen moves it.
+  const rev = _g.genome.ringRev, binN = _g.genome.bin.length;
+  if (_g.webCache?.rev !== rev || _g.webCache.bin !== binN) {
+    const installed = new Map(genes.map((g) => [g.id, g.level]));
+    const held = new Set(shelved.map((g) => g.id));
+    _g.webCache = { rev, bin: binN, web: buildWeb(installed, held) };
+  }
+  const web = _g.webCache.web;
+  const top = ins.top + 150 * u;
+  const bottom = H - ins.bottom - 120 * u;
+  _g.webView ??= fitWeb(W, bottom - top);
+  const v = { ..._g.webView, cy: _g.webView.cy + top };
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, top, W, bottom - top);
+  ctx.clip();
+  drawWeb(ctx, web, v, u, _g.webPick, _g.now);
+  ctx.restore();
+  _g.webHitAt = (px: number, py: number) => webHit(web, v, px, py, u);
+  const t = { rows: [] as { box: Box; gene: GeneId; cost: number;
+                            afford: boolean }[] };
   _g.researchRows = [...strip, ...t.rows.map((r) => ({
     box: r.box, kind: "evolve" as const, gene: r.gene,
     cost: r.cost, afford: r.afford,

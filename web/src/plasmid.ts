@@ -517,6 +517,11 @@ export class Plasmid {
    *  impossible as long as `touch()` is the only way the ring changes -- and
    *  there is a test asserting every public mutator calls it. */
   private rev = 0;
+
+  /** The revision counter, for callers that cache derived views of the ring.
+   *  Bumped by every mutation, so `revision` changing is the one reliable
+   *  signal that anything downstream needs rebuilding. */
+  get ringRev(): number { return this.rev; }
   private memoOperons: { rev: number; value: Operon[] } | null = null;
   /** @internal: the energy setter clears this from outside the accessor. */
   /** Memo for the ATP figures. Not private: plasmid_atp.ts owns the

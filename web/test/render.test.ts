@@ -376,3 +376,42 @@ describe("the bench card does not collide with anything", () => {
   // in logic.test.ts, asserts what actually matters: the gaps above and
   // below are within a factor of two of each other.
 });
+
+describe("the fragment band reserves the space it uses", () => {
+  it("rows never run past the band the bin was pushed down by", () => {
+    // They were drawn at `ring.rOuter + 6u` -- six units ABOVE where the bin
+    // already starts -- so they printed over the "PARTS BIN" header and its
+    // first row. Adding a section means reserving its space, not drawing
+    // where something else already is.
+    //
+    // This pins the two numbers against each other: the pitch the rows are
+    // drawn at, and the band the bin is displaced by. They live in the same
+    // file and nothing but this stops them drifting.
+    const u = 2.57;
+    const rowH = 26 * u;
+    const gapAfter = 4 * u;
+    const pitch = rowH + gapAfter;
+    const band = (n: number): number => n * 30 * u + 10 * u;
+    for (const n of [1, 2, 3, 6]) {
+      expect(n * pitch, `${String(n)} fragments overflow their band`)
+        .toBeLessThanOrEqual(band(n));
+      // ...and the band is not absurdly generous either
+      expect(band(n) - n * pitch, `${String(n)} fragments waste too much space`)
+        .toBeLessThan(40 * u);
+    }
+    expect(band(0), "an empty hold still reserves space").toBeGreaterThan(0);
+  });
+
+  it("no fragments means no band at all", async () => {
+    // The common case. A reserved strip with nothing in it would push the
+    // bin down for no reason on every screen a player ever sees.
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    const src = readFileSync(
+      join(fileURLToPath(new URL("../src", import.meta.url)),
+           "plasmid_screen.ts"), "utf8");
+    expect(src, "the band is unconditional")
+      .toContain("_g.fragments.length > 0");
+  });
+});

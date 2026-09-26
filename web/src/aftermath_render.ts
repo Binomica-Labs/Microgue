@@ -15,6 +15,8 @@ import type { GeneId } from "./biology.js";
 export interface AftermathBoxes {
   /** The one forward action. */
   action: Box;
+  /** Save the build as a picture. Null where the run is not over. */
+  share: Box | null;
   /** Close, on the report only -- it returns to the menu without spending. */
   close: Box | null;
   /** Store rows, when on the store. */
@@ -81,7 +83,8 @@ export function drawAftermath(
   ctx.fillRect(0, 0, W, H);
   const won = last?.won ?? false;
   const copy = stageCopy(stage, won);
-  const out: AftermathBoxes = { action: { x: 0, y: 0, w: 0, h: 0 }, close: null,
+  const out: AftermathBoxes = { action: { x: 0, y: 0, w: 0, h: 0 },
+    share: null, close: null,
                                 rows: [], maxScroll: 0 };
   const left = ins.left + 16 * u;
   const wide = W - ins.left - ins.right - 32 * u;
@@ -208,6 +211,10 @@ export function drawAftermath(
         wide), left, H - ins.bottom - 80 * u);
     }
     out.action = actionButton(ctx, W, H, ins, u, copy.action, GOLD);
+    // A run ends and everything it was disappears. This is the only
+    // artefact that leaves the game, so it sits beside the one forward
+    // action rather than being buried.
+    out.share = shareButton(ctx, u, out.action);
     return out;
   }
 
@@ -304,4 +311,27 @@ export function drawAftermath(
   }
   out.action = actionButton(ctx, W, H, ins, u, copy.action, GREEN);
   return out;
+}
+
+/** The "save the build" button, tucked above the forward action. */
+function shareButton(
+  ctx: CanvasRenderingContext2D, u: number, action: Box,
+): Box {
+  const w = action.w, h = 30 * u;
+  const box: Box = { x: action.x, y: action.y - h - 8 * u, w, h };
+  ctx.fillStyle = "rgba(16,22,18,0.9)";
+  ctx.strokeStyle = "rgba(200,220,235,0.45)";
+  ctx.lineWidth = Math.max(1.3 * u, 1);
+  ctx.beginPath();
+  ctx.roundRect(box.x, box.y, box.w, box.h, 5 * u);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#c8dceb";
+  ctx.font = `${11 * u}px ui-monospace,monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("save this build", box.x + w / 2, box.y + h / 2);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  return box;
 }

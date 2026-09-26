@@ -11767,3 +11767,237 @@ describe("the tree reads as a tree, not as two lines", () => {
       .toBeLessThan(2);
   });
 });
+
+describe("the bench map is the whole game, dim until you hold it", () => {
+  it("every gene is on the map from turn one, whatever you carry", async () => {
+    // The tree was built from what the player HAS, so a new strain got two
+    // dots and a V -- and three releases of tuning could not fix it,
+    // because an empty tree has nothing to draw. A map of what EXISTS is
+    // full from the first second and lighting a node is the reward.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const empty = buildWeb(new Map(), new Set());
+    const some = buildWeb(new Map([["psbA", 2]]), new Set());
+    const all = Object.keys(bio.GENES).length - 1;      // ori is not on it
+    expect(empty.nodes.length, "a new strain sees an empty map").toBe(all);
+    expect(some.nodes.length, "the map changes size with what you hold")
+      .toBe(all);
+    expect(empty.nodes.some((n) => n.installed), "an empty ring lit a node")
+      .toBe(false);
+    expect(some.nodes.filter((n) => n.installed).length, "nothing lit up")
+      .toBe(1);
+  });
+
+  it("a gene is always in the same place", async () => {
+    // A map that moved as you filled it would be unlearnable, and the whole
+    // value of a constellation is that you start to know where things are.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const a = buildWeb(new Map(), new Set());
+    const b = buildWeb(new Map([["psbA", 4], ["mcrA", 1]]),
+                       new Set(["katG"]));
+    for (const n of a.nodes) {
+      const m = b.nodes.find((o) => o.id === n.id);
+      expect(m, `${n.id} vanished`).toBeDefined();
+      expect(m?.x, `${n.id} moved`).toBeCloseTo(n.x, 9);
+      expect(m?.y, `${n.id} moved`).toBeCloseTo(n.y, 9);
+    }
+  });
+
+  it("radius carries tier: core in the middle, deep chemistry at the rim", async () => {
+    const { buildWeb } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    const meanR = (tier: number): number => {
+      const s = w.nodes.filter((n) => n.tier === tier);
+      return s.length
+        ? s.reduce((a, n) => a + Math.hypot(n.x, n.y), 0) / s.length : 0;
+    };
+    const lo = meanR(1), hi = meanR(8);
+    if (lo > 0 && hi > 0) {
+      expect(hi, "tier does not push a gene outward").toBeGreaterThan(lo);
+    }
+    // ...and nothing escapes the unit circle the view is built around
+    for (const n of w.nodes) {
+      expect(Math.hypot(n.x, n.y), `${n.id} is outside the map`)
+        .toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("a strand is live only when BOTH its ends are", async () => {
+    // The web is what you have BUILT, not what exists. A strand lighting
+    // from one end would claim a connection the strain cannot make.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    expect(w.edges.some((e) => e.live), "an empty ring lit a strand")
+      .toBe(false);
+    expect(w.edges.length, "there is no web at all").toBeGreaterThan(20);
+    // light one end of some strand and it stays dark
+    const e0 = w.edges[0];
+    if (e0) {
+      const half = buildWeb(new Map([[e0.a, 1]]), new Set());
+      const same = half.edges.find((e) => e.a === e0.a && e.b === e0.b);
+      expect(same?.live, "a strand lit from one end").toBe(false);
+      const both = buildWeb(new Map([[e0.a, 1], [e0.b, 1]]), new Set());
+      const lit = both.edges.find((e) => e.a === e0.a && e.b === e0.b);
+      expect(lit?.live, "a strand with both ends held stayed dark").toBe(true);
+    }
+  });
+
+  it("the view clamps: a player can never pan into the void", async () => {
+    const { clampWeb, fitWeb } = await import("../src/web_render.js");
+    const v = fitWeb(400, 800);
+    expect(v.scale, "the map is invisible at rest").toBeGreaterThan(0);
+    for (const bad of [{ cx: 1e9, cy: -1e9, scale: 1e9 },
+                       { cx: NaN, cy: NaN, scale: NaN },
+                       { cx: -1e9, cy: 1e9, scale: 0 }]) {
+      const c = clampWeb(bad, 400, 800);
+      expect(Number.isFinite(c.scale) && c.scale > 0,
+             `scale ${String(c.scale)}`).toBe(true);
+      expect(Number.isFinite(c.cx) && Number.isFinite(c.cy),
+             "the centre went non-finite").toBe(true);
+    }
+  });
+});
+
+describe("the map holds up at both extremes", () => {
+  it("every node is tappable at its own centre, and misses stay misses", async () => {
+    // Eighty-eight nodes on a radial layout: an off-by-one in the angle or
+    // the radius would make a whole pathway untappable, and nothing else
+    // would notice. (A first probe tested arbitrary coordinates and found
+    // nothing, which proved only that empty space is empty.)
+    const { buildWeb, webNodeAt } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    for (const n of w.nodes) {
+      expect(webNodeAt(w, n.x, n.y, 0.05)?.id, `${n.id} is not tappable`)
+        .toBe(n.id);
+    }
+    expect(webNodeAt(w, 9, 9, 0.05), "empty space hit a node").toBeNull();
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(() => webNodeAt(w, bad, bad, 0.05),
+             `webNodeAt(${String(bad)}) threw`).not.toThrow();
+    }
+  });
+
+  it("a full ring lights everything, and a bare one lights nothing", async () => {
+    // The two ends of the run. Everything installed is the worst case for
+    // the live-strand pass and had never been drawn.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const every = new Map(Object.keys(bio.GENES)
+      .filter((g) => g !== "ori")
+      .map((g) => [g as bio.GeneId, 5]));
+    const full = buildWeb(every, new Set());
+    expect(full.nodes.every((n) => n.installed), "a full ring left nodes dark")
+      .toBe(true);
+    expect(full.edges.every((e) => e.live), "a full ring left strands dark")
+      .toBe(true);
+    const bare = buildWeb(new Map(), new Set());
+    expect(bare.nodes.some((n) => n.installed || n.held),
+           "a bare ring lit something").toBe(false);
+    expect(bare.edges.some((e) => e.live), "a bare ring lit a strand")
+      .toBe(false);
+    // same shape either way -- the map is what EXISTS
+    expect(full.nodes.length).toBe(bare.nodes.length);
+    expect(full.edges.length).toBe(bare.edges.length);
+  });
+
+  it("a gene held in the bin lights dimmer than one on the ring", async () => {
+    const { buildWeb } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map([["psbA", 2]]), new Set(["katG"]));
+    const on = w.nodes.find((n) => n.id === "psbA");
+    const shelf = w.nodes.find((n) => n.id === "katG");
+    expect(on?.installed, "an installed gene is not marked installed").toBe(true);
+    expect(shelf?.held, "a banked gene is not marked held").toBe(true);
+    expect(shelf?.installed, "a banked gene is drawn as installed").toBe(false);
+  });
+});
+
+describe("the build card is the one thing that leaves the game", () => {
+  interface Card {
+    strain: string; generation: number; floor: number; maxFloor: number;
+    turns: number; lysed: number;
+    installed: ReadonlyMap<bio.GeneId, number>;
+    held: ReadonlySet<bio.GeneId>; epitaph: string; won: boolean;
+  }
+  const trace = (d: Card,
+                 draw: (c: CanvasRenderingContext2D, d2: Card) => void,
+  ): string[] => {
+    const out: string[] = [];
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (p === "measureText") return (s: string) => ({ width: s.length * 8 });
+        if (p === "createLinearGradient" || p === "createRadialGradient") {
+          return () => ({ addColorStop: () => undefined });
+        }
+        if (["fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
+             "lineWidth", "globalAlpha"].includes(p)) return "";
+        return (...a: unknown[]) => {
+          if (p === "fillText") out.push(String(a[0]));
+          return undefined;
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    draw(ctx, d);
+    return out;
+  };
+
+  it("the card says what was built, not just what happened", async () => {
+    // The report card says what HAPPENED. This says what you BUILT, which
+    // is the part a player would actually want to keep.
+    const { drawCard } = await import("../src/export_card.js");
+    const texts = trace({
+      strain: "Verdant Hollow", generation: 4, floor: 17, maxFloor: 24,
+      turns: 1840, lysed: 62,
+      installed: new Map<bio.GeneId, number>([["psbA", 3], ["katG", 2],
+                                              ["cbbL", 1]]),
+      held: new Set<bio.GeneId>(["sodA"]),
+      epitaph: "The Bdellovibrio got in.", won: false,
+    }, drawCard);
+    const all = texts.join(" | ");
+    expect(all, "the strain is not named").toContain("Verdant Hollow");
+    expect(all, "the depth is missing").toContain("17/24");
+    expect(all, "the lineage is missing").toContain("generation 4");
+    expect(all, "the pathways built are missing").toMatch(/photo|stress|carbon/);
+    expect(all, "the epitaph is missing").toContain("Bdellovibrio");
+    expect(all, "the licence line is missing").toMatch(/Binomica/);
+  });
+
+  it("a winning run says so instead of naming a floor", async () => {
+    const { drawCard } = await import("../src/export_card.js");
+    const texts = trace({
+      strain: "Deep Thing", generation: 9, floor: 24, maxFloor: 24,
+      turns: 4000, lysed: 300,
+      installed: new Map<bio.GeneId, number>([["mcrA", 5]]),
+      held: new Set<bio.GeneId>(), epitaph: "", won: true,
+    }, drawCard).join(" | ");
+    expect(texts, "a win still reads as a depth").toContain("reached the bottom");
+  });
+
+  it("the filename cannot escape a directory or carry a null", async () => {
+    // It is built from a name the PLAYER typed. A path separator or a null
+    // in a download filename is the kind of thing that is someone else's
+    // security bug later.
+    const { cardName } = await import("../src/export_card.js");
+    for (const bad of ["../../etc/passwd", "a\u0000b", "/abs/path",
+                       "..\\win", "", "   "]) {
+      const n = cardName(bad, 3);
+      expect(n, `"${bad}" escaped`).not.toContain("/");
+      expect(n, `"${bad}" escaped`).not.toContain("\\");
+      expect(n, `"${bad}" kept a null`).not.toContain("\u0000");
+      expect(n.endsWith(".png"), `"${bad}" lost its extension`).toBe(true);
+      expect(n.length, `"${bad}" produced an empty name`).toBeGreaterThan(12);
+    }
+    // a very long name is cut, not passed through
+    expect(cardName("x".repeat(500), 1).length).toBeLessThan(64);
+  });
+
+  it("an empty build still produces a card", async () => {
+    // A strain that died on floor one with nothing installed is exactly
+    // when a player most wants to shrug and share it.
+    const { drawCard } = await import("../src/export_card.js");
+    const texts = trace({
+      strain: "", generation: 1, floor: 1, maxFloor: 24, turns: 3, lysed: 0,
+      installed: new Map(), held: new Set(), epitaph: "", won: false,
+    }, drawCard);
+    expect(texts.length, "an empty build drew nothing").toBeGreaterThan(2);
+    expect(texts.join(" "), "the depth is missing").toContain("1/24");
+  });
+});

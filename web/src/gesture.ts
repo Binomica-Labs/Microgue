@@ -7,7 +7,9 @@
 // One tap, opened and closed. Deciding the gesture ONCE on down and acting ONCE
 // on up makes that impossible to express.
 
-export type Gesture = "none" | "button" | "slot" | "spin" | "dismiss" | "world" | "menu";
+export type Gesture = "none" | "button" | "slot" | "spin" | "dismiss" | "world" | "menu"
+  /** Panning or pinching the bench map. */
+  | "web";
 
 export interface Box { x: number; y: number; w: number; h: number; }
 

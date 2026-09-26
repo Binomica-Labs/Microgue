@@ -11,6 +11,7 @@ import type { Mob } from "./dungeon.js";
 import * as bio from "./biology.js";
 import { classifyDown, classifyKey } from "./gesture.js";
 import { buttonAt } from "./buttons.js";
+import { clampWeb } from "./web_render.js";
 import { clampView, moduleLabelAt, zoomAbout } from "./kegg_ui.js";
 import { BIN_ROW, slotAt } from "./plasmid_ui.js";
 import { inBox as inBoxOf, type Box, uiUnit } from "./chrome.js";
@@ -132,8 +133,14 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     if (_g.showResearch) {
       if (_g.inClose(x, y)) { _g.showResearch = false; _g.gesture = "none"; return; }
       const hit = _g.researchRows.find((r) => inBoxOf(r.box, x, y));
-      if (hit) _g.research(hit);
-      _g.gesture = "none";
+      if (hit) { _g.research(hit); _g.gesture = "none"; return; }
+      // A tap on the map selects a gene; a drag pans it. The press only
+      // records where it started -- which it is gets decided on release,
+      // because a pan that selected whatever it started on would make the
+      // map unusable with a thumb.
+      const node = _g.webHitAt?.(x, y) ?? null;
+      _g.webFrom = { x, y, picked: node?.id ?? null };
+      _g.gesture = "web";
       return;
     }
     // The naming screen: "done" commits what is typed, "use suggested" takes
@@ -274,6 +281,7 @@ export function i_pointerDown(_g: Game, x: number, y: number): void {
     }, x, y);
 
     switch (_g.gesture) {
+    case "web": break;          // the map handles its own release
       case "button":
         _g.gestureBtn = btn;
         if (btn) btn.active = true;
@@ -364,6 +372,17 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
     }
     if (_g.gesture === "slot" && (_g.dragFrom !== null || _g.dragBin !== null)) {
       _g.dragXY = { x, y };
+    } else if (_g.gesture === "web" && _g.webFrom && _g.webView) {
+      // Pan. The drag moves the map under the finger one-for-one, which is
+      // the only mapping that feels like touching a thing rather than
+      // steering one.
+      const dx = x - _g.webFrom.x, dy = y - _g.webFrom.y;
+      if (Math.hypot(dx, dy) > 6) {
+        _g.webView = clampWeb(
+          { ..._g.webView, cx: _g.webView.cx + dx, cy: _g.webView.cy + dy },
+          innerWidth, innerHeight);
+        _g.webFrom = { x, y, picked: null };   // a drag is no longer a tap
+      }
     } else if (_g.gesture === "spin" && _g.spinFrom !== null) {
       if (_g.showMap) {
         // handled in the pan branch below
@@ -376,6 +395,15 @@ export function i_pointerMove(_g: Game, x: number, y: number): void {
   }
 
 export function i_pointerUp(_g: Game, x: number, y: number): void {
+  // A map gesture commits on RELEASE: if the finger never travelled, it was
+  // a tap and it selects whatever it started on. A pan clears `picked` as
+  // soon as it moves, so dragging across the map never selects anything.
+  if (_g.gesture === "web") {
+    if (_g.webFrom?.picked) _g.webPick = _g.webFrom.picked;
+    _g.webFrom = null;
+    _g.gesture = "none";
+    return;
+  }
   // The menu commits here, on RELEASE, not under the finger. See press.ts.
   if ((_g.showSplash || !_g.started) && _g.naming === null
       && _g.pickingClassFor === null && !_g.dead) {
@@ -407,6 +435,9 @@ export function i_pointerUp(_g: Game, x: number, y: number): void {
     }
 
     // The one forward action on every screen.
+    // Saving the build takes precedence: it sits above the forward action
+    // and a near-miss should not advance the run instead.
+    if (ab.share && inBoxOf(ab.share, x, y)) { _g.saveBuild(); return; }
     if (inBoxOf(ab.action, x, y)) {
       if (st === "ready") {
         // Send it down: leave the flow and go back to the menu, where New
@@ -598,8 +629,9 @@ export function i_bindPinch(_g: Game): void {
     // A pinch has to act on whatever is actually on screen. This handler only
     // checked showPlasmid, so pinching the pathway map silently zoomed the
     // WORLD behind it -- the map never moved and the gesture felt broken.
-    const owner = (): "none" | "world" | "map" => {
+    const owner = (): "none" | "world" | "map" | "bench" => {
       if (_g.showPlasmid || _g.showNotes || _g.showSplash || _g.openDrop) return "none";
+      if (_g.showResearch) return "bench";
       return _g.showMap ? "map" : "world";
     };
 
@@ -613,6 +645,17 @@ export function i_bindPinch(_g: Game): void {
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (who === "world") {
         _g.setZoom(z0 * (d / d0));
+      } else if (who === "bench" && _g.webView) {
+        // Zoom about the midpoint, so what you are pinching stays under
+        // your fingers. Anything else and the map slides away as you zoom.
+        const want = z0 * (d / d0);
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const k = want / _g.webView.scale;
+        _g.webView = clampWeb({
+          scale: want,
+          cx: mid.x + (_g.webView.cx - mid.x) * k,
+          cy: mid.y + (_g.webView.cy - mid.y) * k,
+        }, innerWidth, innerHeight);
       } else if (_g.view) {
         // Zoom about the midpoint between the fingers, so what you are
         // pinching stays under them.
@@ -633,7 +676,9 @@ export function i_bindPinch(_g: Game): void {
       if (pts.size === 2) {
         const [a, b] = [...pts.values()] as [Point, Point];
         d0 = Math.hypot(a.x - b.x, a.y - b.y);
-        z0 = who === "world" ? _g.zoom : (_g.view?.scale ?? 1);
+        z0 = who === "world" ? _g.zoom
+        : who === "bench" ? (_g.webView?.scale ?? 1)
+        : (_g.view?.scale ?? 1);
         _g.walk = null;
         _g.panFrom = null;              // a pinch is not a pan
         _g.pinching = true;

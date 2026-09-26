@@ -296,3 +296,65 @@ describe("nothing mutates the ring without invalidating the memo", () => {
     expect(read(), "a symbiont left a stale read").not.toBeCloseTo(s0, 9);
   });
 });
+
+describe("the bench map is cheap and never stale", () => {
+  it("edge endpoints are resolved at build time, not searched per frame", async () => {
+    // The renderer looked them up with `nodes.find()` -- twice per edge,
+    // once for the dim pass and once for the live one. Seventy-seven edges
+    // against eighty-eight nodes measured 22.5us a frame doing nothing but
+    // searching an array it already had.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    expect(w.edges.length, "there are no edges to check").toBeGreaterThan(20);
+    for (const e of w.edges) {
+      for (const [k, v] of Object.entries({ ax: e.ax, ay: e.ay,
+                                            bx: e.bx, by: e.by })) {
+        expect(Number.isFinite(v), `${e.a}-${e.b}: ${k} is ${String(v)}`)
+          .toBe(true);
+      }
+      // and they agree with the nodes they name
+      const a = w.nodes.find((n) => n.id === e.a);
+      const b = w.nodes.find((n) => n.id === e.b);
+      expect(a?.x, `${e.a}: the edge disagrees with the node`)
+        .toBeCloseTo(e.ax, 9);
+      expect(b?.y, `${e.b}: the edge disagrees with the node`)
+        .toBeCloseTo(e.by, 9);
+    }
+  });
+
+  it("the ring's revision changes whenever the ring does", () => {
+    // The map is cached on it. If a mutation did not bump it, the bench
+    // would show the wrong genes lit until something else happened to
+    // invalidate -- a stale map is worse than a slow one.
+    const p = new Plasmid();
+    p.integrated = 20;
+    const seen = new Set<number>([p.ringRev]);
+    p.stash({ kind: "gene", id: "katG", level: 1, mods: [], allele: WILD_TYPE });
+    seen.add(p.ringRev);
+    const slot = p.slots.findIndex((s) => s === null);
+    if (slot >= 0) {
+      p.install(p.bin.length - 1, slot);
+      seen.add(p.ringRev);
+      p.evolve("katG");
+      seen.add(p.ringRev);
+      p.uninstall(slot);
+      seen.add(p.ringRev);
+    }
+    p.rotate(1);
+    seen.add(p.ringRev);
+    expect(seen.size, "the revision did not move across five mutations")
+      .toBeGreaterThanOrEqual(4);
+  });
+
+  it("building the map is worth caching, and cached it is free", async () => {
+    // ~85us to walk every gene in the game. Called per frame it was five
+    // times the cost of the per-frame bug it was drawn by.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const t0 = performance.now();
+    const N = 300;
+    for (let i = 0; i < N; i++) buildWeb(new Map(), new Set());
+    const us = (performance.now() - t0) / N * 1000;
+    expect(us, `buildWeb is ${us.toFixed(0)}us -- too slow even to cache`)
+      .toBeLessThan(600);
+  });
+});

@@ -182,6 +182,142 @@ versions of this screen, three different wrong rules about size** -- too
 small, always maximum, and now hopefully neither.
 
 
+## v1.69.3 — the fragment rows printed over the bin header
+
+I drew the unread-fragment rows at `ring.rOuter + 6u`. The bin already
+starts at `ring.rOuter + 16u`, so the rows landed six units ABOVE its
+header and covered both it and the first part row.
+
+The band is reserved now: the bin's `y` is displaced by the fragments'
+height, and the rows are anchored to `_g.bin.y` minus that same band, so
+the two cannot drift apart. `spec` pins the row pitch against the reserved
+height at one, two, three and six fragments -- and that the band is zero
+when the hold is empty, because a reserved strip with nothing in it would
+push the bin down on every screen a player ever sees.
+
+**Third layout collision in three releases**, all the same mistake: adding
+a new element at a position something else already occupies, rather than
+making room for it. The bench card over the footer, the tree over the card,
+now fragments over the bin. In each case the fix was to anchor the new
+thing to the existing thing's own measurement instead of guessing an offset
+from a landmark that happened to be nearby.
+
+
+## v1.70.1 — the map cost more to build than to draw
+
+Two per-frame costs in yesterday's constellation, the second found only
+because fixing the first made it visible.
+
+**Edge endpoints were searched, not stored.** The renderer resolved them
+with `nodes.find()` twice per edge -- once for the dim pass, once for the
+live one. Seventy-seven edges against eighty-eight nodes: 22.5us a frame
+doing nothing but searching an array it already had. The layout knows where
+they are, so it says so now. 22.5us -> 2.0us, and the dim strands stroke as
+ONE path rather than seventy-seven.
+
+**Then `buildWeb` turned out to cost 84.5us, and it ran every frame** --
+five times the cost of the bug I had just fixed. It is a pure function of
+the ring and the bin, so it is cached on `ringRev` (a new read-only
+accessor on the revision counter that already existed for the operon memo).
+`spec` pins that the revision moves across every mutation, because a stale
+map would light the wrong genes and that is worse than a slow one.
+
+## A probe that proved only that empty space is empty
+
+My first hit-test check sampled arbitrary coordinates -- the centre, a point
+on the rim -- found nothing, and looked like a broken hit test. Nothing is
+AT those points: the nodes sit at specific angles. Testing every node at its
+own centre finds 88 of 88. **Sampling where you guess a thing should be is
+not the same as testing the thing.**
+
+
+# v1.71.0 — save this build
+
+A run ends and everything it was disappears. The report card says what
+HAPPENED; this says what you BUILT, and it is the only artefact that leaves
+the game.
+
+The constellation is what makes it worth having: the whole metabolic map
+with your pathways lit, the strain's name, the depth, the generation, the
+pathways you actually committed to in their own colours, and the last line
+of the epitaph. Composed on its own 1080px canvas rather than scraped from
+the screen -- a screenshot of a phone is a screenshot of a phone, bars and
+notches and whatever was mid-animation.
+
+## Two routes off the device
+
+The share sheet first, if the browser has it and will take a file, because
+on a phone that is what people actually want -- straight into a message, no
+trip through Downloads. A download link otherwise, which works everywhere.
+
+**A cancelled share is a DECISION, not a failure.** `AbortError` is the
+player closing the sheet themselves, and reporting that as an error would
+be the game telling them something untrue about their own action. It
+reports nothing.
+
+The object URL is revoked on a timer rather than immediately: some browsers
+have not finished reading the blob when `click()` returns, and revoking
+early gives a download that silently produces an empty file.
+
+## The filename is built from something the player typed
+
+`spec` pins that it cannot contain a path separator or a null and cannot be
+empty, because a strain name goes straight into a download filename and
+that is the kind of thing that becomes someone else's security bug later.
+`../../etc/passwd` comes out as `microgue--etc-passwd-F3.png`.
+
+Still open: the endgame, and more procedural generation.
+
+
+# v1.70.0 — the bench is a constellation
+
+Sebastian's design, and it is right: a spider web of grey nodes that fill
+with colour as you acquire them. It also dissolves a problem three releases
+of tuning could not touch.
+
+The tree was built from what the player HAS. A new strain got two dots and
+a V, and every fix -- fill the height, scale with content, centre it --
+was treating a symptom, because **an empty tree has nothing to draw**. A map
+of what EXISTS is full from the first second, and lighting a node is the
+reward.
+
+## Position means something
+
+    ANGLE  = pathway. Twelve sectors in the ring's own colour order, so the
+             map and the plasmid agree about what colour nitrogen is.
+    RADIUS = tier. Tier 1 near the middle, tier 8 at the rim, because that
+             is what depth means here: common chemistry first, then the
+             things only one organism on the floor can do.
+
+88 nodes, 77 strands. Measured: mean radius 0.22 at tier 1, 0.53 at tier 4,
+0.94 at tier 8. A gene is ALWAYS in the same place -- a map that moved as
+you filled it would be unlearnable, and `spec` pins that.
+
+A strand lights only when BOTH ends are held: the web is what you have
+built, not what exists, and one lit end would claim a connection the strain
+cannot make.
+
+## Pan and pinch
+
+Pan is one-for-one with the finger, which is the only mapping that feels
+like touching a thing rather than steering one. Pinch zooms about the
+midpoint so what you are pinching stays under your fingers. A tap selects,
+and a drag clears the selection the moment it moves -- a pan that selected
+whatever it started on would make the map unusable with a thumb.
+
+`clampWeb` recovers from a NON-FINITE view, found by a test written for
+this release: `Math.min(NaN, x)` is NaN, so clamping alone never recovers,
+and one bad pinch -- two pointers reporting the same position gives 0/0 --
+would have left a blank screen with no way back for the rest of the session.
+
+## NOT done, and worth saying
+
+The request also asked for a build export on death, a cooler endgame, and
+more procedural generation. Those are three substantial features and doing
+them badly alongside this would have been worse than not doing them. The
+map was the thing blocking the screen from being good; the rest is open.
+
+
 # v1.69.0 — sequencing is a confirmed act
 
 It sequenced on PICKUP: an unconfirmed tap in the loot menu spent the ATP

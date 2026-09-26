@@ -82,9 +82,16 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
   const cell = side
     ? Math.max((paneW - 7 * gap) / 6, 1)
     : Math.max(Math.min((W - ins.left - ins.right - 7 * gap) / 6, 62 * u), 1);
+  // Unread fragments take a band ABOVE the bin, and the bin moves down to
+  // make room. I drew them at `rOuter + 6u` -- six units above where the bin
+  // already starts -- so they printed straight over the "PARTS BIN" header
+  // and its first row. Reserving the space is the difference between adding
+  // a section and drawing on top of one.
+  const fragBand = _g.fragments.length > 0
+    ? _g.fragments.length * 30 * u + 10 * u : 0;
   _g.bin = {
     x: side ? paneX + gap : ins.left + gap,
-    y: side ? paneTop : _g.ring.cy + _g.ring.rOuter + 16 * u,
+    y: (side ? paneTop : _g.ring.cy + _g.ring.rOuter + 16 * u) + fragBand,
     cell, gap, cols: 6,
   };
   // Where the notes under the list go, and how wide they may run.
@@ -210,7 +217,9 @@ function drawFragmentRows(
   const ins = stage(W, _g.insets(), u);
   const w = W - ins.left - ins.right - 28 * u;
   const h = 26 * u;
-  let y = _g.ring.cy + _g.ring.rOuter + 6 * u;
+  // Anchored to the same place the bin measures from, so the two cannot
+  // drift apart: this band sits directly above the bin's header.
+  let y = _g.bin.y - (_g.fragments.length * 30 * u + 10 * u) + 4 * u;
   ctx.textBaseline = "middle";
   for (let i = 0; i < _g.fragments.length; i++) {
     const f = _g.fragments[i];
