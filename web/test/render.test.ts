@@ -368,17 +368,11 @@ describe("the bench card does not collide with anything", () => {
     }
   });
 
-  it("a sparse tree does not leave a void above it", async () => {
-    // Two genes on a tall phone left several hundred pixels of nothing
-    // between the trait strip and the highest branch. A sparse tree should
-    // be a SMALL tree, not a stretched one with a hole on top.
-    const { layout } = await import("../src/bench_tree.js");
-    const h = 1700;
-    const l = layout([{ id: "psbA", level: 2 },
-                      { id: "katG", level: 1 }], 1080, h, 2.57);
-    const highest = Math.min(...l.branches.map((b) => b.tipY),
-                             ...l.nodes.map((n) => n.y));
-    expect(highest / h, `the tree starts ${((highest / h) * 100).toFixed(0)}% `
-      + "down its own space").toBeLessThan(0.25);
-  });
+  // REMOVED: "a sparse tree does not leave a void above it" asserted the
+  // tree must start in the top quarter of its space. That was right when
+  // the bug was a tiny bottom-anchored tree, and wrong once a sparse tree
+  // became deliberately SMALL and CENTRED -- a small tree that started at
+  // the top would be hanging from the ceiling instead. The replacement,
+  // in logic.test.ts, asserts what actually matters: the gaps above and
+  // below are within a factor of two of each other.
 });

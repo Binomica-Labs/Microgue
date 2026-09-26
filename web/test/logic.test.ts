@@ -10868,22 +10868,39 @@ describe("the bench tree", () => {
 });
 
 describe("the tree grows into the space it has", () => {
-  it("fills the height on a tall phone, not a fifth of it", async () => {
+  it("SCALES with content: sparse is small, full fills the space", async () => {
     // It was laid out with `reach = min(verticalRoom, w * 0.46)`, and on a
     // tall narrow phone the WIDTH term won by miles: the tree used 20% of
     // the screen and left 65% empty above it. Reach comes from the height
     // now, and the fan narrows if that would push a branch off the sides.
+    // The rule CHANGED, twice, and both earlier versions were wrong in
+    // opposite directions. First the tree used 20% of the screen and left
+    // the rest empty. Then it always used the maximum -- the same enormous
+    // V at two genes as at twelve, sixty times the node radius of bare
+    // line. The right rule is neither: a tree with two things on it should
+    // be a SMALL tree, and a full ring should fill the space.
     const { layout } = await import("../src/bench_tree.js");
-    const genes = [{ id: "psbA" as bio.GeneId, level: 1 },
-                   { id: "katG" as bio.GeneId, level: 1 }];
-    for (const [w, h] of [[1080, 2400], [393, 852], [320, 560]] as const) {
+    const POOL: bio.GeneId[] = ["psbA", "katG", "cbbL", "sodA", "celA",
+                                "groL", "recA", "uvrA", "narG", "nirS",
+                                "mtrC", "dsrA"];
+    const usedBy = (n: number, w: number, h: number): number => {
       const u = Math.max(Math.min(w, h) / 420, 1);
-      const l = layout(genes, w, h, u);
-      const highest = Math.min(...l.nodes.map((n) => n.y),
+      const l = layout(POOL.slice(0, n).map((id) => ({ id, level: 1 })), w, h, u);
+      const highest = Math.min(...l.nodes.map((nd) => nd.y),
                                ...l.branches.map((b) => b.tipY));
-      const used = (l.rootY - highest) / h;
-      expect(used, `${String(w)}x${String(h)}: the tree uses only `
-        + `${(used * 100).toFixed(0)}% of its space`).toBeGreaterThan(0.5);
+      return (l.rootY - highest) / h;
+    };
+    for (const [w, h] of [[1080, 2400], [393, 852], [320, 560]] as const) {
+      const sparse = usedBy(2, w, h), full = usedBy(12, w, h);
+      expect(full, `${String(w)}x${String(h)}: a full ring does not grow the tree`)
+        .toBeGreaterThan(sparse);
+      expect(full, `${String(w)}x${String(h)}: a full ring uses only `
+        + `${(full * 100).toFixed(0)}%`).toBeGreaterThan(0.6);
+      expect(sparse, `${String(w)}x${String(h)}: two genes still sprawl across `
+        + `${(sparse * 100).toFixed(0)}%`).toBeLessThan(0.62);
+      const u = Math.max(Math.min(w, h) / 420, 1);
+      const l = layout([{ id: "psbA", level: 1 },
+                        { id: "katG", level: 1 }], w, h, u);
       // ...and still fits
       for (const b of l.branches) {
         expect(b.tipX >= 0 && b.tipX <= w,
@@ -11705,5 +11722,48 @@ describe("a levelled gene in the bin is still visible", () => {
     }
     const shelved = p.bin.filter((b) => b.kind === "gene" && b.level > 1);
     expect(shelved, "an unlevelled spare counts as an investment").toEqual([]);
+  });
+});
+
+describe("the tree reads as a tree, not as two lines", () => {
+  it("a limb is never absurdly long against the node it carries", async () => {
+    // Measured at 60x the node radius with two genes: the branch was 1322px
+    // of bare line with a 22px dot on the end, and the eye read two lines
+    // rather than a branch bearing something. The ratio is the thing that
+    // makes it a tree.
+    const { layout } = await import("../src/bench_tree.js");
+    const POOL: bio.GeneId[] = ["psbA", "katG", "cbbL", "sodA", "celA",
+                                "groL", "recA", "uvrA"];
+    for (const n of [2, 4, 8]) {
+      const l = layout(POOL.slice(0, n).map((id) => ({ id, level: 2 })),
+                       1080, 1700, 2.57);
+      const b = l.branches[0];
+      const nd = l.nodes[0];
+      if (!b || !nd) continue;
+      const limb = Math.hypot(b.tipX - l.rootX, b.tipY - l.forkY);
+      expect(limb / nd.r, `${String(n)} genes: the limb is `
+        + `${(limb / nd.r).toFixed(0)}x the node`).toBeLessThan(40);
+      expect(nd.r, "the node is too small to tap").toBeGreaterThan(20);
+    }
+  });
+
+  it("a sparse tree is centred, not shoved to one end", async () => {
+    // Both earlier versions left a void: first above (the tree was tiny and
+    // bottom-anchored), then above again (the tree was short and still
+    // bottom-anchored). A small plant looks small; a small plant in one
+    // corner looks broken.
+    const { layout } = await import("../src/bench_tree.js");
+    const h = 1700;
+    const l = layout([{ id: "psbA", level: 1 },
+                      { id: "katG", level: 1 }], 1080, h, 2.57);
+    const above = Math.min(...l.branches.map((b) => b.tipY),
+                           ...l.nodes.map((n) => n.y));
+    const below = h - l.rootY;
+    expect(above, "nothing above the tree at all").toBeGreaterThan(0);
+    expect(below, "nothing below the tree at all").toBeGreaterThan(0);
+    // neither gap more than twice the other
+    expect(Math.max(above, below) / Math.min(above, below),
+           `gaps ${above.toFixed(0)} above and ${below.toFixed(0)} below`)
+      .toBeLessThan(2);
   });
 });

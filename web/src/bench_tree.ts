@@ -77,7 +77,17 @@ export function layout(
   genes: readonly TreeGene[], w: number, h: number, u: number,
 ): TreeLayout {
   const rootX = w / 2;
-  const rootY = h - 24 * u;
+  // A short tree is CENTRED in its space, not left sitting at the bottom of
+  // it. Bottom-anchoring a tree that only fills half the height puts all the
+  // emptiness in one place above it, which is the void the last two
+  // versions of this screen both had -- first because the tree was too
+  // small, then because it was too short. A small plant looks small; a
+  // small plant shoved into one corner looks broken.
+  const fillNow = Math.min(0.42 + genes.length * 0.062, 1);
+  const slack = (h - 24 * u) * (1 - fillNow);
+  // 0.6 rather than a true half: a tree wants slightly more room above it
+  // than below, because the canopy is the part you look at.
+  const rootY = h - 24 * u - slack * 0.6;
   const forkY = rootY - Math.max(h * 0.10, 40 * u);
 
   // Group by pathway, ordered so the arrangement is stable frame to frame:
@@ -101,7 +111,18 @@ export function layout(
   // branch off the sides. A branch `phi` off vertical extends
   // `reach*sin(phi)` sideways and `reach*cos(phi)` up, so the widest
   // half-angle that still fits is `asin(halfWidth / reach)`.
-  const reach = Math.max(forkY - 24 * u, 40 * u);
+  // Reach SCALES WITH CONTENT.
+  //
+  // It was always the maximum: the limb measured 1322px whether the strain
+  // carried two genes or twelve, so a two-gene tree was the same enormous V
+  // with most of it empty. Sixty times the node radius of bare line. A tree
+  // with two things on it should be a SMALL tree.
+  //
+  // Fills from just under half the available height at one or two genes to
+  // all of it by about ten, which is where a ring is full enough that the
+  // shape is carrying real information.
+  const fill = Math.min(0.42 + genes.length * 0.062, 1);
+  const reach = Math.max((forkY - 24 * u) * fill, 40 * u);
   const halfW = Math.max(w / 2 - 34 * u, 20 * u);
   const fits = Math.asin(Math.min(halfW / Math.max(reach, 1), 1));
   const wanted = Math.min(Math.PI * 0.41, 0.21 * Math.max(n - 1, 1) + 0.25);
@@ -145,7 +166,11 @@ export function layout(
         x, y,
         // Node size carries level, so a grown gene is bigger without a
         // number: the shape of the tree IS the build.
-        r: Math.max((7 + Math.min(g.level, 5) * 1.6) * u, 6),
+        // Bigger, because the node is the thing you tap and the thing the
+        // eye should land on. At the old size the limb was forty to sixty
+        // times the radius and the tree read as two lines with a dot on
+        // each rather than as a branch bearing something.
+        r: Math.max((11 + Math.min(g.level, 5) * 2.2) * u, 8),
         fromX: prev && k > 0 ? prev.x : rootX,
         fromY: prev && k > 0 ? prev.y : forkY,
       });

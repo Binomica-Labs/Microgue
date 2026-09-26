@@ -147,6 +147,41 @@ today duplicated logic has been the bug (two `occupancy` predicates, two
 a test rather than in the code.
 
 
+## v1.69.2 — the tree never got smaller
+
+Collisions were fixed in .1 and it still read as two long diverging lines
+with a dot on each. Measured why: **the limb was 1322px whether the strain
+carried two genes or twelve.** Sixty times the node radius of bare line. The
+tree was always the maximum size, so a sparse ring was the same enormous V
+with most of it empty.
+
+Three changes, all measured:
+
+* **Reach scales with content** -- just under half the available height at
+  one or two genes, all of it by about ten, which is where a ring is full
+  enough that the shape carries real information. 719px at two genes now,
+  1336px at twelve.
+* **Nodes are bigger** (11u base, was 7u). The node is the thing you tap and
+  the thing the eye should land on; at forty to sixty times the radius the
+  limb dominated completely. Now 20-30x.
+* **A sparse tree is CENTRED**, not bottom-anchored. Both earlier versions
+  left a void above -- first because the tree was tiny, then because it was
+  short -- and a small plant shoved into one corner looks broken where a
+  small plant simply looks small.
+
+## Two tests that contradicted each other
+
+"A sparse tree does not leave a void above it" asserted the tree must start
+in the top quarter of its space. Correct when the bug was a tiny
+bottom-anchored tree; WRONG once a sparse tree became deliberately small and
+centred, because a small tree starting at the top hangs from the ceiling.
+
+Deleted, with the reason, and replaced by the rule that actually matters:
+the gaps above and below are within a factor of two of each other. **Three
+versions of this screen, three different wrong rules about size** -- too
+small, always maximum, and now hopefully neither.
+
+
 # v1.69.0 — sequencing is a confirmed act
 
 It sequenced on PICKUP: an unconfirmed tap in the loot menu spent the ATP
