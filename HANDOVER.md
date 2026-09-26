@@ -231,6 +231,33 @@ own centre finds 88 of 88. **Sampling where you guess a thing should be is
 not the same as testing the thing.**
 
 
+## v1.71.1 — NaN on a thing you keep
+
+The card printed `floor NaN/24`. On a screen that scrolls away; on the one
+artefact that LEAVES the game it is a saved image that says NaN for ever,
+and a player would reasonably assume the game is broken because the only
+piece of it they can show anyone says so.
+
+Every figure on the card now goes through a guard that clamps to finite and
+non-negative. `spec` checks NaN, Infinity and negatives on all of them --
+eight failures when the guard is removed.
+
+Also: a player-typed strain name is clipped to the square rather than
+running off both edges, and a blank one becomes "unnamed strain" instead of
+an untitled card.
+
+## The layout collision that did NOT happen
+
+Three releases in a row I put a new element where something already was, so
+I measured this one BEFORE shipping rather than after a screenshot. The
+report's content grows downward with the epitaph while the buttons are
+anchored to the bottom -- exactly the shape that collides. It clears by
+226px in the worst case (320x560, five epitaph lines), and `spec` now pins
+content against buttons at three sizes and three epitaph lengths.
+
+Checking first cost one probe. Each of the previous three cost a release.
+
+
 # v1.71.0 — save this build
 
 A run ends and everything it was disappears. The report card says what

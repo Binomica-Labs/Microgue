@@ -12001,3 +12001,82 @@ describe("the build card is the one thing that leaves the game", () => {
     expect(texts.join(" "), "the depth is missing").toContain("1/24");
   });
 });
+
+describe("the card is an artefact, so nothing bad may reach it", () => {
+  const draw = async (over: Record<string, unknown>): Promise<string[]> => {
+    const { drawCard } = await import("../src/export_card.js");
+    const out: string[] = [];
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (p === "measureText") return (s: string) => ({ width: s.length * 8 });
+        if (p === "createLinearGradient" || p === "createRadialGradient") {
+          return () => ({ addColorStop: () => undefined });
+        }
+        if (["fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
+             "lineWidth", "globalAlpha"].includes(p)) return "";
+        return (...a: unknown[]) => {
+          if (p === "fillText") out.push(String(a[0]));
+          return undefined;
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    drawCard(ctx, {
+      strain: "S", generation: 1, floor: 3, maxFloor: 24, turns: 10,
+      lysed: 0, installed: new Map(), held: new Set(), epitaph: "e",
+      won: false, ...over,
+    });
+    return out;
+  };
+
+  it("no figure on the card can ever read NaN", async () => {
+    // It printed "floor NaN/24". On a screen that scrolls away; on the one
+    // artefact that LEAVES the game it is a saved image that says NaN for
+    // ever. Every figure goes through a guard now.
+    const texts = await draw({
+      turns: NaN, lysed: NaN, floor: NaN, generation: NaN, maxFloor: NaN,
+    });
+    const all = texts.join(" | ");
+    expect(all, "NaN reached the card").not.toContain("NaN");
+    expect(all, "undefined reached the card").not.toContain("undefined");
+    expect(all, "Infinity reached the card").not.toContain("Infinity");
+    expect(texts.length, "the card drew nothing").toBeGreaterThan(2);
+  });
+
+  it("negative and absurd figures are clamped, not printed", async () => {
+    for (const over of [{ floor: -5, turns: -100, lysed: -3 },
+                        { floor: Infinity, turns: -Infinity },
+                        { generation: -1 }]) {
+      const all = (await draw(over)).join(" | ");
+      expect(all, `${JSON.stringify(over)} printed a negative`)
+        .not.toMatch(/-\d/);
+      expect(all).not.toContain("NaN");
+    }
+  });
+
+  it("a player-typed name of any length fits the square", async () => {
+    // A title running off both edges of a shared image is worse than a
+    // truncated one.
+    const long = await draw({ strain: "x".repeat(400) });
+    for (const t of long) {
+      expect(t.length, `"${t.slice(0, 20)}..." is ${String(t.length)} chars`)
+        .toBeLessThan(200);
+    }
+    // ...and an empty name still gets a title
+    const blank = await draw({ strain: "   " });
+    expect(blank.join(" "), "a blank name left the card untitled")
+      .toContain("unnamed");
+  });
+
+  it("a full ring and an empty one both compose", async () => {
+    const every = new Map(Object.keys(bio.GENES)
+      .filter((g) => g !== "ori").map((g) => [g as bio.GeneId, 5]));
+    const full = await draw({ installed: every });
+    expect(full.length, "a full build drew nothing").toBeGreaterThan(4);
+    expect(full.join(" "), "a full build lost its gene count")
+      .toMatch(/\d+ genes/);
+    const bare = await draw({ installed: new Map(), held: new Set() });
+    expect(bare.join(" "), "an empty build lost its gene count")
+      .toContain("0 genes");
+  });
+});

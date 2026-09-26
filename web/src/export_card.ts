@@ -38,6 +38,17 @@ export const CARD_SIZE = 1080;
  * Compose the card. Returns the canvas so the caller decides what to do
  * with it -- download, share sheet, or nothing.
  */
+/**
+ * A number fit to print on something a player keeps.
+ *
+ * The card is the one artefact that LEAVES the game, so a NaN here is not a
+ * glitch that scrolls away -- it is a saved image that says "floor NaN/24"
+ * for ever. Every figure on it goes through this.
+ */
+function num(v: number, fallback = 0): number {
+  return Number.isFinite(v) ? Math.max(Math.trunc(v), 0) : fallback;
+}
+
 export function drawCard(
   ctx: CanvasRenderingContext2D, d: CardData, size = CARD_SIZE,
 ): void {
@@ -55,14 +66,18 @@ export function drawCard(
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "#ffffff";
   ctx.font = `${20 * u}px ui-monospace,monospace`;
-  ctx.fillText(d.strain, size / 2, 34 * u);
+  // The name is typed by the player and can be any length. Clipped, because
+  // a title running off both edges of a square image is worse than a
+  // truncated one.
+  ctx.fillText(clip(ctx, d.strain.trim() || "unnamed strain", size - 40 * u),
+               size / 2, 34 * u);
 
   ctx.fillStyle = d.won ? "#7fe0a4" : "#8fa89a";
   ctx.font = `${11 * u}px ui-monospace,monospace`;
   ctx.fillText(
-    d.won ? `reached the bottom \u00b7 generation ${String(d.generation)}`
-      : `floor ${String(d.floor)}/${String(d.maxFloor)} `
-        + `\u00b7 generation ${String(d.generation)}`,
+    d.won ? `reached the bottom \u00b7 generation ${String(num(d.generation, 1))}`
+      : `floor ${String(num(d.floor, 1))}/${String(num(d.maxFloor, 24))} `
+        + `\u00b7 generation ${String(num(d.generation, 1))}`,
     size / 2, 50 * u);
 
   // What it was made of: the pathways actually lit, in their own colours.
@@ -85,8 +100,8 @@ export function drawCard(
   ctx.fillStyle = "#6f8f7c";
   ctx.font = `${10 * u}px ui-monospace,monospace`;
   ctx.fillText(
-    `${String(d.installed.size)} genes \u00b7 ${String(d.turns)} turns `
-    + `\u00b7 ${String(d.lysed)} lysed`, size / 2, size - 34 * u);
+    `${String(d.installed.size)} genes \u00b7 ${String(num(d.turns))} turns `
+    + `\u00b7 ${String(num(d.lysed))} lysed`, size / 2, size - 34 * u);
 
   if (d.epitaph.length > 0) {
     ctx.fillStyle = "#8fa89a";

@@ -415,3 +415,33 @@ describe("the fragment band reserves the space it uses", () => {
       .toContain("_g.fragments.length > 0");
   });
 });
+
+describe("the save-build button clears the report", () => {
+  it("content and buttons never meet, at any size or epitaph length", () => {
+    // Three layout collisions in three releases before this, all the same
+    // mistake: a new element placed where something else already was. The
+    // report's content grows DOWNWARD with the epitaph while the buttons
+    // are anchored to the bottom, so adding a button above the action is
+    // exactly the shape that collides.
+    for (const [W, H] of [[320, 560], [393, 852], [1080, 2400]] as const) {
+      const u = Math.max(Math.min(W, H) / 420, 1);
+      const insBottom = 12;
+      for (const epitaphLines of [0, 1, 5]) {
+        // content, as aftermath_render stacks it
+        let y = 60 * u + 54 * u + 34 * u;
+        if (epitaphLines > 0) y += 14 * u + epitaphLines * 12 * u;
+        // buttons, bottom-anchored
+        const actionTop = H - insBottom - 46 * u - 16 * u;
+        const shareTop = actionTop - 30 * u - 8 * u;
+        expect(y, `${String(W)}x${String(H)} with ${String(epitaphLines)} `
+          + "epitaph lines: the report runs into the buttons")
+          .toBeLessThan(shareTop);
+        // ...and the share button is on screen at all
+        expect(shareTop, `${String(W)}x${String(H)}: the button is off the top`)
+          .toBeGreaterThan(0);
+        expect(actionTop + 46 * u, `${String(W)}x${String(H)}: the action `
+          + "button is off the bottom").toBeLessThanOrEqual(H);
+      }
+    }
+  });
+});
