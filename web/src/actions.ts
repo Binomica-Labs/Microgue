@@ -12,7 +12,7 @@ import { covers } from "./footprint.js";
 import { tilesOf } from "./footprint.js";
 import { SIZES } from "./behaviour.js";
 import { music, play, stopMusic } from "./audio.js";
-import { pentatonicOf, voicing } from "./music.js";
+import { keyOf, pentatonicOf, voicing } from "./music.js";
 import { factor as rFactor, selected } from "./resistance.js";
 import { fragmentOf } from "./fragment.js";
 
@@ -280,6 +280,12 @@ export function t_step_(_g: Game, t: number): void {
       health: _g.player.maxhp > 0 ? _g.player.hp / _g.player.maxhp : 1,
       light: daylight(_g.clock),
       energy: _g.player.atpMax > 0 ? _g.player.atp / _g.player.atpMax : 0.5,
+      // This column's key, so two runs do not open on the same pitch.
+      key: keyOf(_g.dungeon.seed),
+      // The floor's alarm and the ring's load: the two things the player
+      // most needs to feel and could previously only read.
+      alarm: _g.quorum,
+      load: _g.genome.load(d),
     }), pentatonicOf(d), d);
     // Hitstop freezes the animation clock only. Turn state already resolved,
     // so nothing desyncs -- the world just holds still for a beat.

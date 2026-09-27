@@ -258,6 +258,44 @@ content against buttons at three sizes and three epitaph lengths.
 Checking first cost one probe. Each of the previous three cost a release.
 
 
+# v1.74.0 — the music is this column's
+
+The generative music has been there since v1.30-ish: mode ladder by
+stratum, drone, pentatonic melody pulled toward chord tones, a harmony
+voice that joins when the strain is doing well. Two gaps, both found by
+asking what it actually READS.
+
+## Every run opened on the same pitch
+
+The root came from DEPTH alone, so the fortieth descent sounded identical
+to the first at the same floor. A column now gets its own key: seven
+semitones, quantised to whole steps.
+
+Whole steps because a continuous offset drifts out of tune against the
+fixed intervals the drone voices use, and seven because wider puts the deep
+strata below what a phone speaker reproduces at all. Hashed rather than
+taken from the seed directly -- consecutive seeds giving adjacent keys
+would mean two runs started back to back still sounded the same, which is
+the failure this was meant to fix. Measured: eight distinct keys across
+forty seeds.
+
+## The floor turning on you was inaudible
+
+Quorum and burden landed today and the soundtrack knew about neither. The
+music sounded exactly the same whether nothing had noticed you or half the
+column was converging.
+
+* **Alarm tightens the interval**, stacking with threat rather than
+  replacing it -- being hunted by the FLOOR is a different fact from being
+  hunted by the thing in front of you, and both should be audible at once.
+* **Burden detunes and closes the filter**, so an overloaded ring sounds
+  sour and choked. That is the one place a player can HEAR the capacity
+  constraint instead of reading a percentage, and it only bites above 1.0:
+  the strain is the signal, not the load.
+
+Both guards verified by removal, three failures each.
+
+
 # v1.73.0 — every column has its own ecology
 
 The last of the replayability asks, and the first attempt was wrong in a

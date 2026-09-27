@@ -41,10 +41,34 @@ export const MODES: readonly (readonly number[])[] = [
 
 /** Root frequency per stratum: the column sinks about a fifth over its
  *  depth, so the deep is physically lower as well as darker. */
-export function rootOf(depth: number): number {
+/**
+ * Semitones a column is transposed by.
+ *
+ * Every run sounded IDENTICAL at the same depth: the root came from depth
+ * alone, so the fortieth descent opened on the same pitch as the first.
+ * A column gets its own tonal centre now -- the structure is the same, the
+ * key is not, which is the difference between hearing a soundtrack again
+ * and hearing this column.
+ *
+ * Seven semitones of range, quantised to whole steps. A continuous offset
+ * would drift out of tune against the fixed intervals the drone voices use,
+ * and a wider range would put the deep strata below what a phone speaker
+ * reproduces at all.
+ */
+export function keyOf(seed: number): number {
+  const s = Number.isFinite(seed) ? Math.abs(Math.trunc(seed)) : 0;
+  // A cheap stable hash: consecutive seeds must not give adjacent keys, or
+  // two runs started back to back would sound like the same one.
+  const h = ((s * 2654435761) % 4294967296) / 4294967296;
+  return Math.round(h * 7) - 3;
+}
+
+export function rootOf(depth: number, key = 0): number {
   const d = Number.isFinite(depth) ? Math.min(Math.max(Math.round(depth), 0), 8) : 0;
-  // A3 at the surface down to a bit below D3 at the bottom.
-  return 220 * Math.pow(2, -d / 14);
+  const k = Number.isFinite(key) ? Math.min(Math.max(key, -3), 4) : 0;
+  // A3 at the surface down to a bit below D3 at the bottom, transposed into
+  // this column's key.
+  return 220 * Math.pow(2, -d / 14) * Math.pow(2, k / 12);
 }
 
 export function modeOf(depth: number): readonly number[] {
@@ -129,6 +153,19 @@ export interface MusicState {
   readonly light: number;
   /** 0..1 ATP against the pool. */
   readonly energy: number;
+  /** This column's key, in semitones. See keyOf. */
+  readonly key?: number;
+  /**
+   * The floor's quorum alarm, 0..1.
+   *
+   * The music should know before the player does. A floor that has turned
+   * on you is the most important thing happening, and it was inaudible --
+   * the soundtrack sounded exactly the same whether nothing had noticed you
+   * or half the column was converging.
+   */
+  readonly alarm?: number;
+  /** Expression load, 0..1+. A strained cell should sound strained. */
+  readonly load?: number;
 }
 
 export interface MusicVoicing {
@@ -155,17 +192,31 @@ export function voicing(s: MusicState): MusicVoicing {
   const health = Math.min(Math.max(num(s.health, 1), 0), 1);
   const light = Math.min(Math.max(num(s.light, 1), 0), 1);
   const energy = Math.min(Math.max(num(s.energy, 0.5), 0), 1);
+  const key = Math.min(Math.max(num(s.key ?? 0, 0), -3), 4);
+  const alarm = Math.min(Math.max(num(s.alarm ?? 0, 0), 0), 1);
+  // Load runs past 1 when the ring is over capacity; past 2 it is choked,
+  // and the ear stops distinguishing anyway.
+  const load = Math.min(Math.max(num(s.load ?? 0, 0), 0), 2);
 
   return {
-    root: rootOf(depth),
+    root: rootOf(depth, key),
     // 7s when nothing is happening, down to ~2.4s with something on you.
     // 11s was a note every two breaths -- too sparse to hear as a line at
     // all, so the phrasing and the harmonic pull were both inaudible.
-    interval: 7 - threat * 4.6,
+    // Alarm tightens the interval the same way threat does, and stacks:
+    // being hunted by the FLOOR is a different fact from being hunted by
+    // the thing in front of you, and both should be audible at once.
+    interval: 7 - Math.min(threat * 4.6 + alarm * 2.2, 5.4),
     // 4 cents at full health -- a slow beat -- widening to 28, which sours.
-    detune: 4 + (1 - health) * 24,
+    // Burden detunes. A cell asking for more transcription than it can
+    // supply is not in tune with itself, and this is the one place the
+    // player can HEAR the constraint rather than read a percentage.
+    detune: 4 + (1 - health) * 24 + Math.max(load - 1, 0) * 18,
     // Daylight opens the filter; the deep closes it regardless.
-    cutoff: (300 + light * 900) * (1 - depth / 12),
+    // ...and closes the filter, so an overloaded ring sounds choked as well
+    // as sour.
+    cutoff: (300 + light * 900) * (1 - depth / 12)
+      * (1 - Math.min(Math.max(load - 1, 0), 1) * 0.35),
     // The lab is nearly silent; the column settles at a steady level.
     level: depth === 0 ? 0.02 : 0.05 + Math.min(depth, 6) * 0.005,
     wellbeing: health * 0.6 + energy * 0.4,

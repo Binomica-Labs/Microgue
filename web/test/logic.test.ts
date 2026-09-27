@@ -12274,3 +12274,93 @@ describe("the last five releases survive garbage at every entry point", () => {
     }
   });
 });
+
+describe("the music is this column's, not the game's", () => {
+  it("each column gets its own key, and neighbours do not collide", async () => {
+    // Every run sounded IDENTICAL at the same depth: the root came from
+    // depth alone, so the fortieth descent opened on the same pitch as the
+    // first. And a naive seed-to-key map would give consecutive seeds
+    // adjacent keys, so two runs started back to back would sound the same.
+    const { keyOf } = await import("../src/music.js");
+    const keys = new Set<number>();
+    for (let s = 1; s <= 60; s++) keys.add(keyOf(s));
+    expect(keys.size, "the column key barely varies").toBeGreaterThan(4);
+    for (const k of keys) {
+      expect(k, `key ${String(k)} is out of band`).toBeGreaterThanOrEqual(-3);
+      expect(k).toBeLessThanOrEqual(4);
+      expect(Number.isInteger(k), "a fractional key would drift out of tune "
+        + "against the fixed drone intervals").toBe(true);
+    }
+    // consecutive seeds land apart
+    let adjacent = 0;
+    for (let s = 1; s < 40; s++) {
+      if (Math.abs(keyOf(s) - keyOf(s + 1)) <= 1) adjacent++;
+    }
+    expect(adjacent, "consecutive seeds give nearly the same key")
+      .toBeLessThan(20);
+    // and the same seed is always the same key
+    expect(keyOf(17)).toBe(keyOf(17));
+  });
+
+  it("the root moves with the key but stays audible", async () => {
+    const { rootOf, keyOf } = await import("../src/music.js");
+    for (let d = 0; d <= 8; d++) {
+      for (const seed of [1, 9, 40]) {
+        const f = rootOf(d, keyOf(seed));
+        expect(f, `d${String(d)} seed ${String(seed)}: ${f.toFixed(1)}Hz is `
+          + "below what a phone reproduces").toBeGreaterThan(80);
+        expect(f, "the root climbed out of the bass").toBeLessThan(400);
+      }
+    }
+    // transposing actually changes it
+    expect(rootOf(4, 3)).not.toBeCloseTo(rootOf(4, 0), 1);
+  });
+
+  it("the floor's alarm is audible before it is visible", async () => {
+    // A floor that has turned on you is the most important thing happening
+    // and it was inaudible: the soundtrack sounded identical whether
+    // nothing had noticed you or half the column was converging.
+    const { voicing } = await import("../src/music.js");
+    const base = { depth: 4, threat: 0, health: 1, light: 1, energy: 0.8 };
+    const calm = voicing(base);
+    const hunted = voicing({ ...base, alarm: 1 });
+    expect(hunted.interval, "a swarming floor sounds like a calm one")
+      .toBeLessThan(calm.interval);
+    // ...and it stacks with threat rather than replacing it
+    const both = voicing({ ...base, threat: 1, alarm: 1 });
+    expect(both.interval, "alarm and threat do not stack")
+      .toBeLessThanOrEqual(voicing({ ...base, threat: 1 }).interval);
+    expect(both.interval, "the interval collapsed past usefulness")
+      .toBeGreaterThan(1);
+  });
+
+  it("an overloaded ring sounds strained", async () => {
+    // The one place a player can HEAR the burden constraint rather than
+    // read a percentage.
+    const { voicing } = await import("../src/music.js");
+    const base = { depth: 4, threat: 0, health: 1, light: 1, energy: 0.8 };
+    const easy = voicing(base);
+    const choked = voicing({ ...base, load: 2 });
+    expect(choked.detune, "an overloaded ring is in tune").toBeGreaterThan(easy.detune);
+    expect(choked.cutoff, "an overloaded ring is not muffled")
+      .toBeLessThan(easy.cutoff);
+    // under capacity changes nothing: the strain is the signal, not the load
+    expect(voicing({ ...base, load: 0.8 }).detune).toBeCloseTo(easy.detune, 6);
+  });
+
+  it("garbage state never produces an inaudible or broken voicing", async () => {
+    const { voicing, keyOf, rootOf } = await import("../src/music.js");
+    for (const b of [NaN, Infinity, -Infinity, -99, 99]) {
+      const v = voicing({ depth: b, threat: b, health: b, light: b,
+                          energy: b, key: b, alarm: b, load: b });
+      for (const [k, n] of Object.entries(v)) {
+        if (typeof n !== "number") continue;
+        expect(Number.isFinite(n), `${k} = ${String(n)} from ${String(b)}`)
+          .toBe(true);
+      }
+      expect(v.cutoff, "the filter closed completely").toBeGreaterThan(0);
+      expect(v.interval, "the interval went negative").toBeGreaterThan(0);
+      expect(Number.isFinite(rootOf(b, keyOf(b)))).toBe(true);
+    }
+  });
+});
