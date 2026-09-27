@@ -8,9 +8,14 @@
 // taken the frame, so the caller stops.
 
 import { stage, uiUnit } from "./chrome.js";
-import { raisedCard } from "./relief.js";
+import { raisedCard, shade } from "./relief.js";
 import { TRAITS, TRAIT_IDS, expansionCost } from "./chromosome.js";
 import { ellipsise, type ResearchRow } from "./screens.js";
+import { GENES } from "./biology.js";
+import { MAX_LEVEL, evolutionCost, levelMultiplier } from "./parts.js";
+import { PATHWAY_COLOUR } from "./plasmid_ui.js";
+import type { Web } from "./web_layout.js";
+import type { Insets } from "./chrome.js";
 import { buildWeb, drawWeb, fitWeb, webHit } from "./web_render.js";
 import type { GeneId } from "./biology.js";
 import { drawClose, drawHeader, type Box } from "./chrome.js";
@@ -174,8 +179,13 @@ function drawBenchTree(
   drawWeb(ctx, web, v, u, _g.webPick, _g.now);
   ctx.restore();
   _g.webHitAt = (px: number, py: number) => webHit(web, v, px, py, u);
-  const t = { rows: [] as { box: Box; gene: GeneId; cost: number;
-                            afford: boolean }[] };
+  // THE CARD, and the purchase.
+  //
+  // Replacing the tree with the map dropped this entirely: `rows` was
+  // stubbed to an empty array, so no gene on the bench was buyable at all.
+  // A screen whose whole purpose is spending ATP shipped unable to spend
+  // any.
+  const t = { rows: drawPick(ctx, _g, W, H, ins, u, web) };
   _g.researchRows = [...strip, ...t.rows.map((r) => ({
     box: r.box, kind: "evolve" as const, gene: r.gene,
     cost: r.cost, afford: r.afford,
@@ -202,3 +212,92 @@ function benchTree(): boolean { return BENCH_MODE === "tree"; }
 
 /** "tree" or "list". The list is kept whole in bench_list.ts. */
 const BENCH_MODE: "tree" | "list" = "tree";
+
+/**
+ * The selected gene's card, with its evolve action.
+ *
+ * Anchored to the bottom inset like the report's, because that is the one
+ * fixed thing on the screen -- and because three separate layout
+ * collisions this week all came from measuring off something that moved.
+ */
+function drawPick(
+  ctx: CanvasRenderingContext2D, _g: Game, W: number, H: number,
+  ins: Insets, u: number, web: Web,
+): { box: Box; gene: GeneId; cost: number; afford: boolean }[] {
+  const pick = _g.webPick === null
+    ? null : web.nodes.find((n) => n.id === _g.webPick);
+  if (!pick) {
+    ctx.fillStyle = "#6f8f7c";
+    ctx.font = `${10 * u}px ui-monospace,monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText("tap a gene \u00b7 drag to pan \u00b7 pinch to zoom",
+                 W / 2, H - ins.bottom - 34 * u);
+    ctx.textAlign = "left";
+    return [];
+  }
+  const tint = PATHWAY_COLOUR[pick.pathway];
+  const capped = pick.level >= MAX_LEVEL;
+  const cost = evolutionCost(Math.max(pick.level, 1), pick.id);
+  const owned = pick.installed;
+  const afford = owned && !capped && Number.isFinite(cost)
+    && _g.player.atp >= cost;
+
+  const line = 15 * u;
+  const cardH = 4 * line + 14 * u;
+  const cardW = Math.min(W - 36 * u, 340 * u);
+  const top = H - ins.bottom - 30 * u - cardH;
+  const cx = W / 2;
+  raisedCard(ctx, cx - cardW / 2, top, cardW, cardH, 6 * u, "#141c18", 2.5 * u);
+  ctx.strokeStyle = afford ? tint : "rgba(255,255,255,0.18)";
+  ctx.lineWidth = Math.max(afford ? 2 : 1.4, 1) * u;
+  ctx.beginPath();
+  ctx.roundRect(cx - cardW / 2, top, cardW, cardH, 6 * u);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let y = top + 12 * u;
+  ctx.fillStyle = shade(tint, 0.35);
+  ctx.font = `${9 * u}px ui-monospace,monospace`;
+  ctx.fillText(`${GENES[pick.id].product}  \u00b7  ${pick.pathway}`, cx, y);
+  y += line;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `${12 * u}px ui-monospace,monospace`;
+  ctx.fillText(owned ? `${GENES[pick.id].name}  L${String(pick.level)}`
+    : GENES[pick.id].name, cx, y);
+  y += line;
+  ctx.font = `${10 * u}px ui-monospace,monospace`;
+  if (!owned) {
+    // A gene you do not have cannot be bought here. Saying WHERE it comes
+    // from is more use than greying out a button with no explanation.
+    ctx.fillStyle = "#6f8f7c";
+    ctx.fillText(pick.held ? "in the bin \u2014 install it to evolve it"
+      : "not yet found \u2014 sequence one in the column", cx, y);
+  } else if (capped) {
+    ctx.fillStyle = tint;
+    ctx.fillText("fully evolved", cx, y);
+  } else {
+    ctx.fillStyle = afford ? tint : "#6f8f7c";
+    ctx.fillText(
+      `${String(cost)} ATP   x${levelMultiplier(pick.level).toFixed(2)}`
+      + ` \u2192 x${levelMultiplier(pick.level + 1).toFixed(2)}`, cx, y);
+    if (!afford) {
+      y += line;
+      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.font = `${9 * u}px ui-monospace,monospace`;
+      ctx.fillText(
+        `${String(Math.max(Math.ceil(cost - _g.player.atp), 0))} ATP short`,
+        cx, y);
+    }
+  }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+
+  // The whole card is the button when the purchase is possible. A separate
+  // target inside a card the player already tapped to open is one tap too
+  // many on a phone.
+  return owned && !capped
+    ? [{ box: { x: cx - cardW / 2, y: top, w: cardW, h: cardH },
+         gene: pick.id, cost, afford }]
+    : [];
+}

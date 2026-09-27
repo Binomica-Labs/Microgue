@@ -12364,3 +12364,67 @@ describe("the music is this column's, not the game's", () => {
     }
   });
 });
+
+describe("the map reads as branches, not as a scatter", () => {
+  it("each pathway is one tight spoke, not a cloud", async () => {
+    // The first version took angle from the index and radius from the tier
+    // INDEPENDENTLY, so a pathway's genes landed at unrelated angles and
+    // unrelated radii: twelve clouds of dots with lines wandering between
+    // them. A skill tree reads because it is made of paths you can follow
+    // with a finger.
+    const { buildWeb, PATHWAY_ORDER } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    const sector = (Math.PI * 2) / PATHWAY_ORDER.length;
+    const byP = new Map<string, { x: number; y: number }[]>();
+    for (const n of w.nodes) {
+      byP.set(n.pathway, [...(byP.get(n.pathway) ?? []), { x: n.x, y: n.y }]);
+    }
+    for (const [p, pts] of byP) {
+      if (pts.length < 2) continue;
+      // Measured against the branch's OWN mean direction, because a spoke
+      // sitting on the +/-pi boundary reads as 358 degrees to a naive
+      // atan2 sweep -- an artefact of the measurement, not the layout.
+      const mx = pts.reduce((a, q) => a + q.x, 0) / pts.length;
+      const my = pts.reduce((a, q) => a + q.y, 0) / pts.length;
+      const mid = Math.atan2(my, mx);
+      let worst = 0;
+      for (const q of pts) {
+        let d = Math.atan2(q.y, q.x) - mid;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        worst = Math.max(worst, Math.abs(d));
+      }
+      expect(worst, `${p} spreads ${(worst * 180 / Math.PI).toFixed(0)} deg, `
+        + "which is a cloud rather than a branch")
+        .toBeLessThan(sector * 0.35);
+    }
+  });
+
+  it("strands join neighbours on a branch, never leap across the map", async () => {
+    // A long strand is a line crossing everything else, and enough of them
+    // is the mess.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    for (const e of w.edges) {
+      const len = Math.hypot(e.bx - e.ax, e.by - e.ay);
+      expect(len, `${e.a}-${e.b} spans ${len.toFixed(2)} of the unit map`)
+        .toBeLessThan(0.35);
+    }
+  });
+
+  it("no two genes land on the same point", async () => {
+    // A pathway whose genes are all one tier would otherwise pile them at
+    // the same distance, on top of each other and untappable.
+    const { buildWeb } = await import("../src/web_layout.js");
+    const w = buildWeb(new Map(), new Set());
+    for (let i = 0; i < w.nodes.length; i++) {
+      for (let j = i + 1; j < w.nodes.length; j++) {
+        const a = w.nodes[i], b = w.nodes[j];
+        if (!a || !b) continue;
+        expect(Math.hypot(a.x - b.x, a.y - b.y),
+               `${a.id} and ${b.id} are on top of each other`)
+          .toBeGreaterThan(0.015);
+      }
+    }
+  });
+});

@@ -5313,3 +5313,69 @@ describe("winning is a real ending", () => {
       .toBe(n);
   });
 });
+
+describe("the bench can actually spend ATP", () => {
+  beforeEach(() => { setupEnv({ calls: 0 }); });
+
+  it("a selected gene is offered for evolution, and evolving works", async () => {
+    // Replacing the tree with the map dropped this entirely: `rows` was
+    // stubbed to an empty array, so no gene on the bench was buyable at
+    // all. A screen whose whole purpose is spending ATP shipped unable to
+    // spend any, and nothing caught it because no test opened the bench
+    // and tried to buy something.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(0, "heterotroph");
+    // put a gene on the ring
+    g.genome.stash({ kind: "gene", id: "katG", level: 1, mods: [],
+                     allele: WILD_TYPE });
+    const slot = g.genome.slots.findIndex((s) => s === null);
+    if (slot < 0) return;
+    g.genome.install(g.genome.bin.length - 1, slot);
+    g.player.atp = 9999;
+
+    g.showResearch = true;
+    g.webPick = "katG";
+    g.frame(100);                              // renders, builds the rows
+
+    const row = g.researchRows.find(
+      (r) => r.kind === "evolve" && r.gene === "katG");
+    expect(row, "the bench offers no way to evolve a carried gene")
+      .toBeDefined();
+    if (!row) return;
+    const before = g.genome.slots.find(
+      (s) => s?.kind === "gene" && s.id === "katG");
+    const lvl0 = before?.kind === "gene" ? before.level : 0;
+    g.research(row);
+    const after = g.genome.slots.find(
+      (s) => s?.kind === "gene" && s.id === "katG");
+    expect(after?.kind === "gene" ? after.level : 0,
+           "buying the upgrade did not raise the level").toBeGreaterThan(lvl0);
+  });
+
+  it("a gene you do not carry is not offered", async () => {
+    // Evolving searches the RING, so offering a button for a gene you have
+    // never found would take the ATP and refuse.
+    const { Game } = await import("../src/main.js");
+    const g = new Game({
+      width: 400, height: 800, style: {} as CSSStyleDeclaration,
+      getContext: () => stubContext({ calls: 0 }),
+      addEventListener: () => undefined,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }),
+    } as unknown as HTMLCanvasElement);
+    g.startRun(1, "heterotroph");
+    g.player.atp = 9999;
+    g.showResearch = true;
+    g.webPick = "mcrA";                        // a deep gene, certainly absent
+    g.frame(100);
+    expect(g.researchRows.some(
+      (r) => r.kind === "evolve" && r.gene === "mcrA"),
+      "the bench offered to evolve a gene the strain does not carry")
+      .toBe(false);
+  });
+});

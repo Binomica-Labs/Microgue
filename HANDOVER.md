@@ -258,6 +258,49 @@ content against buttons at three sizes and three epitaph lengths.
 Checking first cost one probe. Each of the previous three cost a release.
 
 
+# v1.75.0 — the bench could not spend ATP
+
+## A screen whose whole purpose stopped working
+
+Replacing the tree with the constellation dropped the purchase path
+entirely. `rows` was stubbed to an empty array as scaffolding and never
+filled in, so NO gene on the bench was buyable. The bench exists to spend
+ATP and shipped unable to spend any.
+
+Nothing caught it because no test ever opened the bench and tried to buy
+something -- every bench test checked layout. There is one now that walks
+the whole path: install a gene, select it, render, find the row, evolve,
+assert the level moved. Plus its inverse, because evolving searches the
+RING and offering a gene you have never found would take the ATP and
+refuse.
+
+The card is back, and the WHOLE CARD is the button when a purchase is
+possible: a separate target inside a card you already tapped to open is one
+tap too many on a phone.
+
+## The scatter
+
+Angle came from the gene's INDEX and radius from its TIER, independently --
+so a pathway's genes landed at unrelated angles AND unrelated radii.
+Twelve clouds of dots with lines wandering between them, which is exactly
+what "messy and scales poorly" looks like.
+
+A skill tree reads because it is made of PATHS you can follow with a
+finger. Each pathway is one spoke now, its genes beads along it ordered by
+tier, with a small alternating sideways offset so same-tier genes separate
+without breaking the line. Measured: every branch inside 3.7 degrees, every
+strand under 0.17 of the map, no two nodes closer than 0.015.
+
+Radius comes from POSITION ALONG THE BRANCH rather than raw tier, because a
+pathway whose genes are all tier 6 would otherwise stack them all at one
+distance.
+
+**A measurement artefact worth recording:** the first spread check swept
+atan2 and reported one branch at 358 degrees. That branch sits on the
++/-pi boundary; the layout was fine and the measurement was wrong. The test
+measures against each branch's own mean direction.
+
+
 # v1.74.0 — the music is this column's
 
 The generative music has been there since v1.30-ish: mode ladder by

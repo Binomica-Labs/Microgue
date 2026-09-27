@@ -99,18 +99,35 @@ export function buildWeb(
     if (list.length === 0) return;
     const sector = (Math.PI * 2) / PATHWAY_ORDER.length;
     const mid = pi * sector - Math.PI / 2;
-    list.forEach((id, i) => {
+    // A BRANCH, not a scatter.
+    //
+    // The first version put angle from the index and radius from the tier
+    // independently, so a pathway's genes landed at unrelated angles AND
+    // unrelated radii -- twelve clouds of dots with lines wandering between
+    // them, which is what "messy and scales poorly" looks like. A skill
+    // tree reads because it is made of PATHS you can follow with a finger.
+    //
+    // So each pathway is one spoke out from the centre, and its genes are
+    // beads on it, ordered by tier. The small sideways offset keeps
+    // same-tier genes from stacking on one point without breaking the line.
+    const ordered = list.slice().sort(
+      (x, y) => GENES[x].tier - GENES[y].tier || (x < y ? -1 : 1));
+    ordered.forEach((id, i) => {
       const tier = Math.min(Math.max(GENES[id].tier, 1), 8);
-      // Tier sets the radius; the index fans within the sector so genes of
-      // the same tier do not stack on one point.
-      const r = 0.22 + (tier - 1) / 7 * 0.72;
-      const spread = sector * 0.78;
-      const t = list.length === 1 ? 0.5 : i / (list.length - 1);
-      const a = mid + (t - 0.5) * spread;
+      // Radius from POSITION ALONG THE BRANCH, not raw tier: a pathway
+      // whose genes are all tier 6 would otherwise pile them all at the
+      // same distance, on top of each other.
+      const step = ordered.length === 1 ? 0.5 : i / (ordered.length - 1);
+      const r = 0.26 + step * 0.66;
+      // Alternating half-step sideways: enough to separate, small enough
+      // that the branch still reads as a line.
+      const off = (i % 2 === 0 ? 1 : -1) * (i === 0 ? 0 : 0.032);
+      const a = mid + off;
       const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      void tier;
       at.set(id, { x, y });
       nodes.push({
-        id, pathway: p, tier, x, y,
+        id, pathway: p, tier: GENES[id].tier, x, y,
         installed: installed.has(id),
         held: held.has(id),
         level: installed.get(id) ?? 0,
@@ -123,6 +140,8 @@ export function buildWeb(
   // complete rather than a scatter of dots appear.
   const edges: WebEdge[] = [];
   for (const [, list] of byPath) {
+    // The same order the branch was laid out in, so a strand joins
+    // NEIGHBOURS on the spoke rather than leaping across it.
     const sorted = list.slice().sort(
       (x, y) => GENES[x].tier - GENES[y].tier || (x < y ? -1 : 1));
     for (let i = 1; i < sorted.length; i++) {
