@@ -378,7 +378,7 @@ describe("the bench card does not collide with anything", () => {
 });
 
 describe("the fragment band reserves the space it uses", () => {
-  it("rows never run past the band the bin was pushed down by", () => {
+  it("rows never run past the band the bin was pushed down by", async () => {
     // They were drawn at `ring.rOuter + 6u` -- six units ABOVE where the bin
     // already starts -- so they printed over the "PARTS BIN" header and its
     // first row. Adding a section means reserving its space, not drawing
@@ -387,11 +387,12 @@ describe("the fragment band reserves the space it uses", () => {
     // This pins the two numbers against each other: the pitch the rows are
     // drawn at, and the band the bin is displaced by. They live in the same
     // file and nothing but this stops them drifting.
+    // THE SCREEN'S OWN numbers. Recomputing them here reported zero
+    // failures when the band was shrunk to a quarter of its size.
+    const { fragmentBand, ROW_PITCH } = await import("../src/plasmid_screen.js");
     const u = 2.57;
-    const rowH = 26 * u;
-    const gapAfter = 4 * u;
-    const pitch = rowH + gapAfter;
-    const band = (n: number): number => n * 30 * u + 10 * u;
+    const pitch = ROW_PITCH * u;
+    const band = (n: number): number => fragmentBand(n, u);
     for (const n of [1, 2, 3, 6]) {
       expect(n * pitch, `${String(n)} fragments overflow their band`)
         .toBeLessThanOrEqual(band(n));
@@ -399,25 +400,31 @@ describe("the fragment band reserves the space it uses", () => {
       expect(band(n) - n * pitch, `${String(n)} fragments waste too much space`)
         .toBeLessThan(40 * u);
     }
-    expect(band(0), "an empty hold still reserves space").toBeGreaterThan(0);
+    // An empty hold reserves NOTHING -- a strip with nothing in it would
+    // push the bin down on every screen a player ever sees.
+    expect(band(0), "an empty hold reserved space anyway").toBe(0);
+    for (const bad of [NaN, -1, Infinity]) {
+      expect(Number.isFinite(band(bad)), `band(${String(bad)}) is not a size`)
+        .toBe(true);
+      expect(band(bad)).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it("no fragments means no band at all", async () => {
-    // The common case. A reserved strip with nothing in it would push the
-    // bin down for no reason on every screen a player ever sees.
-    const { readFileSync } = await import("node:fs");
-    const { fileURLToPath } = await import("node:url");
-    const { join } = await import("node:path");
-    const src = readFileSync(
-      join(fileURLToPath(new URL("../src", import.meta.url)),
-           "plasmid_screen.ts"), "utf8");
-    expect(src, "the band is unconditional")
-      .toContain("_g.fragments.length > 0");
+    // Was a source-text scan for a conditional, which is a test of how the
+    // code is WRITTEN rather than what it does -- and it broke the moment
+    // the conditional moved into the function. Asserts the behaviour now.
+    const { fragmentBand } = await import("../src/plasmid_screen.js");
+    expect(fragmentBand(0, 2.57), "an empty hold pushed the bin down").toBe(0);
+    expect(fragmentBand(1, 2.57), "one fragment reserved nothing")
+      .toBeGreaterThan(0);
   });
 });
 
 describe("the save-build button clears the report", () => {
-  it("content and buttons never meet, at any size or epitaph length", () => {
+  it("content and buttons never meet, at any size or epitaph length", async () => {
+    const { reportButtons, reportContentBottom } =
+      await import("../src/aftermath_render.js");
     // Three layout collisions in three releases before this, all the same
     // mistake: a new element placed where something else already was. The
     // report's content grows DOWNWARD with the epitaph while the buttons
@@ -427,21 +434,135 @@ describe("the save-build button clears the report", () => {
       const u = Math.max(Math.min(W, H) / 420, 1);
       const insBottom = 12;
       for (const epitaphLines of [0, 1, 5]) {
-        // content, as aftermath_render stacks it
-        let y = 60 * u + 54 * u + 34 * u;
-        if (epitaphLines > 0) y += 14 * u + epitaphLines * 12 * u;
-        // buttons, bottom-anchored
-        const actionTop = H - insBottom - 46 * u - 16 * u;
-        const shareTop = actionTop - 30 * u - 8 * u;
+        // The screen's own stacking, not a copy of it.
+        const y = reportContentBottom(epitaphLines, u);
+        // THE RENDERER'S OWN button positions, not a copy: recomputing
+        // them reported zero failures when the share button was moved on
+        // top of the action it is supposed to sit above.
+        const { actionTop, actionH, shareTop, shareH } =
+          reportButtons(H, u, insBottom);
         expect(y, `${String(W)}x${String(H)} with ${String(epitaphLines)} `
           + "epitaph lines: the report runs into the buttons")
           .toBeLessThan(shareTop);
         // ...and the share button is on screen at all
         expect(shareTop, `${String(W)}x${String(H)}: the button is off the top`)
           .toBeGreaterThan(0);
-        expect(actionTop + 46 * u, `${String(W)}x${String(H)}: the action `
+        expect(actionTop + actionH, `${String(W)}x${String(H)}: the action `
           + "button is off the bottom").toBeLessThanOrEqual(H);
+        expect(shareTop + shareH, `${String(W)}x${String(H)}: the share `
+          + "button overlaps the action it sits above")
+          .toBeLessThanOrEqual(actionTop);
       }
     }
+  });
+});
+
+describe("the map is legible at the zoom it opens at", () => {
+  it("a node is a small fraction of the map, not a quarter of the screen", async () => {
+    // The radius multiplied by BOTH `v.scale / 180` and `u` -- a 6.8x
+    // double-scale that made a lit node 50px across with a 129px halo on a
+    // 1080px screen. The map fitted fine; the nodes were swallowing it,
+    // which reads as being zoomed far in when you are not.
+    // THE RENDERER'S OWN function, not a copy of the formula. Recomputing
+    // it here reported zero failures when the double-scaling was put back.
+    const { fitWeb, nodeRadius } = await import("../src/web_render.js");
+    for (const [W, H] of [[1080, 1700], [393, 600], [320, 420]] as const) {
+      const v = fitWeb(W, H);
+      const lit = nodeRadius(v.scale, true, 5);
+      const dim = nodeRadius(v.scale, false);
+      // a node must be small against the map it sits on
+      expect(lit / v.scale, `${String(W)}x${String(H)}: a maxed node is `
+        + `${((lit / v.scale) * 100).toFixed(0)}% of the map radius`)
+        .toBeLessThan(0.06);
+      // ...and still big enough to hit with a thumb
+      expect(lit, `${String(W)}x${String(H)}: a node is ${lit.toFixed(0)}px`)
+        .toBeGreaterThan(5);
+      expect(dim).toBeGreaterThan(2);
+      expect(dim, "a dim node is as loud as a lit one").toBeLessThan(lit);
+    }
+  });
+
+  it("the whole map, and its region labels, fit at the opening zoom", async () => {
+    // Labels sit further out than the furthest node. If they do not fit, a
+    // player opens the bench and cannot read the names of the regions --
+    // which are the thing that makes it navigable rather than decorative.
+    const { fitWeb } = await import("../src/web_render.js");
+    const { buildWeb } = await import("../src/web_layout.js");
+    const web = buildWeb(new Map(), new Set());
+    const maxR = Math.max(...web.nodes.map((n) => Math.hypot(n.x, n.y)));
+    for (const [W, H] of [[1080, 1700], [393, 600], [320, 420]] as const) {
+      const v = fitWeb(W, H);
+      expect((maxR + 0.12) * v.scale,
+             `${String(W)}x${String(H)}: the region labels are off screen`)
+        .toBeLessThanOrEqual(Math.min(W, H) / 2);
+      expect(maxR * v.scale, `${String(W)}x${String(H)}: the map is cropped`)
+        .toBeLessThan(Math.min(W, H) / 2);
+    }
+  });
+
+  it("every pathway gets a label, whatever the build", async () => {
+    const { buildWeb, PATHWAY_ORDER } = await import("../src/web_layout.js");
+    for (const build of [new Map(), new Map([["psbA" as never, 3]])]) {
+      const web = buildWeb(build, new Set());
+      const named = new Set(web.nodes.map((n) => n.pathway));
+      for (const p of PATHWAY_ORDER) {
+        const has = web.nodes.some((n) => n.pathway === p);
+        if (has) {
+          expect(named.has(p), `${p} has nodes but no region`).toBe(true);
+        }
+      }
+      expect(named.size, "the map has fewer than half its regions")
+        .toBeGreaterThan(PATHWAY_ORDER.length / 2);
+    }
+  });
+});
+
+describe("layout tests read the code, not a copy of it", () => {
+  it("no layout test recomputes arithmetic that lives in src", async () => {
+    // Three tests found in one sweep that reported ZERO failures when the
+    // thing they checked was broken: the bench card's position, the
+    // fragment band's height, and the report buttons'. Each recomputed the
+    // formula instead of importing it, so each verified that arithmetic is
+    // arithmetic.
+    //
+    // A test that recomputes what it checks cannot fail. Knowing that in
+    // the abstract did not stop me writing three of them, so this looks for
+    // the shape: `<number> * u` appearing in a layout test where the same
+    // constant appears in a source file's own `* u` arithmetic.
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    const srcConsts = new Set<string>();
+    for (const f of readdirSync(join(root, "src"))) {
+      if (!f.endsWith(".ts")) continue;
+      const txt = readFileSync(join(root, "src", f), "utf8");
+      for (const m of txt.matchAll(/(\d+(?:\.\d+)?)\s*\*\s*u\b/g)) {
+        const g = m[1];
+        if (g !== undefined) srcConsts.add(g);
+      }
+    }
+    const mine = readFileSync(
+      join(root, "test", "render.test.ts"), "utf8");
+    const shared = new Set<string>();
+    for (const m of mine.matchAll(/(\d+(?:\.\d+)?)\s*\*\s*u\b/g)) {
+      const g = m[1];
+      // Small integers are ordinary spacing in a test's own fixture and
+      // say nothing about duplication; the tell is a specific constant.
+      if (g !== undefined && srcConsts.has(g) && Number(g) > 20) shared.add(g);
+    }
+    // A test's own THRESHOLD is not a duplicated formula: "the band wastes
+    // less than 40u" is a judgement this test is making, not a number it
+    // copied from the screen. Only flagged where the line also computes a
+    // POSITION, which is what the screen owns.
+    for (const line of mine.split("\n")) {
+      if (!/toBeLessThan\(|toBeGreaterThan\(/.test(line)) continue;
+      for (const m of line.matchAll(/(\d+(?:\.\d+)?)\s*\*\s*u\b/g)) {
+        const g = m[1];
+        if (g !== undefined) shared.delete(g);
+      }
+    }
+    expect([...shared], "render.test.ts recomputes source arithmetic -- "
+      + "import the value instead").toEqual([]);
   });
 });

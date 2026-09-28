@@ -258,6 +258,76 @@ content against buttons at three sizes and three epitaph lengths.
 Checking first cost one probe. Each of the previous three cost a release.
 
 
+## v1.75.1 — it was not the zoom, it was the nodes
+
+The map looked zoomed far in. It was not: the whole map fits at the opening
+view (437px of a 540px half-width). A lit node was **50px across with a
+129px halo on a 1080px screen**, so the nodes were swallowing the map they
+sat on.
+
+The radius multiplied by BOTH `v.scale / 180` and `u` -- a 6.8x
+double-scale. Sized as a fraction of `v.scale` now, which tracks zoom
+exactly and cannot double-count. 50px -> 14px.
+
+## Regions have names
+
+A field of grey circles says nothing about what any of it IS. You had to tap
+a node to learn its pathway, which is backwards: the map should tell you
+what its regions are so you can decide where to look. Each branch is now
+labelled at its tip, in the pathway's colour once anything on it is lit, and
+`spec` checks the label ring fits inside the opening view at three screen
+sizes. Gene names arrive with zoom -- regions first, then the things in
+them, because eighty-eight labels at arm's length is a wall of text.
+
+## The same test mistake, twice in one week
+
+The first version of the node-size test recomputed the radius formula
+itself and reported ZERO failures when the double-scaling was put back. It
+was checking the arithmetic was sound, not that the renderer used it --
+exactly the bench-card collision test from v1.69.1.
+
+`nodeRadius()` is exported and called by both now. Three failures when the
+regression is reintroduced. **A test that recomputes what it checks cannot
+fail, and knowing that in the abstract did not stop me writing one.**
+
+
+# v1.76.0 — three tests that could not fail
+
+Having made the same mistake twice in a week, I swept for it instead of
+waiting for the third screenshot. The sweep: a constant appearing in a
+test's own `* u` arithmetic that also appears in a source file's.
+
+**Three hits, all confirmed by removal -- each reported ZERO failures when
+the thing it checked was broken:**
+
+* the bench card's position (moved back onto the footer: 0 failures)
+* the fragment band's height (shrunk to a quarter: 0 failures)
+* the report buttons' positions (share moved on top of the action: 0)
+
+Each recomputed the formula instead of importing it, so each verified that
+arithmetic is arithmetic. `fragmentBand()`, `reportButtons()` and
+`reportContentBottom()` are exported now and called by both the renderer
+and the test. Three failures each on reintroduction.
+
+## And a check that looks for the shape
+
+`spec` now scans render.test.ts for constants it shares with src's own
+layout arithmetic. Introducing a new duplicate produces three failures.
+
+It distinguishes a duplicated FORMULA from a test's own THRESHOLD: "the
+band wastes less than 40u" is a judgement the test is making, not a number
+copied from the screen, and flagging it would push future tests toward
+weaker assertions to satisfy the linter -- which would be a worse outcome
+than the bug.
+
+## Two assertions that had to go
+
+Cleaning this up broke two of my own: "an empty hold still reserves space"
+(it should reserve nothing) and a SOURCE-TEXT scan for a conditional, which
+tested how the code was WRITTEN rather than what it does and broke the
+moment the conditional moved into a function. Both replaced with behaviour.
+
+
 # v1.75.0 — the bench could not spend ATP
 
 ## A screen whose whole purpose stopped working

@@ -313,11 +313,47 @@ export function drawAftermath(
   return out;
 }
 
+/**
+ * Where the report's two buttons sit.
+ *
+ * ONE definition, used by the renderer and by the test that checks the
+ * report's content does not run into them. That test recomputed these
+ * numbers and reported zero failures when the share button was moved on
+ * top of the action -- the third such test found in one sweep.
+ */
+/**
+ * How far down the report's content reaches.
+ *
+ * The collision test measured this by copying the stack out of the drawing
+ * code, which is the same duplication as the button positions -- it would
+ * have kept passing while the real layout drifted. Exported so the test
+ * reads the number the screen actually uses.
+ */
+export function reportContentBottom(
+  epitaphLines: number, u: number,
+): number {
+  const n = Number.isFinite(epitaphLines)
+    ? Math.min(Math.max(Math.trunc(epitaphLines), 0), 5) : 0;
+  // heading, then the depth bar and stat block, then the credit row.
+  let y = 60 * u + 54 * u + 34 * u;
+  if (n > 0) y += 14 * u + n * 12 * u;       // "final moments" plus lines
+  return y;
+}
+
+export function reportButtons(
+  H: number, u: number, insBottom: number,
+): { actionTop: number; actionH: number; shareTop: number; shareH: number } {
+  const actionH = 46 * u, shareH = 30 * u;
+  const actionTop = H - insBottom - actionH - 16 * u;
+  return { actionTop, actionH, shareTop: actionTop - shareH - 8 * u, shareH };
+}
+
 /** The "save the build" button, tucked above the forward action. */
 function shareButton(
   ctx: CanvasRenderingContext2D, u: number, action: Box,
 ): Box {
-  const w = action.w, h = 30 * u;
+  const w = action.w;
+  const h = 30 * u;
   const box: Box = { x: action.x, y: action.y - h - 8 * u, w, h };
   ctx.fillStyle = "rgba(16,22,18,0.9)";
   ctx.strokeStyle = "rgba(200,220,235,0.45)";

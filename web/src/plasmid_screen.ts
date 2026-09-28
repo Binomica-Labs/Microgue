@@ -87,8 +87,7 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
   // already starts -- so they printed straight over the "PARTS BIN" header
   // and its first row. Reserving the space is the difference between adding
   // a section and drawing on top of one.
-  const fragBand = _g.fragments.length > 0
-    ? _g.fragments.length * 30 * u + 10 * u : 0;
+  const fragBand = fragmentBand(_g.fragments.length, u);
   _g.bin = {
     x: side ? paneX + gap : ins.left + gap,
     y: (side ? paneTop : _g.ring.cy + _g.ring.rOuter + 16 * u) + fragBand,
@@ -209,6 +208,23 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
  * read. Tapping one asks for a confirm; nothing is spent or revealed until
  * that confirm is answered.
  */
+/**
+ * How much room the unread fragments take above the bin.
+ *
+ * ONE definition, called by the bin's own offset, by the rows that fill the
+ * band, and by the test that checks they agree. The test used to recompute
+ * this and reported zero failures when the band was shrunk to a quarter --
+ * the third time this week a test verified arithmetic rather than the code
+ * that uses it.
+ */
+export function fragmentBand(count: number, u: number): number {
+  const n = Number.isFinite(count) ? Math.max(Math.trunc(count), 0) : 0;
+  return n > 0 ? n * ROW_PITCH * u + 10 * u : 0;
+}
+
+/** Row height plus its gap, in units. The band is built from this. */
+export const ROW_PITCH = 30;
+
 function drawFragmentRows(
   ctx: CanvasRenderingContext2D, _g: Game, W: number, u: number,
 ): { box: Box; index: number }[] {
@@ -216,10 +232,10 @@ function drawFragmentRows(
   if (_g.fragments.length === 0) return rows;
   const ins = stage(W, _g.insets(), u);
   const w = W - ins.left - ins.right - 28 * u;
-  const h = 26 * u;
+  const h = (ROW_PITCH - 4) * u;
   // Anchored to the same place the bin measures from, so the two cannot
   // drift apart: this band sits directly above the bin's header.
-  let y = _g.bin.y - (_g.fragments.length * 30 * u + 10 * u) + 4 * u;
+  let y = _g.bin.y - fragmentBand(_g.fragments.length, u) + 4 * u;
   ctx.textBaseline = "middle";
   for (let i = 0; i < _g.fragments.length; i++) {
     const f = _g.fragments[i];
@@ -243,7 +259,7 @@ function drawFragmentRows(
     ctx.font = `${9.5 * u}px ui-monospace,monospace`;
     ctx.fillText(`sequence ${String(cost)} ATP`, box.x + w - 9 * u, y + h / 2);
     rows.push({ box, index: i });
-    y += h + 4 * u;
+    y += ROW_PITCH * u;
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";

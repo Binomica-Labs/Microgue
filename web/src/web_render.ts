@@ -44,6 +44,21 @@ export function clampWeb(v: WebView, w: number, h: number): WebView {
   };
 }
 
+/**
+ * A node's radius on screen.
+ *
+ * Exported because the test that checks nodes are not swallowing the map
+ * must read THIS, not a copy of it. A first version of that test recomputed
+ * the formula and reported zero failures when the old double-scaling was
+ * put back -- it was checking the arithmetic was sound, not that the
+ * renderer used it. Second time this week; the fix is always one definition.
+ */
+export function nodeRadius(scale: number, lit: boolean, level = 0): number {
+  const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const lv = Number.isFinite(level) ? Math.min(Math.max(level, 0), 5) : 0;
+  return Math.max(s * (lit ? 0.022 + lv * 0.004 : 0.014), 2.5);
+}
+
 const sx = (v: WebView, x: number): number => v.cx + x * v.scale;
 const sy = (v: WebView, y: number): number => v.cy + y * v.scale;
 
@@ -83,14 +98,49 @@ export function drawWeb(
     ctx.globalAlpha = 1;
   }
 
+  // REGION LABELS, at the tip of each branch.
+  //
+  // A field of grey circles tells you nothing about what any of it is. You
+  // had to tap a node to learn its pathway, which is the wrong way round:
+  // the map should say what its regions ARE so you can decide where to
+  // look. This is the part that makes it navigable rather than decorative.
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  const tips = new Map<string, { x: number; y: number; r: number }>();
+  for (const n of web.nodes) {
+    const d = Math.hypot(n.x, n.y);
+    const cur = tips.get(n.pathway);
+    if (!cur || d > cur.r) tips.set(n.pathway, { x: n.x, y: n.y, r: d });
+  }
+  for (const [p, t] of tips) {
+    // Pushed a little further out than the last node, along the same
+    // direction, so a label never sits on top of the branch it names.
+    const k = t.r > 0 ? (t.r + 0.12) / t.r : 1;
+    const lx = sx(v, t.x * k), ly = sy(v, t.y * k);
+    const lit = web.nodes.some(
+      (n) => n.pathway === p && (n.installed || n.held));
+    ctx.fillStyle = lit ? PATHWAY_COLOUR[p as keyof typeof PATHWAY_COLOUR]
+      : "rgba(255,255,255,0.3)";
+    ctx.font = `${Math.max(v.scale * 0.028, 8)}px ui-monospace,monospace`;
+    ctx.globalAlpha = lit ? 0.9 : 0.6;
+    ctx.fillText(p, lx, ly);
+    ctx.globalAlpha = 1;
+  }
+
   for (const n of web.nodes) {
     const x = sx(v, n.x), y = sy(v, n.y);
     const tint = PATHWAY_COLOUR[n.pathway];
     const lit = n.installed || n.held;
-    const r = Math.max((lit ? 5.5 + Math.min(n.level, 5) * 0.9 : 3.4)
-                       * (v.scale / 180) * u, 2);
+    // Sized as a FRACTION OF THE MAP, not from `u` and the scale together.
+    //
+    // The old formula multiplied by both `v.scale / 180` and `u` -- a 6.8x
+    // double-scale that made a lit node 50px across with a 129px halo on a
+    // 1080px screen. The map fitted fine; the nodes were swallowing it,
+    // which reads as being zoomed far in when you are not.
+    //
+    // A fraction of `v.scale` is the right unit: it tracks zoom exactly,
+    // which is what a node should do, and it cannot double-count.
+    const r = nodeRadius(v.scale, lit, n.level);
 
     if (n.installed) {
       // A soft halo, so an installed gene is findable at a glance across a
@@ -98,7 +148,7 @@ export function drawWeb(
       ctx.fillStyle = tint;
       ctx.globalAlpha = 0.16 + 0.05 * Math.sin(now / 900 + n.x * 6);
       ctx.beginPath();
-      ctx.arc(x, y, r * 2.6, 0, Math.PI * 2);
+      ctx.arc(x, y, r * 1.9, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -119,12 +169,15 @@ export function drawWeb(
       ctx.arc(x, y, r + 4 * u, 0, Math.PI * 2);
       ctx.stroke();
     }
-    // Names only when there is room for them: eighty-eight labels at once
-    // is a wall of text, and the map is for finding regions, not reading.
-    if (v.scale > 420 && (lit || n.id === selected)) {
-      ctx.fillStyle = n.installed ? "#ffffff" : "rgba(255,255,255,0.5)";
-      ctx.font = `${Math.max(7.5 * u, 6)}px ui-monospace,monospace`;
-      ctx.fillText(GENES[n.id].name, x, y + r + 9 * u);
+    // Gene names once a branch is big enough to read along. Eighty-eight
+    // labels at arm's length is a wall of text, so they arrive with zoom --
+    // regions first, then the things in them.
+    const near = v.scale > 700;
+    if ((near || lit || n.id === selected) && v.scale > 380) {
+      ctx.fillStyle = n.installed ? "#ffffff"
+        : lit ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.38)";
+      ctx.font = `${Math.max(v.scale * 0.021, 7)}px ui-monospace,monospace`;
+      ctx.fillText(GENES[n.id].name, x, y + r + v.scale * 0.032);
     }
   }
   ctx.textAlign = "left";
