@@ -12816,3 +12816,87 @@ describe("a boss you have to answer, not just out-damage", () => {
     expect(phaseOf(50, 0).id, "a zero-max boss broke the ladder").toBeDefined();
   });
 });
+
+describe("hardening the floor features", () => {
+  it("a stripped corpse stays stripped across a reload", async () => {
+    // Levels regenerate from the seed, so a looted carcass came BACK -- and
+    // a corpse is pure reward with no risk, which makes it the one thing on
+    // a floor worth save-scumming for.
+    const { Dungeon } = await import("../src/dungeon.js");
+    const { carcassKey } = await import("../src/carcass.js");
+    let seed = 0, floor = 0;
+    for (let s = 1; s <= 40 && seed === 0; s++) {
+      const d = new Dungeon(110, 80, s);
+      d.floor = 1 + (s % 20);
+      if (d.current().carcasses.length > 0) { seed = s; floor = d.floor; }
+    }
+    expect(seed, "no seed in forty produced a corpse").toBeGreaterThan(0);
+    const before = new Dungeon(110, 80, seed);
+    before.floor = floor;
+    const keys = before.current().carcasses.map(
+      (c) => carcassKey(floor, c.x, c.y));
+    expect(keys.length).toBeGreaterThan(0);
+
+    const after = new Dungeon(110, 80, seed);
+    after.scavenged = new Set(keys);
+    after.floor = floor;
+    expect(after.current().carcasses.filter((c) => !c.taken).length,
+           "a looted corpse came back on reload").toBe(0);
+    // ...and the floor is otherwise identical: marking taken must not move
+    // any later roll, or remembering a corpse would reshape the level.
+    expect(after.current().mobs.length).toBe(before.current().mobs.length);
+    expect(after.current().carcasses.length)
+      .toBe(before.current().carcasses.length);
+  });
+
+  it("a seam is never the only way to the stairs", async () => {
+    // Measured: one floor in sixty put the seam across the only route down.
+    // A hazard is a cost you CHOOSE to pay; make it the only way out and it
+    // is a mandatory tax that kills a low-hp player who never had a
+    // decision to make.
+    const { Dungeon } = await import("../src/dungeon.js");
+    let checked = 0;
+    for (let s = 1; s <= 60; s++) {
+      const d = new Dungeon(110, 80, s);
+      d.floor = 1 + (s % 22);
+      const lvl = d.current();
+      if (lvl.hazards.length === 0 || !lvl.down) continue;
+      checked++;
+      const block = new Set(lvl.hazards.map(
+        (h) => `${String(h.x)},${String(h.y)}`));
+      const seen = new Set<string>();
+      const q = [{ x: lvl.up.x, y: lvl.up.y }];
+      while (q.length > 0) {
+        const p = q.pop();
+        if (!p) break;
+        const k = `${String(p.x)},${String(p.y)}`;
+        if (seen.has(k) || block.has(k) || !lvl.grid.isFloor(p.x, p.y)) continue;
+        seen.add(k);
+        q.push({ x: p.x + 1, y: p.y }, { x: p.x - 1, y: p.y },
+               { x: p.x, y: p.y + 1 }, { x: p.x, y: p.y - 1 });
+      }
+      expect(seen.has(`${String(lvl.down.x)},${String(lvl.down.y)}`),
+             `seed ${String(s)}: the seam walls off the exit`).toBe(true);
+    }
+    expect(checked, "no floor in sixty grew a seam").toBeGreaterThan(3);
+  });
+
+  it("every module since v1.75 survives garbage", async () => {
+    const C = await import("../src/carcass.js");
+    const H = await import("../src/hazard.js");
+    const B = await import("../src/boss.js");
+    const T = await import("../src/trail.js");
+    for (const b of [NaN, Infinity, -Infinity, -1e9, 1e9, 0]) {
+      expect(() => C.carcassAt(b, b, b, makeRng(1))).not.toThrow();
+      expect(C.carcassKey(b, b, b).length).toBeGreaterThan(2);
+      expect(H.hazardsAt(b).length).toBeGreaterThanOrEqual(0);
+      expect(B.PHASES.some((p) => p.id === B.phaseOf(b, b).id)).toBe(true);
+      expect(Number.isFinite(T.appetite(b, b, b))).toBe(true);
+      expect(typeof T.warm(T.mark(b, b, b), b)).toBe("boolean");
+    }
+    for (const h of Object.values(H.HAZARDS)) {
+      expect(H.hazardLine(h, 0).length).toBeGreaterThan(10);
+      expect(H.hazardLine(h, 9).length).toBeGreaterThan(10);
+    }
+  });
+});

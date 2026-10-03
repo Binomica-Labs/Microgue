@@ -236,6 +236,7 @@ export function g_startRun(
     // same organisms for everyone, everywhere, today. See daily.ts.
     const seed = _g.daily ? dailySeed() : (Date.now() & 0xffff) + slot;
     _g.dungeon = new Dungeon(96, 96, seed);
+    _g.dungeon.scavenged = new Set(_g.run.scavenged);
     _g.genome = new Plasmid();
     _g.run = newRun();          // a new culture has seen nothing
     // The column this time. Rolled from the seed so a given descent is

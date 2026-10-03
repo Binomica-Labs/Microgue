@@ -3,7 +3,7 @@
 // parameters, cached so climbing back finds the same level.
 
 import { hazardsAt, type Hazard } from "./hazard.js";
-import { carcassAt, type Carcass } from "./carcass.js";
+import { carcassAt, carcassKey, type Carcass } from "./carcass.js";
 import { communityOf, microbesIn, type Community } from "./community.js";
 import { MAX_DEPTH, microbesAt, stratum, type Microbe as Microbe0, type Stratum }
   from "./biology.js";
@@ -246,6 +246,15 @@ export class Dungeon {
    */
   readonly community: Community;
 
+  /**
+   * Corpses already stripped this run, as "floor:x:y".
+   *
+   * Set by the Game from its run state. A level regenerates from the seed
+   * whenever it is rebuilt, so the generator has to be told what the player
+   * already took or it hands it back.
+   */
+  scavenged: ReadonlySet<string> = new Set();
+
   private spawn(p: Microbe0, x: number, y: number): Mob {
     const hp = Math.round(p.hp * SIZES[p.size].hp);
     return {
@@ -428,7 +437,12 @@ export class Dungeon {
       if (lvl.down?.x === t.x && lvl.down.y === t.y) continue;
       if (lvl.carcasses.some((c) => c.x === t.x && c.y === t.y)) continue;
       const c = carcassAt(lvl.depth, t.x, t.y, rng, pool);
-      if (c) lvl.carcasses.push(c);
+      if (!c) continue;
+      // Already stripped: generate it so the floor looks the same, but mark
+      // it taken. Skipping it entirely would move every LATER roll and
+      // change the rest of the floor, which is a worse bug than a husk.
+      if (this.scavenged.has(carcassKey(lvl.floor, c.x, c.y))) c.taken = true;
+      lvl.carcasses.push(c);
     }
   }
 
@@ -457,6 +471,36 @@ export class Dungeon {
       if (lvl.down?.x === t.x && lvl.down.y === t.y) continue;
       lvl.hazards.push({ id: kind.id, x: t.x, y: t.y });
     }
+    // THE EXIT MUST STAY REACHABLE WITHOUT CROSSING IT.
+    //
+    // Measured: one floor in sixty put the seam across the only route to
+    // the down stairs. A hazard is supposed to be a cost you CHOOSE to pay
+    // -- make it the only way out and it is a mandatory tax, and on a
+    // low-hp run it kills a player who never had a decision to make.
+    //
+    // Dropped whole rather than thinned: a ring with a gap cut in it is a
+    // ring you walk around, which is the other way to make it meaningless.
+    if (lvl.down && !this.reaches(lvl, lvl.up, lvl.down)) lvl.hazards = [];
+  }
+
+  /** Can you get from a to b without entering a hazard tile? */
+  private reaches(lvl: Level, a: mg.Point, b: mg.Point): boolean {
+    const block = new Set(lvl.hazards.map(
+      (h) => `${String(h.x)},${String(h.y)}`));
+    const seen = new Set<string>();
+    const q: mg.Point[] = [a];
+    while (q.length > 0) {
+      const p = q.pop();
+      if (!p) break;
+      const k = `${String(p.x)},${String(p.y)}`;
+      if (seen.has(k) || block.has(k)) continue;
+      if (!lvl.grid.isFloor(p.x, p.y)) continue;
+      seen.add(k);
+      if (p.x === b.x && p.y === b.y) return true;
+      q.push({ x: p.x + 1, y: p.y }, { x: p.x - 1, y: p.y },
+             { x: p.x, y: p.y + 1 }, { x: p.x, y: p.y - 1 });
+    }
+    return false;
   }
 
   private stockRooms(lvl: Level, rng: Rng): void {

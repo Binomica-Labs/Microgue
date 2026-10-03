@@ -58,7 +58,8 @@ export function p_save(_g: Game): void {
         .map((l): [number, number] => [l.floor, l.stockedAt]),
       won: _g.won,
       run: { deepest: _g.run.deepest, deaths: _g.run.deaths, killed: _g.run.killed, condition: _g.run.condition,
-             bestiary: [..._g.run.bestiary], library: [..._g.run.library] },
+             bestiary: [..._g.run.bestiary], library: [..._g.run.library],
+             scavenged: [..._g.run.scavenged] },
       settings: _g.settings,
     };
     // Say so ONCE if the write fails. Every turn would be unusable noise, and
@@ -78,6 +79,9 @@ export function p_save(_g: Game): void {
 
 export function p_applySave(_g: Game, s: SaveData): void {
     _g.dungeon = new Dungeon(96, 96, s.seed);
+    // Before any level is built: the generator consults this while placing
+    // corpses, so setting it after would hand back everything already taken.
+    _g.dungeon.scavenged = new Set(s.run.scavenged);
     _g.dungeon.floor = s.floor;
     _g.genome = new Plasmid();
     // The chromosome's SIZE first. `put` refuses positions it does not have,
@@ -110,5 +114,6 @@ export function p_applySave(_g: Game, s: SaveData): void {
     _g.run = {
       deepest: s.run.deepest, deaths: s.run.deaths, killed: s.run.killed, condition: s.run.condition,
       bestiary: [...s.run.bestiary], library: [...s.run.library],
+      scavenged: [...s.run.scavenged],
     };
   }

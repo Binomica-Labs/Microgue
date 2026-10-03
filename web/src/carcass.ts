@@ -96,3 +96,10 @@ export function carcassLine(c: Carcass): string {
     + `${String(c.fragments.length)} fragment`
     + `${c.fragments.length === 1 ? "" : "s"} still readable.`;
 }
+
+/** How a stripped corpse is remembered across a reload. */
+export function carcassKey(floor: number, x: number, y: number): string {
+  const n = (v: number): string =>
+    String(Number.isFinite(v) ? Math.trunc(v) : 0);
+  return `${n(floor)}:${n(x)}:${n(y)}`;
+}

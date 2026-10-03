@@ -344,6 +344,48 @@ part you came to change -- and "credit" was a quieter wrong answer than
 "order", which is exactly why it survived the first pass.
 
 
+# v1.82.0 — hardening v1.75 to v1.81
+
+Seven releases of new systems. Two real defects, both found by asking what
+the new state does when the world is rebuilt.
+
+## A looted corpse came back
+
+**Levels regenerate from the seed on load, and nothing recorded what had
+been taken.** Save, strip a carcass, reload: it is there again. A corpse is
+PURE REWARD WITH NO RISK, which makes it the one thing on a floor worth
+save-scumming for -- mobs at least fight back.
+
+The run now carries `scavenged`, a set of "floor:x:y", written into the save
+and handed to the Dungeon BEFORE any level is built. An already-stripped
+corpse is still generated and then marked taken, rather than skipped:
+skipping it would move every later roll and reshape the rest of the floor,
+which is a worse bug than a husk. `spec` pins that the floor is otherwise
+byte-identical.
+
+The parse is capped at 400 keys of 24 chars, because a hand-edited save
+should not be able to hand us an unbounded array to hold for a whole run.
+
+## A seam could wall off the exit
+
+One floor in sixty put the hazard ring across the only route to the down
+stairs. **A hazard is a cost you CHOOSE to pay; make it the only way out and
+it is a mandatory tax** -- and on a low-hp run it kills a player who never
+had a decision to make.
+
+The generator now floods from the up stairs, ignoring hazard tiles, and
+drops the seam entirely if the exit is unreachable. Dropped WHOLE rather
+than thinned: a ring with a gap cut in it is a ring you walk around, which
+is the other way to make it meaningless. 19 of 20 seams survive the check.
+
+## And a sweep
+
+Carcasses, hazards, boss phases and trails fed NaN, Infinity and absurd
+magnitudes at every entry point, plus every hazard line at both bites and
+every phase line: clean. One pleasant non-finding -- a corpse inside a
+hazard ring is not a bug, it is the reward the ring is there to guard.
+
+
 # v1.81.0 — a boss you have to answer
 
 The last of Sebastian's five. A boss was an ELITE WITH BIGGER NUMBERS: the

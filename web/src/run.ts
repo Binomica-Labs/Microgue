@@ -21,6 +21,9 @@ export interface RunState {
   /** Loci ever seen, and organisms ever met -- the field notebook. */
   bestiary: string[];
   library: GeneId[];
+  /** Corpses already stripped this run, as "floor:x:y". Levels regenerate
+   *  from the seed, so without this a looted carcass came back on reload. */
+  scavenged: string[];
   /** Organisms killed this lineage. Feeds the smallest, saturating term of
    *  strain adaptation; see strain.ts. */
   killed: number;
@@ -31,7 +34,7 @@ export interface RunState {
 
 export function newRun(): RunState {
   return { deepest: 1, deaths: 0, bestiary: [], library: [], killed: 0,
-           condition: "none" };
+           condition: "none", scavenged: [] };
 }
 
 export function recordSighting(run: RunState, microbeId: string): boolean {

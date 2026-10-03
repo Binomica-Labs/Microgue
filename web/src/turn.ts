@@ -85,6 +85,11 @@ export function t_onTile(_g: Game, x: number, y: number): void {
       (k) => !k.taken && k.x === x && k.y === y);
     if (c) {
       c.taken = true;
+      // Recorded on the RUN, not just the level: levels regenerate from the
+      // seed on load, so without this a looted corpse came back -- and a
+      // corpse is pure reward with no risk, which makes it the one thing on
+      // a floor worth save-scumming for.
+      _g.run.scavenged.push(carcassKey(_g.dungeon.floor, c.x, c.y));
       const room = _g.fragments.length;
       const space = Math.max(FRAGMENT_HOLD - room, 0);
       const took = c.fragments.slice(0, space);
@@ -317,7 +322,7 @@ import { crossingLine, decay as qDecay, levelOf }
   from "./quorum.js";
 import { relax } from "./resistance.js";
 import { sequencingCost } from "./fragment.js";
-import { carcassLine } from "./carcass.js";
+import { carcassKey, carcassLine } from "./carcass.js";
 import { HAZARDS, hazardBite, hazardLine } from "./hazard.js";
 import { alleleName, alleleRarity, rollAllele } from "./allele.js";
 

@@ -111,7 +111,14 @@ export interface SaveData {
   /** Lineage state: the notebook, the score, the death count. Omitting this
    *  silently discarded every sighting the moment the tab closed. */
   readonly run: { deepest: number; deaths: number; killed: number;
-                  condition: ConditionId; bestiary: string[]; library: GeneId[] };
+                  condition: ConditionId; bestiary: string[]; library: GeneId[];
+                  /** Corpses already stripped, as "floor:x:y".
+                   *
+                   *  Levels regenerate from the seed on load, so without
+                   *  this a looted carcass came BACK -- and a carcass is
+                   *  pure reward with no risk, which makes it the one thing
+                   *  on a floor worth save-scumming for. */
+                  scavenged: string[] };
   readonly settings: Settings;
 }
 
@@ -206,7 +213,7 @@ export function parsePart(v: unknown): Part | null {
 }
 
 function parseRun(v: unknown): SaveData["run"] {
-  const empty = { deepest: 1, deaths: 0, killed: 0,
+  const empty = { scavenged: [] as string[], deepest: 1, deaths: 0, killed: 0,
                   condition: "none" as ConditionId,
                   bestiary: [] as string[], library: [] as GeneId[] };
   if (!isRecord(v)) return empty;
@@ -228,6 +235,12 @@ function parseRun(v: unknown): SaveData["run"] {
     // Absent in an older save simply means a lineage that predates the
     // counter, not one that never fought.
     killed: Math.max(num(v["killed"], 0), 0),
+    // Capped: a hand-edited save must not be able to hand us an unbounded
+    // array to hold in memory for the rest of the run.
+    scavenged: Array.isArray(v["scavenged"])
+      ? (v["scavenged"] as unknown[]).filter((k): k is string =>
+          typeof k === "string" && k.length < 24).slice(0, 400)
+      : [],
     // Absent in a save from before conditions existed: a stable column.
     condition: isConditionId(v["condition"]) ? v["condition"] : "none",
     bestiary, library,
