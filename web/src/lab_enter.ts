@@ -35,7 +35,7 @@ export function g_enterLab(_g: Game, slot: number): void {
   const lvl: Level = {
     depth: 0, floor: 0, grid: plan.grid, stratum: LAB_STRATUM,
     up: plan.entry, down: null, mobs: [], founding: 0, visited: true, boss: false,
-    rooms: [], barriers: [], cleared: true, stockedAt: 0,
+    rooms: [], barriers: [], carcasses: [], hazards: [], cleared: true, stockedAt: 0,
     sight: litSight(plan.grid),
   };
   // The dungeon goes to floor 0 too. `level` and `dungeon` are the same

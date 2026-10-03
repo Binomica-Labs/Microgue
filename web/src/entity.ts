@@ -10,6 +10,7 @@
 // If entity kinds pass roughly six AND their behaviours genuinely cross-cut,
 // revisit. Until then this is strictly safer.
 
+import type { Trail } from "./trail.js";
 import type { Agenda } from "./agenda.js";
 import type { GeneId } from "./biology.js";
 import type { Facing } from "./motion.js";
@@ -74,6 +75,11 @@ export interface Microbe extends Body {
   /** Turns of disengagement left: it has lost interest and will not sense
    *  the player again until this runs out. */
   bored?: number;
+  /** Where the player was when last sensed, and when. A chemotactic cell
+   *  follows a gradient, and a gradient outlives the source moving. */
+  trail?: Trail;
+  /** The stress response it is currently mounting, for elites. See boss.ts. */
+  phase?: string;
   /** Turns until it may fire again, and how long it has been winding up. */
   reload: number;
   charging: number;

@@ -202,6 +202,9 @@ class Game {
   webView: WebView | null = null;
   /** Which gene the map has selected. */
   webPick: GeneId | null = null;
+  /** The hazard whose explanation has already been given. One line per
+   *  seam, not one per tile: a note on every step is noise. */
+  hazardSeen: string | null = null;
   /** Hit-test into the map, rebuilt each frame by the renderer. */
   webHitAt: ((px: number, py: number) => { id: GeneId } | null) | null = null;
   /** The built map, cached on the ring's revision. `buildWeb` walks every

@@ -1791,6 +1791,7 @@ describe("state that should persist, does", () => {
     webFrom: "where a map gesture began",
     webPinch: "finger spread at the start of a pinch",
     webCache: "the built map, cached on the ring revision",
+    hazardSeen: "which seam has already been explained, this visit",
     quorum: "the floor's alarm; it decays and is rebuilt by fighting",
     resistance: "what the floor has adapted to; rebuilt as you fight",
     intro: "the lab floor, before anything is created",

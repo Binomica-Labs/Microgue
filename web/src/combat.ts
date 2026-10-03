@@ -4,6 +4,7 @@
 // Everything here takes its world explicitly rather than reaching for game
 // state, which is what makes it testable without a canvas.
 
+import { appetite, mark, warm } from "./trail.js";
 import { biteScale, chaseLimit, hunts, senseScale } from "./quorum.js";
 import { divides, partition } from "./fission.js";
 import { ageAgenda, agendaStep, newAgenda } from "./agenda.js";
@@ -25,6 +26,11 @@ export interface Target {
 }
 
 export interface TurnWorld {
+  /** The turn number, for ageing a trail. */
+  readonly turn: number;
+  /** The player's maximum, so a mob can tell a wounded target from a whole
+   *  one. `player.hp` alone says nothing without it. */
+  readonly playerMaxHp: number;
   readonly grid: Grid;
   readonly mobs: Mob[];
   readonly player: Target;
@@ -236,8 +242,29 @@ export function microbeTurn(w: TurnWorld): TurnEvent[] {
     // Sense range widens with the floor's alarm: a roused population is
     // looking for you, and at `alarmed` it does not stop looking.
     const q = w.quorum ?? 0;
-    const reach = senseRange(m.behaviour) * senseScale(q);
-    const senses = dist <= reach || m.behaviour === "sessile";
+    // APPETITE: what the target looks like, not just where it is.
+    //
+    // Mobs pressed a full-health player exactly as hard as a dying one, and
+    // a weak cell threw itself at a strong one as readily as at prey.
+    // Chemotaxis runs toward damaged, leaking targets -- a wounded cell
+    // sheds amino acids and nucleotides, which is a food signal -- and a
+    // small cell near a large one does have receptors telling it so.
+    // `threat` is already the player's power measured against what the
+    // floor can take -- the exact 0..1 the appetite wants, and computed
+    // once per turn rather than per mob.
+    const want = appetite(w.player.hp, w.playerMaxHp, w.threat);
+    const reach = senseRange(m.behaviour) * senseScale(q) * want;
+    const direct = dist <= reach || m.behaviour === "sessile";
+
+    // ...and a TRAIL, so losing sight is not amnesia.
+    //
+    // Sensing was binary and memoryless: step one tile out of range and
+    // every pursuer forgot you existed, which is what made the floor feel
+    // like a set of switches rather than like being hunted. A chemotactic
+    // cell follows a gradient, and a gradient persists after the source
+    // moves. Breaking line of sight buys distance now, not safety.
+    if (direct) m.trail = mark(w.player.x, w.player.y, w.turn);
+    const senses = direct || warm(m.trail, w.turn);
     // Not a sessile cell: it cannot chase, so it cannot chase fruitlessly.
     // It "senses" from anywhere so it strikes whatever comes adjacent, and
     // that made it bored after ten turns of you being elsewhere on the floor

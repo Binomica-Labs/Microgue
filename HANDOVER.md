@@ -291,6 +291,333 @@ regression is reintroduced. **A test that recomputes what it checks cannot
 fail, and knowing that in the abstract did not stop me writing one.**
 
 
+## v1.76.1 — the band forgot the bin's own label
+
+The fragment rows printed over "PARTS BIN n/18" again. v1.69.3 reserved a
+band for the bin's ROWS and never modelled its HEADER, which is drawn at
+`bin.y - 6u`. The last fragment row ended at exactly `bin.y - 6u`. Off by
+precisely the height of the thing I did not think about.
+
+`HEADER_GAP` is 26u now, not 10u; clear by 41px at every count.
+
+**The test passed the whole time.** It compared rows to the band and never
+mentioned the header either -- the same blind spot as the code, written by
+the same person in the same sitting. A test derived from the implementation
+inherits whatever the implementation forgot. The missing assertion is in
+now and produces three failures when the gap goes back.
+
+That is a different failure from yesterday's duplicated-formula tests. Those
+checked the wrong SOURCE; this one checked the right source and asked an
+incomplete QUESTION. The sweep for duplicated constants cannot find it.
+
+## "order this?" for a fragment
+
+The confirm dialog was the store's, reused for sequencing, so an unread
+fragment asked "order this?" and offered an "order" button -- the wrong word
+for the only action on the screen, and one that describes a shop the player
+is not standing in. The verb is a parameter now; the store still says order,
+because there it is right.
+
+
+## v1.76.2 — sequencing is not shopping
+
+.1 changed the verb and stopped there, which was half the fix. The dialog
+is the store's, so it was also pricing a fragment in CREDIT -- the store's
+synthesis currency, which sequencing does not spend and which is not even
+open during a run. The number on screen was the player's ATP wearing the
+wrong label.
+
+Verb and unit are both parameters now, and the button reads the action
+rather than naming it:
+
+    sequence this?                     order this?
+    1.4 kb fragment                    katG cassette
+    16 ATP, leaving 983                40 credit, leaving 959
+    [cancel]  [sequence it]            [cancel]  [order it]
+
+The store keeps its own words, because there they are right.
+
+**Worth noting how this was missed:** I checked the two strings that said
+"order" and shipped, without reading the rest of the dialog. Reusing a
+component means inheriting ALL of its assumptions, not just the ones in the
+part you came to change -- and "credit" was a quieter wrong answer than
+"order", which is exactly why it survived the first pass.
+
+
+# v1.81.0 — a boss you have to answer
+
+The last of Sebastian's five. A boss was an ELITE WITH BIGGER NUMBERS: the
+same fight as the mob beside it, taking longer. Nothing about it asked what
+you had BUILT, so a boss floor rewarded exactly what every other floor
+rewarded -- more power -- and a wrong-shaped genome lost by attrition rather
+than by being answered.
+
+Two changes, both reusing machinery that already existed.
+
+## Vulnerability
+
+The six damage channels are already modelled (resistance.ts). A boss is open
+to one or two and shrugs off the rest, so the question stops being "is my
+power high enough" and becomes "do I carry anything that can hurt THIS" --
+a loadout question with an answer you can go and find rather than grind
+toward.
+
+## Phases
+
+The opening is not fixed. A cell under attack does something, and each
+response changes which channel reaches it:
+
+    100%  exposed            bite, enzyme, spear
+     70%  oxidative burst    sulfide, cold
+     40%  encysted           enzyme only
+     15%  dividing           bite, oxidative, spear
+
+Each is a real stress response. An oxidative burst is a defence that also
+means the cell is spending reductant it can no longer use on itself. A cyst
+wall stops nearly everything -- only something that DIGESTS the wall gets
+through, which is what a secreted enzyme is for. A cell that cannot win a
+fight tries to win the census, and dividing costs it the wall it was hiding
+behind.
+
+The ladder reads from the BOTTOM: at 10% it is blooming, not merely
+encysted, or a boss would stick in its first response and never escalate.
+
+## Halved, never nullified
+
+A hard immunity could deal a genome that cannot finish, with no route but
+to walk away -- and a roguelike that can deal an unwinnable hand is broken
+rather than difficult. The wrong channel is halved: a real penalty you can
+grind through, with the right channel twice as fast, which is what makes it
+worth building for. `spec` pins that no channel is locked out of the whole
+fight and that no scale is ever zero -- three failures if immunity is made
+absolute.
+
+That closes all five: enemy AI, rooms, scavenged genes, hazard rooms and
+bosses.
+
+
+# v1.80.0 — chemistry you can walk into, if you can take it
+
+Hazard rooms, the fourth of Sebastian's five.
+
+## Why not just use barriers
+
+Barriers already exist and already gate relict rooms on a gene. But a
+barrier is a LOCKED DOOR: the right gene opens it, and without that gene the
+room may as well not exist. **A lock has no decision in it** -- you turn
+around or you do not.
+
+A hazard is the other shape. The loot is visible, the room is open, and
+crossing hurts. The right gene makes it free; the wrong loadout makes it
+cost blood you may not be able to spare. A desperate player can still take
+it, which is the point: a tunable cost is a decision, a gate is a checklist.
+
+## Five seams, each a real selective pressure
+
+    peroxide  katG, sodA               d1-3   oxygen chemistry from above
+    acid      mnhA, groL               d2-5   protons leaking in
+    metal     acrB, mtrC               d4-7   dissolved heavy metals
+    thermal   groL, dnaK               d5-8   hot water from below
+    anoxic    narG, dsrA, mcrA, cydA   d3-8   nothing to breathe
+
+These are the chemistry that actually decides which organisms live where in
+a column. A player who learns katG is what survives peroxide has learned why
+catalase is nearly universal.
+
+Resistance is TOTAL, not a discount: walking through what was hurting you is
+the moment a loadout pays off, and catalase does not take the edge off
+peroxide, it destroys it.
+
+## Laid as a RING, with the prize inside
+
+A seam you can walk round is not a decision, so it goes in an annulus at
+55% of the room radius with the reward in the middle. Measured: 8 floors in
+30 grow one, every ring encloses a real interior (1 to 13 tiles), never on
+the stairs. `spec` fails if a seam ever encloses nothing -- a ring round a
+wall would be decoration.
+
+## A gene I invented
+
+The acid seam first listed `atpE`, reached for from memory and not in the
+game's table. The right answer was already there: `mnhA`, the Na+/H+
+antiporter -- and acid tolerance really is specifically an ANTIPORTER
+problem, a cell in low pH trading sodium out for the protons flooding in.
+`spec` now checks every resist gene exists, because a hazard naming a gene
+that does not would be unresistable forever and nothing else would notice.
+
+Still open: bosses that demand a loadout.
+
+
+# v1.79.0 — the floor smells blood, and remembers where you went
+
+Enemy AI, the next of Sebastian's five. Eight behaviours already exist
+(chase, glide, drift, hunt, ambush, flank, leech, sessile) with fleeing and
+circling, so the gap was never more TYPES. It was that sensing was binary
+and memoryless, and that a mob read the player's POSITION and nothing else.
+
+## Trails
+
+Step one tile out of range and every pursuer instantly forgot you existed
+and went back to foraging. That is the single thing that made a floor feel
+like a set of switches rather than like being hunted.
+
+A chemotactic cell follows a GRADIENT, and a gradient persists after the
+source moves -- the molecules you shed are still there, thinning, for some
+seconds after you have gone. A mob now marks where it last sensed you and
+follows that for twelve turns. **Breaking line of sight buys distance, not
+safety.** You have to actually leave.
+
+## Appetite
+
+Mobs pressed a full-health player exactly as hard as a dying one. A wounded
+cell sheds amino acids and nucleotides, which really is chemoattractant, so
+a leaking target draws up to +57% sense range. A dangerous target damps that
+bonus, because a small cell does hesitate near a large one.
+
+## The version of this I nearly shipped was backwards
+
+The first attempt multiplied BASE sense range by a wariness factor, so a
+healthy player at threat 0.2 was sensed at 91% of the old range. Getting
+stronger made the floor notice you LESS -- power buying a stealth field,
+which is not what power should buy. I had written a comment saying exactly
+that while implementing the opposite.
+
+The bonus only ever ADDS now: baseline attention never drops, whatever you
+are carrying. `spec` pins it at five threat levels and four health levels.
+A calibration test caught it -- a hunter stopped announcing its posture
+because the mob could no longer sense the player it used to.
+
+## And one near-miss worth recording
+
+I created `src/pursuit.ts` for this and OVERWROTE an existing module of that
+name -- nextAction, nearestMob, distanceTo, all of it gone. `tsc` caught it
+immediately (three modules importing a function that had vanished) and
+`git show HEAD:web/src/pursuit.ts` restored it intact. The new code lives in
+`trail.ts`. Check whether a filename is taken before taking it.
+
+
+# v1.78.0 — something died here, and it was not you
+
+Sebastian asked for five things: better enemy AI, more rooms, scavenged
+genes from a corpse the player did not kill, hazard puzzles, and complex
+bosses. This is the third, done properly, rather than five done badly.
+
+## Rooms already existed -- measured before building
+
+    F 1: 5.3 rooms/floor   chamber, port
+    F 6: 4.0 rooms/floor   port, chamber, bloom, enrichment
+    F14: 6.3 rooms/floor   chamber, enrichment, relict, port, mat, bloom
+    F22: 7.0 rooms/floor   port, chamber, enrichment, bloom, relict
+
+Six kinds, 4-7 per floor, diversifying with depth. The structure the request
+asked for is there; what was missing was a REASON to walk into one.
+
+## The corpse is the reason
+
+Every scrap of DNA in the game came from a cell the player killed, so a room
+you had already cleared paid nothing. A carcass is a cell that died before
+you arrived -- starved, lysed by something that moved on, osmotic failure,
+phage -- and what is left is a genome nobody is using.
+
+The fragments are UNSEQUENCED, which is what keeps it a decision rather than
+a free gift: a scavenged gene still costs ATP to read. And they are drawn
+from that ORGANISM'S OWN gene list, so a player who learns sulfur reducers
+carry dsrA and goes looking for dead ones is reading the game the way it is
+meant to be read.
+
+This is the most real thing in the game. Environmental DNA from lysed cells
+is exactly what natural transformation takes up -- already modelled here
+with comA -- and a dead cell is the richest source of it in any water
+column. Scavenging a corpse for genes is not borrowed from fantasy loot; it
+is what bacteria actually do.
+
+Measured: 16 of 24 floors carry one, 43 fragments across them. In rooms, off
+the stairs, never stacked, never more than three genes and never two copies
+of one -- it is a single genome. A full hold says what was left behind and
+why, because a player who walks away not knowing will think the game ate it.
+
+## Still open from that request
+
+Enemy AI (agendas, quorum and sensory adaptation exist and could go much
+further), hazard-gated loot rooms, and bosses that demand a loadout.
+
+
+# v1.78.0 — the store is open, and it looks like synthesis
+
+`STORE_OPEN = true`. The economy was measured in v1.77.0 rather than
+guessed at -- sound from the second run on, cold start fixed by a founding
+grant rather than by bending the price curve -- so the reason for the pause
+is gone.
+
+## A catalogue that reads like a catalogue
+
+The rows were three strings: name, note, price. True, and they told the
+player nothing about what they were buying or why it cost that.
+
+* **A length bar.** `genePrice` is 30 + 22/kb + 18/tier, so a long gene is
+  genuinely dearer -- which is exactly how real synthesis is priced, per
+  base. The bar IS the invoice: you can see why mcrA costs what it does.
+  Scaled against the longest gene in the game so the bars compare with each
+  other rather than each being its own arbitrary fraction.
+* **The cassette arrow**, in the pathway's colour. A row now looks like the
+  part it will become rather than a line item, and "the green ones" means
+  the same thing on the store, the ring and the bench map.
+* **"in stock"** rather than "ordered", because that is what a shelf of
+  synthesised DNA is.
+
+## The fourth collision, caught before shipping
+
+My first pass put the note's baseline at 26u and the length bar at 22u --
+straight through it. Same cause as the three before: stacking elements by
+eye instead of writing down where they go.
+
+`offerRowLayout()` is one exported definition giving every element's
+position, used by the renderer and by the test that checks nothing overlaps
+anything. Two failures when the bar is moved back through the note. The row
+grew 36u -> 50u to hold three lines honestly rather than squeezing them.
+
+
+# v1.77.0 — the credit the player could not spend
+
+Chased the paused store, because a currency that accrues with no sink is a
+promise the game breaks every time a strain dies.
+
+## Measured before changing anything
+
+    first death, F3    49 credit        a gene:    72 .. 220 (median 131)
+    early death, F6   118 credit        +1 site:   160, 240, 360, 540
+    mid run,    F12   262 credit        strain:    140, 357, 617, 910
+    deep run,   F20   444 credit
+
+From the second run on this is fine -- two deaths buy a site, a deep run
+buys a strain level. **The defect is the cold start: a first death earns 49
+and the cheapest thing in the store costs 72, so the first visit to the
+meta-progression screen can buy NOTHING.** That teaches a player the screen
+is not worth opening, which is the worst possible first impression of a
+system whose whole job is making death bearable.
+
+A one-time FOUNDING_GRANT of 60 on a researcher's first banked run, rather
+than a price cut: the curve is not the problem and should not be disturbed
+to fix a cold start. Checked before the ledger push, because afterwards it
+is never empty again. Per researcher, so it cannot be farmed by starting
+over -- `spec` pins both.
+
+## And stop advertising a closed shop
+
+With the store paused, every death still announced "+211 synthesis credit"
+and the report still captioned it "synthesis credit earned". The credit
+still accrues -- it is banked, waiting -- but it is no longer sold to the
+player as a reward they can use. The report says "banked for the store".
+
+## The store itself is still the owner's call
+
+`STORE_OPEN = false` in aftermath.ts is untouched. The economy measures
+sound from the second run onward and the cold start is now fixed, so the
+flag is the only thing standing between the store and the player -- but
+turning it back on is a design decision, not a bug fix, and it was paused
+deliberately.
+
+
 # v1.76.0 — three tests that could not fail
 
 Having made the same mistake twice in a week, I swept for it instead of

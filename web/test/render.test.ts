@@ -396,6 +396,17 @@ describe("the fragment band reserves the space it uses", () => {
     for (const n of [1, 2, 3, 6]) {
       expect(n * pitch, `${String(n)} fragments overflow their band`)
         .toBeLessThanOrEqual(band(n));
+      // ...AND CLEAR THE BIN'S OWN LABEL.
+      //
+      // This is the assertion that was missing. The band reserved room for
+      // the bin's ROWS and forgot its header -- "PARTS BIN n/18" is drawn
+      // at `bin.y - 6u` and the last fragment row ended at exactly
+      // `bin.y - 6u`, so they printed on top of each other. The test
+      // compared rows to the band and never mentioned the header, so it
+      // passed while the screen was visibly broken.
+      const lastRowEnd = -band(n) + 4 * u + n * pitch;
+      expect(lastRowEnd, `${String(n)} fragments print over "PARTS BIN"`)
+        .toBeLessThan(-6 * u);
       // ...and the band is not absurdly generous either
       expect(band(n) - n * pitch, `${String(n)} fragments waste too much space`)
         .toBeLessThan(40 * u);
@@ -564,5 +575,134 @@ describe("layout tests read the code, not a copy of it", () => {
     }
     expect([...shared], "render.test.ts recomputes source arithmetic -- "
       + "import the value instead").toEqual([]);
+  });
+});
+
+describe("a confirm names the action it is confirming", () => {
+  it("sequencing asks to sequence, not to order", async () => {
+    // The dialog was the store's, reused. An unread fragment asked "order
+    // this?" and offered an "order" button -- the wrong word for the only
+    // action on the screen, and one that describes a shop the player is not
+    // standing in.
+    const { drawConfirm } = await import("../src/screens.js");
+    const texts: string[] = [];
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (p === "measureText") return (s: string) => ({ width: s.length * 8 });
+        if (["fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
+             "lineWidth", "globalAlpha"].includes(p)) return "";
+        return (...a: unknown[]) => {
+          if (p === "fillText") texts.push(String(a[0]));
+          return undefined;
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+
+    drawConfirm(ctx, 400, 800, 2, "1.4 kb fragment", 16, 999,
+                "sequence", "ATP");
+    const all = texts.join(" | ");
+    expect(all, "the sequencing confirm still says order")
+      .not.toContain("order");
+    expect(texts, "the button does not read \"sequence it\"")
+      .toContain("sequence it");
+    expect(all, "the confirm lost the thing being acted on")
+      .toContain("1.4 kb fragment");
+    // The COST is ATP, not the store's synthesis credit. Sequencing does
+    // not touch credit, and the store is not even open during a run.
+    expect(all, "sequencing is priced in the store's currency")
+      .not.toContain("credit");
+    expect(all, "the cost lost its unit").toContain("16 ATP");
+
+    // ...and the store still says order, since that IS the right verb there
+    texts.length = 0;
+    drawConfirm(ctx, 400, 800, 2, "katG", 40, 999);
+    expect(texts, "the store's confirm lost its verb").toContain("order it");
+    expect(texts.join(" | "), "the store lost its own currency")
+      .toContain("credit");
+  });
+
+  it("an unaffordable action says so instead of offering the verb", async () => {
+    const { drawConfirm } = await import("../src/screens.js");
+    const texts: string[] = [];
+    const ctx = new Proxy({}, {
+      get: (_o, p: string) => {
+        if (p === "measureText") return (s: string) => ({ width: s.length * 8 });
+        if (["fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
+             "lineWidth", "globalAlpha"].includes(p)) return "";
+        return (...a: unknown[]) => {
+          if (p === "fillText") texts.push(String(a[0]));
+          return undefined;
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    drawConfirm(ctx, 400, 800, 2, "3.7 kb fragment", 40, 3,
+                "sequence", "ATP");
+    expect(texts.join(" | "), "an unaffordable sequence offered the button")
+      .toContain("not enough");
+  });
+});
+
+describe("the store shows the biology, not a spreadsheet", () => {
+  it("nothing in an offer row overlaps anything else", async () => {
+    // Fourth layout collision of the week in the making: my first pass put
+    // the note's baseline at 26u and the length bar at 22u, straight
+    // through it. Same cause every time -- stacking by eye instead of
+    // writing down where things go. The renderer's OWN layout, not a copy.
+    const { offerRowLayout } = await import("../src/aftermath_render.js");
+    for (const u of [1, 2, 2.57, 4]) {
+      const L = offerRowLayout(u);
+      // each element's vertical extent, from its baseline and font size
+      const spans: [string, number, number][] = [
+        ["name", L.nameY - 11.5 * u, L.nameY],
+        ["note", L.noteY - 8.5 * u, L.noteY],
+        ["bar", L.barY, L.barY + L.barH],
+        ["caption", L.capY - 7.5 * u, L.capY],
+      ];
+      for (let i = 0; i < spans.length; i++) {
+        for (let j = i + 1; j < spans.length; j++) {
+          const a = spans[i], b = spans[j];
+          if (!a || !b) continue;
+          // the bar and its caption are meant to share a line
+          if (a[0] === "bar" && b[0] === "caption") continue;
+          const overlap = Math.min(a[2], b[2]) - Math.max(a[1], b[1]);
+          expect(overlap, `u=${String(u)}: ${a[0]} and ${b[0]} overlap by `
+            + `${overlap.toFixed(1)}px`).toBeLessThanOrEqual(0);
+        }
+      }
+      // ...and everything fits inside the row it is drawn in
+      for (const [what, , bottom] of spans) {
+        expect(bottom, `u=${String(u)}: ${what} runs past the row`)
+          .toBeLessThanOrEqual(L.boxH);
+      }
+      expect(L.boxH).toBeLessThan(L.rowH);
+    }
+  });
+
+  it("a gene offer shows what it is and why it costs that", async () => {
+    // Three strings in a row told the player nothing about WHY a gene costs
+    // what it does. Synthesis is priced by LENGTH, which is both the real
+    // fact and the useful one: the bar is the invoice.
+    const { genePrice } = await import("../src/lab.js");
+    const bio = await import("../src/biology.js");
+    const byKb = Object.keys(bio.GENES)
+      .filter((g) => g !== "ori")
+      .map((g) => ({ g, kb: bio.GENES[g as keyof typeof bio.GENES].kb }))
+      .sort((a, b) => a.kb - b.kb);
+    const shortest = byKb[0], longest = byKb[byKb.length - 1];
+    if (!shortest || !longest) return;
+    expect(genePrice(longest.g as never), "a longer gene is not dearer")
+      .toBeGreaterThan(genePrice(shortest.g as never));
+    // the bar is drawn against the longest gene, so bars are comparable
+    const LONGEST = Math.max(...Object.values(bio.GENES).map((g) => g.kb));
+    expect(longest.kb).toBeCloseTo(LONGEST, 6);
+    expect(shortest.kb / LONGEST, "the shortest gene's bar is invisible")
+      .toBeGreaterThan(0.02);
+  });
+
+  it("the store is open", async () => {
+    const { storeEnabled } = await import("../src/aftermath.js");
+    expect(storeEnabled(), "the store is closed again").toBe(true);
   });
 });

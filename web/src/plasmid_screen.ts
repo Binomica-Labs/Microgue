@@ -187,7 +187,8 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
       ? _g.fragments[_g.sequencing] : undefined;
     _g.confirmBoxes = pending
       ? drawConfirm(ctx, W, H, u, `${pending.kb.toFixed(1)} kb fragment`,
-                    sequencingCost(pending.kb), _g.player.atp)
+                    sequencingCost(pending.kb), _g.player.atp,
+                    "sequence", "ATP")
       : null;
     _g.closeBox = drawClose(ctx, W, ins, u);
     if (card) {
@@ -219,8 +220,19 @@ export function r_drawPlasmid(_g: Game, W: number, H: number): void {
  */
 export function fragmentBand(count: number, u: number): number {
   const n = Number.isFinite(count) ? Math.max(Math.trunc(count), 0) : 0;
-  return n > 0 ? n * ROW_PITCH * u + 10 * u : 0;
+  // HEADER_GAP, not 10u.
+  //
+  // The band reserved room for the bin's ROWS and forgot its LABEL. "PARTS
+  // BIN n/18" is drawn at `bin.y - 6u`, and the last fragment row ended at
+  // exactly `bin.y - 6u`, so the two printed on top of each other. Off by
+  // precisely the height of the thing I did not model -- and the test
+  // missed it because it compared rows to the band and never mentioned the
+  // header either.
+  return n > 0 ? n * ROW_PITCH * u + HEADER_GAP * u : 0;
 }
+
+/** Room left above the bin for its own "PARTS BIN n/n" label, plus air. */
+export const HEADER_GAP = 26;
 
 /** Row height plus its gap, in units. The band is built from this. */
 export const ROW_PITCH = 30;

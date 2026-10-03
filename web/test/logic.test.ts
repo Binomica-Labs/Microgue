@@ -2402,6 +2402,7 @@ describe("save slots", () => {
 
 describe("the microbe turn", () => {
   const world = (mobs: Mob[], px = 5, py = 5) => ({
+    turn: 0, playerMaxHp: 60,
     threat: 0.5, mobSpeed: 1, mired: () => false,
     grid: new mg.Grid(15, 15, mg.FLOOR),
     mobs,
@@ -2830,7 +2831,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(3), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [],
+      rng: makeRng(3), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20,
     };
     for (let i = 0; i < 4; i++) microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);
@@ -2843,7 +2844,7 @@ describe("footprints in the microbe turn", () => {
     const w = {
       grid: new mg.Grid(20, 20, mg.FLOOR), mobs,
       player: { x: 12, y: 12, hp: 999, status: [] as Status[] },
-      rng: makeRng(5), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [],
+      rng: makeRng(5), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20,
     };
     for (let step = 0; step < 25; step++) {
       microbeTurn(w);
@@ -2978,6 +2979,7 @@ describe("pursuit", () => {
 
 describe("ranged weapons", () => {
   const world = (mobs: Mob[], px = 5, py = 5, grid?: mg.Grid) => ({
+    turn: 0, playerMaxHp: 60,
     grid: grid ?? new mg.Grid(20, 20, mg.FLOOR),
     mobs,
     player: { x: px, y: py, hp: 60, status: [] as Status[] },
@@ -3815,7 +3817,7 @@ describe("crawl-like behaviours", () => {
     const w = {
       grid: new mg.Grid(15, 15, mg.FLOOR), mobs: [m],
       player: { x: 5, y: 5, hp: 30, status: [] as Status[] },
-      rng: makeRng(1), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [] as Packet[], clouds: [] as Cloud[],
+      rng: makeRng(1), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [] as Packet[], clouds: [] as Cloud[], turn: 0, playerMaxHp: 60,
     };
     microbeTurn(w);
     expect(w.player.hp).toBeLessThan(30);        // standing still is not safe
@@ -6679,7 +6681,7 @@ describe("a pack does not move as one body", () => {
     let lockstep = 0;
     for (let t = 0; t < turns; t++) {
       const before = lvl.mobs.map((m) => [m.x, m.y] as [number, number]);
-      microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
+      microbeTurn({ turn: 0, playerMaxHp: 60, grid: lvl.grid, mobs: lvl.mobs,
                     player: player,
                     rng: makeRng(7000 + t), armour: 0, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [] });
       const moves = lvl.mobs.map((m, i) =>
@@ -6723,7 +6725,7 @@ describe("a pack does not move as one body", () => {
       const player = { x: 41, y: row, hp: 999, maxhp: 999, atp: 50, atpMax: 100,
                        status: [] };
       for (let t = 0; t < 40; t++) {
-        microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
+        microbeTurn({ turn: 0, playerMaxHp: 60, grid: lvl.grid, mobs: lvl.mobs,
                       player: player,
                       rng: makeRng(s * 97 + t), armour: 0, threat: 0.5, mobSpeed: 1, mired: () => false, packets: [], clouds: [] });
         const m = lvl.mobs[0];
@@ -8118,7 +8120,7 @@ describe("biofilm holds ground", () => {
                      status: [] };
     // biofilm on the tile just right of the mob
     const mired = (x: number, y: number) => x === 33 && y === row;
-    microbeTurn({ grid: lvl.grid, mobs: lvl.mobs,
+    microbeTurn({ turn: 0, playerMaxHp: 60, grid: lvl.grid, mobs: lvl.mobs,
                   player: player,
                   rng: makeRng(1), armour: 0, threat: 0.5, mobSpeed: 1,
                   mired, packets: [], clouds: [] });
@@ -8320,7 +8322,10 @@ describe("the AI announces its posture", () => {
     lvl.mobs.push({ ...proto, behaviour: "hunt", alive: true, hp: 30, maxhp: 30,
                     banked: 0, x: 30, y: row, ax: 30, ay: row });
     const player = { x: 40, y: row, hp: 999, maxhp: 999, atp: 50, atpMax: 100, status: [] };
-    const world = () => ({ grid: lvl.grid, mobs: lvl.mobs,
+    // playerMaxHp must MATCH the player's own max, or the mob reads a
+    // target at 1600% health and the appetite clamp hides it.
+    const world = () => ({ turn: 0, playerMaxHp: 999,
+      grid: lvl.grid, mobs: lvl.mobs,
       player: player as unknown as Parameters<typeof microbeTurn>[0]["player"],
       rng: makeRng(3), armour: 0, threat: 0.2, mobSpeed: 1, mired: () => false,
       packets: [], clouds: [] });
@@ -10168,7 +10173,7 @@ describe("mobs live their lives when the player is nowhere near", () => {
         grid: lvl.grid, mobs: lvl.mobs,
         player,
         rng: makeRng(t * 17), armour: 0, threat: 0.3, mobSpeed: 1,
-        mired: () => false, packets: [], clouds: [], drops: [],
+        mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [],
         fissionChance: 0.004,
       });
     }
@@ -10203,7 +10208,7 @@ describe("mobs live their lives when the player is nowhere near", () => {
         grid: lvl.grid, mobs: lvl.mobs,
         player,
         rng: makeRng(t * 31), armour: 0, threat: 0.2, mobSpeed: 1,
-        mired: () => false, packets: [], clouds: [], drops: [],
+        mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [],
         fissionChance: 0.01,
       });
       const seen = new Set<string>();
@@ -10313,7 +10318,7 @@ describe("fission fills a floor without turning it into a monoculture", () => {
         grid: lvl.grid, mobs: lvl.mobs,
         player,
         rng: makeRng(t * 17), armour: 0, threat: 0.3, mobSpeed: 1,
-        mired: () => false, packets: [], clouds: [], drops: [],
+        mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [],
         fissionChance: FISSION_CHANCE, founding: start,
         stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
       });
@@ -10402,7 +10407,7 @@ describe("mobs lose interest: the floor does not empty into a knot", () => {
         grid: lvl.grid, mobs: lvl.mobs,
         player,
         rng: makeRng(t * 13), armour: 1, threat: 0.3, mobSpeed: 1,
-        mired: () => false, packets: [], clouds: [], drops: [], founding: start,
+        mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [], founding: start,
         stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
       });
       for (const m of lvl.mobs) if ((m.bored ?? 0) > 0) everBored.add(m.uid);
@@ -10449,7 +10454,7 @@ describe("mobs lose interest: the floor does not empty into a knot", () => {
         grid: lvl.grid, mobs: lvl.mobs,
         player,
         rng: makeRng(t * 3), armour: 1, threat: 0.5, mobSpeed: 1,
-        mired: () => false, packets: [], clouds: [], drops: [],
+        mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [],
         stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
       })) if (e.kind === "strike") strikes++;
     }
@@ -10484,7 +10489,7 @@ describe("mob life: the audit of v1.44", () => {
       microbeTurn({
         grid: lvl.grid, mobs: lvl.mobs, player,
         rng: makeRng(t * 7 + 1), armour: 1, threat: 0.5, mobSpeed: 1,
-        mired: () => false, packets: [], clouds: [], drops: [],
+        mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [],
         stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up], ...extra,
       });
     return { lvl, proto, row, player, turn };
@@ -11124,7 +11129,7 @@ describe("the floor fights back", () => {
             grid: lvl.grid, mobs: lvl.mobs,
             player,
             rng: makeRng(t * 13 + seed), armour: 1, threat: 0.5, mobSpeed: 1,
-            mired: () => false, packets: [], clouds: [], drops: [],
+            mired: () => false, packets: [], clouds: [], turn: 0, playerMaxHp: 20, drops: [],
             founding: n, quorum: q,
             stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up],
           });
@@ -12426,5 +12431,388 @@ describe("the map reads as branches, not as a scatter", () => {
           .toBeGreaterThan(0.015);
       }
     }
+  });
+});
+
+describe("the meta-progression keeps its promises", () => {
+  it("a first run can afford SOMETHING in the store", async () => {
+    // Measured: a first death on F3 earns 49 credit and the cheapest offer
+    // costs 72. The first visit to the meta-progression screen could buy
+    // nothing at all, which teaches a player that the screen is not worth
+    // opening -- the worst possible first impression of a system whose
+    // whole job is making death bearable.
+    const { creditFor, genePrice, newLab, recordRun } =
+      await import("../src/lab.js");
+    const cheapest = Math.min(...Object.keys(bio.GENES)
+      .filter((g) => g !== "ori")
+      .map((g) => genePrice(g as bio.GeneId)));
+    const lab = newLab();
+    const o = { floor: 3, turns: 300, catalogued: 2, killed: 10,
+                bossesCleared: 0, genesCarried: 2, bestAllele: 0,
+                killedBy: "x", won: false };
+    recordRun(lab, o, creditFor(o, 0));
+    expect(lab.credit, `a first death leaves ${String(lab.credit)} credit `
+      + `against a cheapest offer of ${String(cheapest)}`)
+      .toBeGreaterThanOrEqual(cheapest);
+  });
+
+  it("the founding grant is once per researcher, not once per run", async () => {
+    // A grant that repeated would be a reason to die early on purpose, and
+    // the per-researcher scoping would make it farmable by starting over.
+    const { FOUNDING_GRANT, creditFor, newLab, recordRun } =
+      await import("../src/lab.js");
+    const lab = newLab();
+    const o = { floor: 3, turns: 300, catalogued: 2, killed: 10,
+                bossesCleared: 0, genesCarried: 2, bestAllele: 0,
+                killedBy: "x", won: false };
+    const earned = creditFor(o, 0);
+    recordRun(lab, o, earned);
+    const afterFirst = lab.credit;
+    expect(afterFirst).toBe(earned + FOUNDING_GRANT);
+    recordRun(lab, o, earned);
+    expect(lab.credit - afterFirst, "the grant was paid twice").toBe(earned);
+    recordRun(lab, o, earned);
+    expect(lab.credit, "the grant kept paying").toBe(earned * 3 + FOUNDING_GRANT);
+  });
+
+  it("a paused store is not advertised as a reward", async () => {
+    // The game announced "+211 synthesis credit" on every death and
+    // captioned it "synthesis credit earned", with the store closed. A
+    // currency with no sink, named twice, is the game saying a player has
+    // been rewarded and then not honouring it.
+    const { storeEnabled } = await import("../src/aftermath.js");
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    for (const f of ["progress.ts", "aftermath_render.ts"]) {
+      const src = readFileSync(join(root, "src", f), "utf8");
+      if (!src.includes("synthesis credit")) continue;
+      expect(src, `${f} promises credit without checking the store is open`)
+        .toContain("storeEnabled()");
+    }
+    // ...and the credit still ACCRUES while closed: it is banked, waiting.
+    const { creditFor, newLab, recordRun } = await import("../src/lab.js");
+    const lab = newLab();
+    const o = { floor: 5, turns: 400, catalogued: 3, killed: 20,
+                bossesCleared: 1, genesCarried: 3, bestAllele: 0,
+                killedBy: "x", won: false };
+    recordRun(lab, o, creditFor(o, 0));
+    expect(lab.credit, "a paused store stopped the credit accruing")
+      .toBeGreaterThan(0);
+    expect(typeof storeEnabled()).toBe("boolean");
+  });
+});
+
+describe("something died here, and it was not you", () => {
+  it("a carcass carries ITS OWN species' genes, not a random draw", async () => {
+    // You scavenge what that organism actually had. A player who learns
+    // that sulfur reducers carry dsrA and goes looking for dead ones is
+    // reading the game the way it is meant to be read.
+    const { carcassAt } = await import("../src/carcass.js");
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const depth of [1, 4, 8]) {
+        const c = carcassAt(depth, 5, 5, makeRng(seed));
+        if (!c) continue;
+        const m = bio.MICROBES.find((x) => x.id === c.species);
+        expect(m, `${c.species} is not an organism`).toBeDefined();
+        expect(m?.depth, `a depth-${String(depth)} corpse is a `
+          + `depth-${String(m?.depth ?? 0)} organism`).toBe(depth);
+        for (const f of c.fragments) {
+          expect(m?.genes, `${c.species} does not carry ${f.gene}`)
+            .toContain(f.gene);
+        }
+      }
+    }
+  });
+
+  it("a corpse never holds two copies of the same gene", async () => {
+    // It is ONE genome. Three of the same fragment would read as a bug.
+    const { carcassAt } = await import("../src/carcass.js");
+    for (let seed = 1; seed <= 60; seed++) {
+      const c = carcassAt(1 + (seed % 8), 5, 5, makeRng(seed));
+      if (!c) continue;
+      const ids = c.fragments.map((f) => f.gene);
+      expect(new Set(ids).size, `${c.species} holds a duplicate`)
+        .toBe(ids.length);
+      expect(ids.length, "a corpse with nothing on it").toBeGreaterThan(0);
+      expect(ids.length, "a corpse is a whole shopping trip")
+        .toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("the fragments are UNSEQUENCED, so a corpse is a decision", async () => {
+    // A free gene would make exploring strictly better than fighting. An
+    // unread fragment costs ATP to turn into anything.
+    const { carcassAt } = await import("../src/carcass.js");
+    const { sequencingCost, gelLine } = await import("../src/fragment.js");
+    const c = carcassAt(1, 5, 5, makeRng(9));
+    if (!c) return;
+    for (const f of c.fragments) {
+      expect(sequencingCost(f.kb), "a scavenged fragment reads free")
+        .toBeGreaterThan(0);
+      expect(gelLine(f), "a scavenged fragment names its gene")
+        .not.toContain(f.gene);
+    }
+  });
+
+  it("corpses are placed in rooms, off the stairs, never stacked", async () => {
+    // In rooms because a room you walk into and find something in is the
+    // reason to walk into rooms. Off the stairs and unstacked because both
+    // hide something the player needs to see.
+    const { Dungeon } = await import("../src/dungeon.js");
+    let found = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = new Dungeon(110, 80, seed);
+      d.floor = 1 + (seed % 20);
+      const lvl = d.current();
+      found += lvl.carcasses.length;
+      const seen = new Set<string>();
+      for (const c of lvl.carcasses) {
+        expect(`${String(c.x)},${String(c.y)}`, "two corpses on one tile")
+          .not.toBe([...seen].find((s) => s === `${String(c.x)},${String(c.y)}`));
+        seen.add(`${String(c.x)},${String(c.y)}`);
+        expect(c.x === lvl.up.x && c.y === lvl.up.y,
+               "a corpse is sitting on the up stairs").toBe(false);
+        if (lvl.down) {
+          expect(c.x === lvl.down.x && c.y === lvl.down.y,
+                 "a corpse is sitting on the down stairs").toBe(false);
+        }
+        expect(lvl.rooms.some((r) => r.tiles.some(
+          (t) => t.x === c.x && t.y === c.y)),
+          "a corpse was left in a corridor").toBe(true);
+      }
+    }
+    expect(found, "no floor in twenty had a corpse").toBeGreaterThan(5);
+  });
+});
+
+describe("the floor smells blood, and remembers where you went", () => {
+  it("attention NEVER drops below the baseline, however strong you get", async () => {
+    // My first version multiplied base sense range by a wariness factor, so
+    // a healthy player at threat 0.2 was sensed at 91% of the old range --
+    // getting stronger made the floor notice you LESS. Power should buy the
+    // ability to win fights, not a stealth field, and I had written a
+    // comment saying exactly that while implementing the opposite.
+    const { appetite } = await import("../src/trail.js");
+    for (const threat of [0, 0.25, 0.5, 0.75, 1]) {
+      for (const hp of [100, 60, 25, 1]) {
+        expect(appetite(hp, 100, threat),
+               `hp ${String(hp)} threat ${String(threat)} dropped below base`)
+          .toBeGreaterThanOrEqual(1);
+      }
+      expect(appetite(100, 100, threat),
+             "a healthy player is sensed at other than baseline").toBe(1);
+    }
+  });
+
+  it("a wounded target is pressed harder", async () => {
+    // A leaking cell sheds amino acids and nucleotides, which really is
+    // chemoattractant. This is the part that makes the floor feel like it
+    // noticed you are in trouble.
+    const { appetite } = await import("../src/trail.js");
+    const whole = appetite(100, 100, 0);
+    const hurt = appetite(50, 100, 0);
+    const dying = appetite(5, 100, 0);
+    expect(hurt, "being wounded changed nothing").toBeGreaterThan(whole);
+    expect(dying, "dying is not worse than wounded").toBeGreaterThan(hurt);
+    expect(dying, "the bonus is unbounded").toBeLessThanOrEqual(1.6);
+    // a dangerous target damps the BONUS without touching the baseline
+    expect(appetite(5, 100, 1), "threat did not damp the bonus")
+      .toBeLessThan(dying);
+    expect(appetite(5, 100, 1)).toBeGreaterThan(1);
+  });
+
+  it("a trail outlives the player moving, then goes cold", async () => {
+    // Sensing was binary and memoryless: step one tile out of range and
+    // every pursuer forgot you existed, which made the floor feel like a
+    // set of switches rather than like being hunted. Breaking line of sight
+    // should buy distance, not safety.
+    const { mark, warm, TRAIL_LIFE } = await import("../src/trail.js");
+    const t = mark(5, 5, 100);
+    expect(warm(t, 100), "a fresh trail is already cold").toBe(true);
+    expect(warm(t, 100 + TRAIL_LIFE - 1), "the trail cools too fast").toBe(true);
+    expect(warm(t, 100 + TRAIL_LIFE), "the trail never goes cold").toBe(false);
+    expect(warm(undefined, 100), "a mob with no trail is following one")
+      .toBe(false);
+    // a clock that went backwards must not resurrect it
+    expect(warm(t, 50), "a trail from the future is warm").toBe(false);
+  });
+
+  it("garbage never makes a mob blind or omniscient", async () => {
+    const { appetite, warm, mark } = await import("../src/trail.js");
+    for (const b of [NaN, Infinity, -Infinity, -1e9, 0]) {
+      const a = appetite(b, b, b);
+      expect(Number.isFinite(a), `appetite -> ${String(a)}`).toBe(true);
+      expect(a, "a garbage reading blinded the mob").toBeGreaterThanOrEqual(1);
+      expect(a, "a garbage reading made it omniscient").toBeLessThanOrEqual(1.6);
+      expect(typeof warm(mark(b, b, b), b)).toBe("boolean");
+    }
+  });
+});
+
+describe("hazards are a cost you can pay, not a door you cannot open", () => {
+  it("every resist gene is a real gene", async () => {
+    // A hazard naming a gene that does not exist would be unresistable
+    // forever, and nothing else would notice. My first draft had one:
+    // "atpE", reached for from memory. The game's antiporter is mnhA, and
+    // acid tolerance is specifically an ANTIPORTER problem -- the right
+    // gene was already in the table.
+    const { HAZARDS } = await import("../src/hazard.js");
+    for (const h of Object.values(HAZARDS)) {
+      expect(h.resists.length, `${h.id} can never be resisted`)
+        .toBeGreaterThan(0);
+      for (const g of h.resists) {
+        expect(bio.GENES[g], `${h.id} names ${g}, which is not a gene`)
+          .toBeDefined();
+      }
+      expect(h.note.length, `${h.id} does not explain itself`)
+        .toBeGreaterThan(40);
+      expect(h.bite, `${h.id} does not bite`).toBeGreaterThan(0);
+    }
+  });
+
+  it("the right gene makes it free, and resistance is total", async () => {
+    // A partial reduction would make the right gene feel like a small
+    // discount. Walking through what was hurting you is the moment a
+    // loadout pays off -- and catalase does not take the edge off
+    // peroxide, it destroys it.
+    const { HAZARDS, hazardBite } = await import("../src/hazard.js");
+    for (const h of Object.values(HAZARDS)) {
+      expect(hazardBite(h, new Set()), `${h.id} is free unprotected`)
+        .toBeGreaterThan(0);
+      for (const g of h.resists) {
+        expect(hazardBite(h, new Set([g])), `${g} does not clear ${h.id}`)
+          .toBe(0);
+      }
+      // an unrelated gene does nothing
+      const other = (Object.keys(bio.GENES) as bio.GeneId[])
+        .find((g) => !h.resists.includes(g) && g !== "ori");
+      if (other) {
+        expect(hazardBite(h, new Set([other])),
+               `${other} wrongly clears ${h.id}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("a seam occurs only where its chemistry does", async () => {
+    // Peroxide is an oxygen problem and belongs near the top; thermal
+    // plumes come from below. A seam in the wrong stratum would be the
+    // same class of error as a gene in the wrong pathway.
+    const { HAZARDS, hazardsAt } = await import("../src/hazard.js");
+    for (let d = 1; d <= 8; d++) {
+      for (const h of hazardsAt(d)) {
+        expect(h.depths, `${h.id} appeared at depth ${String(d)}`).toContain(d);
+      }
+    }
+    expect(hazardsAt(1).some((h) => h.id === "thermal"),
+           "a thermal plume at the oxic surface").toBe(false);
+    expect(Object.values(HAZARDS).every((h) => h.depths.length > 0),
+           "a hazard that occurs nowhere").toBe(true);
+  });
+
+  it("a seam is a ring with something inside it", async () => {
+    // A seam you can walk round is not a decision. The reward sits in the
+    // middle so the cost is unavoidable without the gene -- but the middle
+    // must actually EXIST, or it is a decoration round a wall.
+    const { Dungeon } = await import("../src/dungeon.js");
+    let checked = 0;
+    for (let s = 1; s <= 40 && checked < 5; s++) {
+      const d = new Dungeon(110, 80, s);
+      d.floor = 1 + (s % 22);
+      const lvl = d.current();
+      if (lvl.hazards.length === 0) continue;
+      const hz = new Set(lvl.hazards.map((h) => `${String(h.x)},${String(h.y)}`));
+      const room = lvl.rooms.find(
+        (r) => r.tiles.some((t) => hz.has(`${String(t.x)},${String(t.y)}`)));
+      if (!room) continue;
+      checked++;
+      const inside = room.tiles.filter(
+        (t) => Math.hypot(t.x - room.cx, t.y - room.cy) < room.r * 0.55 - 1.1
+          && !hz.has(`${String(t.x)},${String(t.y)}`));
+      expect(inside.length, `seed ${String(s)}: the seam encloses nothing`)
+        .toBeGreaterThan(0);
+      // and never on the stairs, which would make a floor unleavable
+      for (const h of lvl.hazards) {
+        expect(h.x === lvl.up.x && h.y === lvl.up.y,
+               "a seam is sitting on the up stairs").toBe(false);
+      }
+    }
+    expect(checked, "no floor in forty grew a seam").toBeGreaterThan(0);
+  });
+});
+
+describe("a boss you have to answer, not just out-damage", () => {
+  it("no channel is locked out of the whole fight", async () => {
+    // A boss immune to a channel for every phase would mean a genome built
+    // around that channel simply cannot finish. The phases rotate, so a
+    // player who found the one thing that worked has to keep looking --
+    // but every build must have SOME window.
+    const { PHASES, phaseScale } = await import("../src/boss.js");
+    const { CHANNELS } = await import("../src/resistance.js");
+    for (const c of CHANNELS) {
+      const windows = PHASES.filter((p) => phaseScale(p, c) === 1);
+      expect(windows.length, `${c} is never full damage in any phase`)
+        .toBeGreaterThan(0);
+    }
+    // ...and no phase is open to everything, or it is not a phase
+    for (const p of PHASES) {
+      expect(p.open.length, `${p.id} is open to everything`)
+        .toBeLessThan(CHANNELS.length);
+      expect(p.open.length, `${p.id} is open to nothing`).toBeGreaterThan(0);
+    }
+  });
+
+  it("the wrong channel is slowed, never stopped", async () => {
+    // A hard immunity could deal a genome that cannot finish, and a
+    // roguelike that can deal an unwinnable hand is broken rather than
+    // difficult. Halved is a real penalty you can still grind through, and
+    // the right channel is twice as fast -- which is what makes it worth
+    // building for.
+    const { PHASES, phaseScale } = await import("../src/boss.js");
+    const { CHANNELS } = await import("../src/resistance.js");
+    for (const p of PHASES) {
+      for (const c of CHANNELS) {
+        const s = phaseScale(p, c);
+        expect(s, `${p.id} vs ${c} is a hard immunity`).toBeGreaterThan(0);
+        expect(s, `${p.id} vs ${c} exceeds full damage`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("the phase ladder reads from the bottom", async () => {
+    // At 10% hp it is blooming, not merely encysted: the LOWEST threshold
+    // it has fallen under wins, or a boss would get stuck in its first
+    // response and never escalate.
+    const { phaseOf } = await import("../src/boss.js");
+    expect(phaseOf(100, 100).id, "a whole boss is already reacting").toBe("open");
+    expect(phaseOf(60, 100).id).toBe("burst");
+    expect(phaseOf(35, 100).id).toBe("encyst");
+    expect(phaseOf(10, 100).id, "a dying boss never blooms").toBe("bloom");
+    // monotonic: health only ever moves it down the ladder
+    let last = -1;
+    for (const hp of [100, 80, 60, 40, 20, 5]) {
+      const i = ["open", "burst", "encyst", "bloom"]
+        .indexOf(phaseOf(hp, 100).id);
+      expect(i, `at ${String(hp)}hp the boss went BACKWARDS up the ladder`)
+        .toBeGreaterThanOrEqual(last);
+      last = i;
+    }
+  });
+
+  it("every phase explains itself, and garbage health does not break it", async () => {
+    const { PHASES, phaseOf, phaseLine } = await import("../src/boss.js");
+    for (const p of PHASES) {
+      expect(p.tell.length, `${p.id} has no tell`).toBeGreaterThan(5);
+      expect(p.note.length, `${p.id} does not explain itself`)
+        .toBeGreaterThan(30);
+      expect(phaseLine(p)).toContain(p.tell);
+    }
+    for (const bad of [NaN, Infinity, -Infinity, -50, 0]) {
+      const p = phaseOf(bad, bad);
+      expect(PHASES.some((x) => x.id === p.id),
+             `phaseOf(${String(bad)}) invented a phase`).toBe(true);
+    }
+    expect(phaseOf(50, 0).id, "a zero-max boss broke the ladder").toBeDefined();
   });
 });

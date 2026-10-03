@@ -703,6 +703,14 @@ export function ellipsise(ctx: CanvasRenderingContext2D, text: string, max: numb
 export function drawConfirm(
   ctx: CanvasRenderingContext2D, W: number, H: number, u: number,
   name: string, cost: number, credit: number,
+  // The verb AND the unit, because this dialog is no longer only the
+  // store's.
+  //
+  // Reusing it for sequencing meant an unread fragment asked "order this?",
+  // offered an "order" button, and priced itself in CREDIT -- the store's
+  // synthesis currency, which the player does not spend here and which is
+  // not even open during a run. Sequencing costs ATP and is sequencing.
+  verb = "order", unit = "credit",
 ): { yes: Box; no: Box } {
   ctx.fillStyle = "rgba(0,0,0,0.78)";
   ctx.fillRect(0, 0, W, H);
@@ -723,7 +731,7 @@ export function drawConfirm(
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "#ffffff";
   ctx.font = `${13 * u}px ui-monospace,monospace`;
-  ctx.fillText("order this?", x + w / 2, y + 28 * u);
+  ctx.fillText(`${verb} this?`, x + w / 2, y + 28 * u);
 
   ctx.fillStyle = "#cfe04a";
   ctx.font = `${12 * u}px ui-monospace,monospace`;
@@ -733,8 +741,8 @@ export function drawConfirm(
   ctx.fillStyle = short ? "#e08a5a" : "#8fa89a";
   ctx.font = `${10 * u}px ui-monospace,monospace`;
   ctx.fillText(short
-    ? `${String(cost)} credit \u2014 you have ${String(credit)}`
-    : `${String(cost)} credit, leaving ${String(credit - cost)}`,
+    ? `${String(cost)} ${unit} \u2014 you have ${String(credit)}`
+    : `${String(cost)} ${unit}, leaving ${String(credit - cost)}`,
     x + w / 2, y + 74 * u);
 
   const bw = (w - 44 * u) / 2, bh = 38 * u, by = y + h - bh - 16 * u;
@@ -743,7 +751,8 @@ export function drawConfirm(
 
   for (const [box, label, colour] of [
     [no, "cancel", "rgba(255,255,255,0.5)"],
-    [yes, short ? "not enough" : "order", short ? "rgba(255,255,255,0.25)" : "#7fe0a4"],
+    [yes, short ? "not enough" : `${verb} it`,
+     short ? "rgba(255,255,255,0.25)" : "#7fe0a4"],
   ] as [Box, string, string][]) {
     ctx.strokeStyle = colour;
     ctx.lineWidth = Math.max(1.3 * u, 1.1);

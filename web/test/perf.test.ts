@@ -129,7 +129,7 @@ describe("a mob turn scales with the floor, not its square", () => {
       mobs,
       run: () => {
         player.hp = 1e9;
-        microbeTurn({ grid: lvl.grid, mobs, player, rng: makeRng(t++),
+        microbeTurn({ turn: 0, playerMaxHp: 60, grid: lvl.grid, mobs, player, rng: makeRng(t++),
                       armour: 1, threat: 0.5, mobSpeed: 1, founding: n,
                       mired: () => false, packets: [], clouds: [],
                       stairs: lvl.down ? [lvl.up, lvl.down] : [lvl.up] });

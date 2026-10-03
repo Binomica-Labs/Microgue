@@ -61,6 +61,46 @@ export function t_onTile(_g: Game, x: number, y: number): void {
     } else if (!room) {
       _g.inRoom = null;
     }
+    // A hazard bites on entering the tile. Resistance is TOTAL, not a
+    // discount: being able to simply walk through what was hurting you is
+    // the moment a loadout pays off, and it is what the biology says --
+    // catalase does not take the edge off peroxide, it destroys it.
+    const hz = _g.level.hazards.find((k) => k.x === x && k.y === y);
+    if (hz) {
+      const def = HAZARDS[hz.id];
+      const bite = hazardBite(def, _g.genome.carried());
+      if (_g.hazardSeen !== hz.id) {
+        _g.hazardSeen = hz.id;
+        _g.note(hazardLine(def, bite));
+      }
+      if (bite > 0) {
+        _g.player.hp -= bite;
+        _g.toasts.push(`${def.name}: -${String(bite)}`, "warn", _g.now);
+        if (_g.player.hp <= 0) { _g.lastAttacker = def.name; _g.die(); return; }
+      }
+    }
+    // A corpse first: it is the reason to walk into a room, so it should
+    // not be hidden behind whatever else happens to be on the tile.
+    const c = _g.level.carcasses.find(
+      (k) => !k.taken && k.x === x && k.y === y);
+    if (c) {
+      c.taken = true;
+      const room = _g.fragments.length;
+      const space = Math.max(FRAGMENT_HOLD - room, 0);
+      const took = c.fragments.slice(0, space);
+      _g.fragments.push(...took);
+      _g.note(carcassLine(c));
+      if (took.length < c.fragments.length) {
+        // Say what was left and WHY, rather than silently dropping it: a
+        // player who walks away from a corpse not knowing their hold was
+        // full will think the game ate the reward.
+        _g.note(`You can carry ${String(took.length)} of them. `
+          + "The rest degrade in the water.");
+      }
+      _g.toasts.push(`Scavenged ${String(took.length)} fragment`
+        + (took.length === 1 ? "" : "s"), "info", _g.now);
+      _g.save();
+    }
     const d = dropAt(_g.drops, x, y);
     if (!d) return;
     if (d.items.length === 1) {
@@ -277,6 +317,8 @@ import { crossingLine, decay as qDecay, levelOf }
   from "./quorum.js";
 import { relax } from "./resistance.js";
 import { sequencingCost } from "./fragment.js";
+import { carcassLine } from "./carcass.js";
+import { HAZARDS, hazardBite, hazardLine } from "./hazard.js";
 import { alleleName, alleleRarity, rollAllele } from "./allele.js";
 
 /** How many unread fragments you may carry. A hold, not a hoard: unread DNA
@@ -423,6 +465,8 @@ export function t_mobTurn(_g: Game): void {
       // `up` is always present; `down` is null on the last floor, which is
       // why one of these needs the guard and the other does not.
       stairs: _g.level.down ? [_g.level.up, _g.level.down] : [_g.level.up],
+      turn: _g.clock.turn,
+      playerMaxHp: _g.player.maxhp,
       mired: (x, y) => isBiofilm(_g.biofilm, _g.dungeon.floor, x, y),
       packets: _g.packets,
       clouds: _g.clouds,

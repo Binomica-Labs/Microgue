@@ -5,6 +5,7 @@
 // crossed the 900-line ceiling `spec` enforces -- these are about the strain
 // and the lab, not about time passing.
 
+import { storeEnabled } from "./aftermath.js";
 import { decay, leaveTrace } from "./succession.js";
 import { makeRng } from "./rng.js";
 import { inherit } from "./lineage.js";
@@ -114,8 +115,17 @@ export function t_die(_g: Game): void {
   _g.shopAnchor = 0;
   deleteSlot(_g.slot);
 
-  _g.toasts.push(`The strain is lost. +${String(credit)} synthesis credit.`,
-                 "warn", _g.now);
+  // Only promise the credit when there is somewhere to spend it.
+  //
+  // The store is paused, and the game still announced "+211 synthesis
+  // credit" on every death and captioned it "synthesis credit earned" on
+  // the report. A currency with no sink, named twice, is the game telling
+  // the player they have been rewarded and then not honouring it. The
+  // credit still accrues -- it is banked and waiting for the store to
+  // reopen -- but it is not advertised while it cannot be used.
+  _g.toasts.push(storeEnabled()
+    ? `The strain is lost. +${String(credit)} synthesis credit.`
+    : "The strain is lost.", "warn", _g.now);
   _g.note(`Lysed on F${String(outcome.floor)} after ${String(outcome.turns)} turns. `
     + `${String(carried.length)} loci sequenced, ${String(outcome.catalogued)} organisms `
     + `recorded. The lab banks ${String(credit)} credit.`);

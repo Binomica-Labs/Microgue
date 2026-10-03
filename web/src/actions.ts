@@ -14,6 +14,7 @@ import { SIZES } from "./behaviour.js";
 import { music, play, stopMusic } from "./audio.js";
 import { keyOf, pentatonicOf, voicing } from "./music.js";
 import { factor as rFactor, selected } from "./resistance.js";
+import { phaseLine, phaseOf, phaseScale } from "./boss.js";
 import { fragmentOf } from "./fragment.js";
 
 /** How many gene drops arrive unsequenced. Most, but not all: a run where
@@ -499,8 +500,23 @@ export function t_attack(_g: Game, m: Mob): void {
     // one channel costs more every time, and the answer is to rotate. See
     // resistance.ts -- it caps well short of immunity, so a bad streak is
     // never a dead position.
+    // A BOSS also has a phase, and a phase decides which channel reaches
+    // it. This is what turns a boss from "the same fight with bigger
+    // numbers" into a question about what you built. Halved rather than
+    // nullified: see boss.ts -- a hard immunity could deal a genome that
+    // cannot finish, and a roguelike that deals an unwinnable hand is
+    // broken rather than difficult.
+    const phase = m.elite ? phaseOf(m.hp, m.maxhp) : null;
     const dmg = Math.max(
-      Math.round(_g.atk() * rFactor(_g.resistance, "bite")), 1);
+      Math.round(_g.atk() * rFactor(_g.resistance, "bite")
+        * (phase ? phaseScale(phase, "bite") : 1)), 1);
+    if (phase && m.phase !== phase.id) {
+      // Announced on the CHANGE, once. A line every turn would be noise,
+      // and the player needs to know the answer just changed.
+      m.phase = phase.id;
+      _g.note(`${m.name}: ${phaseLine(phase)}`);
+      _g.toasts.push(`${m.name} \u2014 ${phase.name}`, "warn", _g.now);
+    }
     _g.trace.push(_g.clock.turn, "attack",
                   `${m.name} for ${String(dmg)} (had ${String(m.hp)})`);
     const ranged = Math.abs(m.x - _g.player.x) > 1 || Math.abs(m.y - _g.player.y) > 1;

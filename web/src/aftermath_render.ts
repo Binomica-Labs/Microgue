@@ -8,8 +8,11 @@
 import { MAX_FLOOR } from "./dungeon.js";
 import { drawClose, type Box, type Insets } from "./chrome.js";
 import { ellipsise, type ShopRow } from "./screens.js";
-import { offers, type Lab, type RunRecord } from "./lab.js";
-import { stageCopy, type AftermathStage } from "./aftermath.js";
+import { offers, type Lab, type Offer, type RunRecord } from "./lab.js";
+import { GENES } from "./biology.js";
+import { PATHWAY_COLOUR } from "./plasmid_ui.js";
+import { drawGlyph } from "./part_glyph.js";
+import { storeEnabled, stageCopy, type AftermathStage } from "./aftermath.js";
 import type { GeneId } from "./biology.js";
 
 export interface AftermathBoxes {
@@ -187,7 +190,9 @@ export function drawAftermath(
       ctx.fillText(`+${String(last.credit)}`, left, y + 12 * u);
       ctx.fillStyle = DIM;
       ctx.font = `${10 * u}px ui-monospace,monospace`;
-      ctx.fillText("synthesis credit earned", left + 62 * u, y + 12 * u);
+      ctx.fillText(storeEnabled() ? "synthesis credit earned"
+        : "synthesis credit \u00b7 banked for the store",
+        left + 62 * u, y + 12 * u);
       y += 34 * u;
 
       // Final moments, labelled so it reads as a log and not stray debug text.
@@ -233,7 +238,7 @@ export function drawAftermath(
                  left + 50 * u, y + 4 * u);
     y += 22 * u;
 
-    const rowH = 36 * u;
+    const rowH = offerRowLayout(u).rowH;
     const floor = H - ins.bottom - 78 * u;
     const list = offers(lab, seen);
     const listTop = y;
@@ -248,7 +253,7 @@ export function drawAftermath(
     ctx.clip();
     for (const offer of list.slice(from, from + visible + 1)) {
       if (y + rowH > floor + rowH) break;
-      const box: Box = { x: left, y, w: wide, h: rowH - 5 * u };
+      const box: Box = { x: left, y, w: wide, h: offerRowLayout(u).boxH };
       const afford = !offer.owned && lab.credit >= offer.price;
       out.rows.push({ box, offer });
       ctx.fillStyle = offer.owned ? "rgba(90,200,140,0.16)" : "rgba(16,22,18,0.9)";
@@ -259,19 +264,7 @@ export function drawAftermath(
       ctx.roundRect(box.x, box.y, box.w, box.h, 6 * u);
       ctx.fill();
       ctx.stroke();
-      ctx.textAlign = "left";
-      ctx.fillStyle = offer.owned ? GREEN : afford ? INK : "#7f8f87";
-      ctx.font = `${11.5 * u}px ui-monospace,monospace`;
-      ctx.fillText(offer.name, box.x + 10 * u, box.y + 14 * u);
-      ctx.fillStyle = DIM;
-      ctx.font = `${8.5 * u}px ui-monospace,monospace`;
-      ctx.fillText(ellipsise(ctx, offer.note, box.w - 76 * u),
-                   box.x + 10 * u, box.y + 26 * u);
-      ctx.textAlign = "right";
-      ctx.fillStyle = offer.owned ? "#5ec98a" : afford ? GOLD : "#6f8f7c";
-      ctx.font = `${10.5 * u}px ui-monospace,monospace`;
-      ctx.fillText(offer.owned ? "ordered" : `${String(offer.price)} cr`,
-                   box.x + box.w - 10 * u, box.y + 20 * u);
+      drawOfferBody(ctx, offer, box, u, afford);
       y += rowH;
     }
     ctx.restore();
@@ -370,4 +363,99 @@ function shareButton(
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   return box;
+}
+
+/** The longest gene in the catalogue, so length bars are comparable. */
+const LONGEST_KB = Math.max(...Object.values(GENES).map((g) => g.kb), 1);
+
+/**
+ * Where everything in an offer row sits, as one definition.
+ *
+ * The old row had two lines in 36u. The new one has three -- name, note,
+ * and the length bar with its caption -- and my first pass left the note's
+ * baseline at 26u and put the bar at 22u, straight through it. Fourth
+ * layout collision of the week and the same cause each time: stacking
+ * elements by eye instead of writing down where they go.
+ *
+ * Exported so the test that checks these do not overlap reads THIS rather
+ * than a copy of the arithmetic, which is the other mistake I keep making.
+ */
+export function offerRowLayout(u: number): {
+  rowH: number; boxH: number; nameY: number; noteY: number;
+  barY: number; barH: number; capY: number;
+} {
+  const rowH = 50 * u;
+  return {
+    rowH, boxH: rowH - 5 * u,
+    nameY: 15 * u,            // 11.5u font sits roughly 4u..15u
+    noteY: 28 * u,            //  8.5u font, 20u..28u
+    barY: 34 * u, barH: 3.5 * u,
+    capY: 40 * u,             //  7.5u font, 33u..40u -- clear of the note
+  };
+}
+
+/**
+ * One offer, drawn as the thing it is.
+ *
+ * It was three strings in a row: name, note, price. True, and it told the
+ * player nothing about WHY a gene costs what it costs or what they would be
+ * getting -- a catalogue that reads like a spreadsheet.
+ *
+ * Synthesis is priced by LENGTH, which is a real fact and the most useful
+ * one here: `genePrice` is 30 + 22/kb + 18/tier, so a long gene is
+ * genuinely dearer and a bar showing its length is showing the player the
+ * invoice. Pathway colour ties the row to the ring and the bench map, so
+ * "the green ones" means the same thing on all three screens. And a gene
+ * gets its cassette arrow, because that is what arrives in the tube.
+ */
+function drawOfferBody(
+  ctx: CanvasRenderingContext2D, offer: Offer, box: Box, u: number,
+  afford: boolean,
+): void {
+  const gene = offer.id.kind === "gene" ? offer.id.gene : null;
+  const tint = gene ? PATHWAY_COLOUR[GENES[gene].pathway]
+    : offer.id.kind === "sites" ? "#cfe04a" : "#9fd0ff";
+
+  const ex = box.x + 9 * u, ey = box.y + box.h / 2 - 9 * u, es = 18 * u;
+  ctx.save();
+  ctx.globalAlpha = offer.owned ? 0.5 : afford ? 1 : 0.42;
+  drawGlyph(ctx, gene
+    ? { kind: "cds", pathway: GENES[gene].pathway }
+    : { kind: offer.id.kind === "sites" ? "origin" : "promoter" },
+    ex, ey, es, tint);
+  ctx.restore();
+
+  const textX = ex + es + 9 * u;
+  ctx.textAlign = "left";
+  ctx.fillStyle = offer.owned ? GREEN : afford ? INK : "#7f8f87";
+  ctx.font = `${11.5 * u}px ui-monospace,monospace`;
+  const L = offerRowLayout(u);
+  ctx.fillText(offer.name, textX, box.y + L.nameY);
+  ctx.fillStyle = DIM;
+  ctx.font = `${8.5 * u}px ui-monospace,monospace`;
+  ctx.fillText(ellipsise(ctx, offer.note, box.w - (textX - box.x) - 72 * u),
+               textX, box.y + L.noteY);
+
+  // THE LENGTH BAR. Why it costs what it costs.
+  if (gene) {
+    const kb = GENES[gene].kb;
+    const barW = 46 * u, barH = L.barH;
+    const bx = textX, by = box.y + L.barY;
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(bx, by, barW, barH);
+    // Scaled against the longest gene in the game, so the bars compare with
+    // each other rather than each being its own arbitrary fraction.
+    ctx.fillStyle = afford || offer.owned ? tint : "rgba(255,255,255,0.22)";
+    ctx.fillRect(bx, by, barW * Math.min(kb / LONGEST_KB, 1), barH);
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = `${7.5 * u}px ui-monospace,monospace`;
+    ctx.fillText(`${kb.toFixed(1)} kb to synthesise`, bx + barW + 6 * u,
+                 box.y + L.capY);
+  }
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = offer.owned ? "#5ec98a" : afford ? GOLD : "#6f8f7c";
+  ctx.font = `${10.5 * u}px ui-monospace,monospace`;
+  ctx.fillText(offer.owned ? "in stock" : `${String(offer.price)} cr`,
+               box.x + box.w - 10 * u, box.y + 20 * u);
 }

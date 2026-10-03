@@ -24,6 +24,7 @@ import { cloudAlpha, cloudTiles } from "./projectile.js";
 import { clampView, drawGraph, fitView, frame, litBounds } from "./kegg_ui.js";
 import { drawClose, stage, uiUnit } from "./chrome.js";
 import { isSeen, isVisible } from "./fov.js";
+import { HAZARDS } from "./hazard.js";
 import { itemColour } from "./items.js";
 import { jitter, lungeOffset } from "./fx.js";
 import { drawBody, playerSprite, sprite }
@@ -341,6 +342,47 @@ export function r_draw(_g: Game): void {
     r_barriers(_g, px, hc);
 
     // Loot on the floor: a lozenge per tile, marked when it is a pile.
+    // The seam, under everything: it is terrain, not an object.
+    for (const h of _g.level.hazards) {
+      if (!isVisible(sight, h.x, h.y)) continue;
+      const def = HAZARDS[h.id];
+      ctx.fillStyle = def.colour;
+      ctx.globalAlpha = 0.17;
+      ctx.fillRect(h.x * px, h.y * px, px, px);
+      ctx.globalAlpha = 0.5;
+      // A hatch, so colourblind players and dim screens still read it as
+      // dangerous ground rather than as a lighting change.
+      ctx.strokeStyle = def.colour;
+      ctx.lineWidth = Math.max(px * 0.05, 0.8);
+      ctx.beginPath();
+      ctx.moveTo(h.x * px, (h.y + 1) * px);
+      ctx.lineTo((h.x + 1) * px, h.y * px);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // The dead, before the loot: a corpse is a landmark and should read as
+    // one even with something scattered on the same tile.
+    for (const c of _g.level.carcasses) {
+      if (c.taken || !isVisible(sight, c.x, c.y)) continue;
+      const cx = (c.x + 0.5) * px, cy = (c.y + 0.5) * px;
+      // An empty husk: a ring, not a filled dot, because the cell is gone
+      // and what is left is its outline. Drawn dimmer than live things so
+      // it never reads as a mob at a glance.
+      ctx.strokeStyle = "rgba(190,205,195,0.55)";
+      ctx.lineWidth = Math.max(px * 0.07, 1);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, px * 0.3, px * 0.2, 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+      // A few scattered fragments around it.
+      ctx.fillStyle = "rgba(139,154,164,0.75)";
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + c.x;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(a) * px * 0.26, cy + Math.sin(a) * px * 0.18,
+                Math.max(px * 0.05, 0.8), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     for (const d of _g.drops) {
       const it = d.items[0];
       if (!it) continue;

@@ -2,6 +2,8 @@
 // Multi-level descent. One cave per stratum, generated from that stratum's
 // parameters, cached so climbing back finds the same level.
 
+import { hazardsAt, type Hazard } from "./hazard.js";
+import { carcassAt, type Carcass } from "./carcass.js";
 import { communityOf, microbesIn, type Community } from "./community.js";
 import { MAX_DEPTH, microbesAt, stratum, type Microbe as Microbe0, type Stratum }
   from "./biology.js";
@@ -39,6 +41,10 @@ export interface Level {
   /** The last floor of a stratum: a boss or a swarm waits here. */
   boss: boolean;
   rooms: Room[];
+  /** Cells that died before the player arrived. See carcass.ts. */
+  carcasses: Carcass[];
+  /** Chemistry you can walk into if you can take it. See hazard.ts. */
+  hazards: Hazard[];
   /** Material that has to be digested through. */
   barriers: Barrier[];
   /** A boss floor stays sealed until whatever holds it is dead. */
@@ -143,7 +149,7 @@ export class Dungeon {
                          founding: 0, visited: false, boss: isBossFloor(floor),
                          // Rooms sealed off by the connectivity sweep are gone.
                          rooms: rooms.filter((r) => grid.isFloor(r.cx, r.cy)),
-                         barriers: [],
+                         barriers: [], carcasses: [], hazards: [],
                          cleared: !isBossFloor(floor),
                          stockedAt: 0,
                          sight: makeSight(grid.w, grid.h) };
@@ -155,6 +161,8 @@ export class Dungeon {
     // kind of exceptional creature beside it reads as noise.
     if (!lvl.boss) promoteSome(lvl.mobs, lvl.depth, rng);
     this.stockRooms(lvl, rng);
+    this.scatterDead(lvl, rng);
+    this.layHazards(lvl, rng);
     if (lvl.boss) this.placeBoss(lvl, rng);
     return lvl;
   }
@@ -396,6 +404,61 @@ export class Dungeon {
   }
 
   /** Extra microbes in the rooms that warrant them. */
+  /**
+   * Scatter the dead.
+   *
+   * In ROOMS, not corridors: a room you walk into and find something in is
+   * a reason to walk into rooms, which is the thing the floors were missing
+   * between fights. Roughly one floor in two has one, so finding a corpse
+   * stays an event rather than becoming a chore to sweep up.
+   */
+  private scatterDead(lvl: Level, rng: Rng): void {
+    lvl.carcasses = [];
+    if (lvl.rooms.length === 0) return;
+    const want = rng.next() < 0.55 ? 1 + rng.int(2) : 0;
+    const pool = microbesIn(this.community, lvl.depth);
+    for (let i = 0; i < want; i++) {
+      const room = lvl.rooms[rng.int(lvl.rooms.length)];
+      if (!room || room.tiles.length === 0) continue;
+      const t = room.tiles[rng.int(room.tiles.length)];
+      if (!t) continue;
+      // Never on the stairs, and never stacked on another corpse: both
+      // would hide something the player needs to be able to see.
+      if (t.x === lvl.up.x && t.y === lvl.up.y) continue;
+      if (lvl.down?.x === t.x && lvl.down.y === t.y) continue;
+      if (lvl.carcasses.some((c) => c.x === t.x && c.y === t.y)) continue;
+      const c = carcassAt(lvl.depth, t.x, t.y, rng, pool);
+      if (c) lvl.carcasses.push(c);
+    }
+  }
+
+  /**
+   * Lay a hazard seam across a room, with the good loot behind it.
+   *
+   * A ring around the middle, not a scatter: a seam you can walk round is
+   * not a decision, and the whole point is choosing whether to pay. The
+   * reward sits in the centre so the cost is unavoidable without the gene.
+   */
+  private layHazards(lvl: Level, rng: Rng): void {
+    lvl.hazards = [];
+    const kinds = hazardsAt(lvl.depth);
+    if (kinds.length === 0 || lvl.rooms.length === 0) return;
+    if (rng.next() > 0.4) return;            // not every floor
+    const room = lvl.rooms[rng.int(lvl.rooms.length)];
+    if (!room || room.r < 3) return;         // too small to have a middle
+    const kind = kinds[rng.int(kinds.length)];
+    if (!kind) return;
+    const band = room.r * 0.55;
+    for (const t of room.tiles) {
+      const dist = Math.hypot(t.x - room.cx, t.y - room.cy);
+      // The annulus only. Inside it is the prize; outside is the way in.
+      if (dist < band - 1.1 || dist > band + 1.1) continue;
+      if (t.x === lvl.up.x && t.y === lvl.up.y) continue;
+      if (lvl.down?.x === t.x && lvl.down.y === t.y) continue;
+      lvl.hazards.push({ id: kind.id, x: t.x, y: t.y });
+    }
+  }
+
   private stockRooms(lvl: Level, rng: Rng): void {
     const pool = microbesIn(this.community, lvl.depth);
     if (pool.length === 0) return;

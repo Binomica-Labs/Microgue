@@ -20,13 +20,15 @@
 export type AftermathStage = "report" | "store" | "ready";
 
 /**
- * The synthesis store is PAUSED pending rebalancing. The flow skips from
- * report straight to ready. Everything -- the screen, the offers, the credit
- * economy, the tests -- stays in place; this flag is the only thing between
- * the store and the player. Flip it to bring the store back.
+ * The synthesis store.
+ *
+ * Paused for a while pending rebalancing, and reopened once the economy was
+ * measured rather than guessed at: sound from the second run onward, with
+ * the cold start fixed by a founding grant rather than by bending the price
+ * curve. See v1.77.0 in HANDOVER.md for the numbers.
  */
 export function storeEnabled(): boolean { return STORE_OPEN; }
-const STORE_OPEN = false;
+const STORE_OPEN = true;
 
 export interface Aftermath {
   stage: AftermathStage;

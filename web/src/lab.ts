@@ -109,6 +109,22 @@ const REPEAT = 0.22;
  * full rate for floors deeper than any strain has reached, a fifth for
  * retreading.
  */
+/**
+ * What a brand-new researcher is given on their first banked run.
+ *
+ * Measured: a first death on F3 earns 49 credit and the cheapest thing in
+ * the store costs 72. The first visit to the meta-progression screen could
+ * buy NOTHING, which teaches a player that the screen is not worth opening
+ * -- the worst possible first impression of a system whose whole job is
+ * making death bearable.
+ *
+ * A one-time grant rather than a price cut, because the prices are fine
+ * from the second run on: this fixes the cold start without touching the
+ * curve. Per researcher, so starting a new one is a real fresh start and
+ * not a way to farm it.
+ */
+export const FOUNDING_GRANT = 60;
+
 export function creditFor(o: RunOutcome, deepestEver = 0): number {
   const floor = Math.min(Math.max(finite(o.floor, 1), 1), MAX_FLOOR);
   const known = Math.min(Math.max(finite(deepestEver, 0), 0), MAX_FLOOR);
@@ -146,9 +162,12 @@ export function recordRun(
     won: o.won,
     epitaph: epitaph.slice(-8),
   };
+  // The founding grant, once, on a researcher's first banked run. Checked
+  // BEFORE the push, because after it the ledger is never empty again.
+  const founding = lab.ledger.length === 0 ? FOUNDING_GRANT : 0;
   lab.ledger.push(rec);
   while (lab.ledger.length > LEDGER_CAP) lab.ledger.shift();
-  lab.credit += rec.credit;
+  lab.credit += rec.credit + founding;
   lab.deepestEver = Math.max(lab.deepestEver, floor);
   return rec;
 }

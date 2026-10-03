@@ -61,7 +61,7 @@ describe("sacred invariants", () => {
         const clouds: Cloud[] = [];
         for (let t = 0; t < 120; t++) {
           microbeTurn({
-            grid: level.grid, mobs: level.mobs,
+            grid: level.grid, mobs: level.mobs, turn: t, playerMaxHp: 20,
             player: { ...player, status: [] as Status[] },
             rng: makeRng(t + f), armour: 1, threat: 0.5, mobSpeed: 1, mired: () => false, packets, clouds,
             // Wandering mobs must not settle on stairs; the world has to say
